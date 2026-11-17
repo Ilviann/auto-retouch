@@ -1,10 +1,9 @@
 # Logging and diagnostics contract
 
 Logging must make warnings, failures, and unexpected processing results useful
-for product improvement and bug investigation. Foundation bootstrap logging is
-implemented; worker transport, the full diagnostics panel, batch summaries, and
-report export remain planned. The user's requirement is detailed diagnostic
-feedback; unimplemented parts of the format and defaults below remain proposed.
+for product improvement and bug investigation. Bootstrap logging and batch worker
+delivery are implemented. The full diagnostics panel, batch summaries, and report
+export remain planned.
 
 Milestone 3a emits pipeline command failures, asset-unavailable/recovered and
 context-blocked events. Stage sessions emit preparation, completion, release and
@@ -13,7 +12,7 @@ with job/image/stage instance, operation/version, backend and attempt. Technical
 exceptions retain tracebacks and chained causes at INFO settings; unreadable model
 issues include their captured technical cause. The initial Qt cards expose
 readiness and command errors and retain a diagnostics-storage warning after a
-command. Worker transport and full diagnostic search/export are still pending.
+command. Full diagnostic search and export remain pending.
 
 The 3b artifact store adds `ARTIFACT_COMMITTED`, `ARTIFACT_VALIDATED`,
 `ARTIFACT_WRITE_FAILED`, `ARTIFACT_INVALID`, `ARTIFACT_STORE_FAILED` and explicit
@@ -51,6 +50,16 @@ marks a rewind to the frozen source when a checkpoint is unreadable.
 and stage. The status snapshot continues to show the last committed cursor.
 See [staged job evidence](verification/staged-jobs.md).
 
+The batch worker sends bounded JSON records with the application session ID,
+worker run ID, originating process ID, and job/image/stage context. The parent
+drains events in the background and writes them through the session's existing
+log writer. The worker queue reserves space for warnings and errors. Overflow
+reports dropped counts and sends warnings/errors to stderr as a fallback.
+The parent captures the last 8 KiB of stderr and indicates truncation.
+`WORKER_EXITED` reports an unexpected exit code and the last observed image
+and stage where available. `WorkerOutcome` exposes incomplete diagnostic delivery
+alongside execution errors. See [worker evidence](verification/worker-transport.md).
+
 Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
 `diagnostics/service.py`, with UTC millisecond times, session/process identity,
 codes, structured context, and exception chains at INFO settings. Setup child
@@ -63,16 +72,15 @@ Bootstrap/config-error fallback is `<app-root>/logs`. If this directory fails,
 use the console and memory with an explicit `LOG_WRITE_FAILED`; no successful
 persistence is claimed. A failed configured log path is also shown in startup
 notices. Retention acts only on owned UUID-named JSONL files; retention failures
-are distinct from write failures. Logging is synchronous during this low-volume
-bootstrap milestone; move processing/worker delivery to the dedicated writer
-before adding inference workloads.
+are distinct from write failures. Bootstrap logging is synchronous. Worker log
+delivery and persistence run in background threads.
 
 Before Python or the installed package can run, CMD scripts record fixed codes in
 `logs/bootstrap-errors.log` and print remediation. This minimal fallback uses
 local shell timestamps and rotates at 64 KiB with one backup; configurable age
 retention applies to JSONL, not this early shell fallback. Failed fallback writes
-are reported in the console. Native crash capture and complete worker failure
-monitoring are not claimed by this milestone.
+are reported in the console. The batch worker enables Python fault diagnostics
+and captures stderr where the failing process can still produce it.
 
 ## Outputs and presentation
 

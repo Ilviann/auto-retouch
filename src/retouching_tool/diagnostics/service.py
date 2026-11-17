@@ -1,7 +1,4 @@
-"""Bounded bootstrap logging using Python logging; never claims a failed write succeeded.
-
-Single-process foundation only. Worker transport/report export arrive with jobs.
-"""
+"""Format bounded diagnostic records and persist them through one session writer."""
 
 from collections import deque
 from datetime import datetime, timezone
@@ -17,6 +14,7 @@ import uuid
 
 from ..config import LoggingSettings
 
+MAX_EVENT_BYTES = 65536
 
 def redact(text: str) -> str:
     # Package-manager errors may include authenticated index URLs.
@@ -33,10 +31,53 @@ class _EventHandler(logging.Handler):
         self.owner._write(record)
 
 
-class Diagnostics:
+class EventLogger:
+    """Shared event formatting for local logging and the worker's pipe."""
+
+    def __init__(self, session_id, level):
+        self.session_id = session_id
+        self.logger = logging.Logger("retouching_tool", level=level)
+        self._handler = _EventHandler(self)
+        self.logger.addHandler(self._handler)
+
+    def _write(self, record):
+        event = {"schema_version": 1, "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                 "severity": record.levelname, "code": record.event_code,
+                 "message": redact(record.getMessage())[:4000], "component": record.component,
+                 "session_id": self.session_id, "process_id": os.getpid()}
+        if os.environ.get("AUTO_RETOUCH_PARENT_SESSION"):
+            event["parent_session_id"] = os.environ["AUTO_RETOUCH_PARENT_SESSION"]
+        event.update({key: value for key, value in record.context.items() if key not in event})
+        if record.exc_info:
+            cause = redact("".join(traceback.format_exception(*record.exc_info)))
+            event["exception"] = cause[:12000]
+            if len(cause) > 12000:
+                event["exception_truncated"] = True
+        # Bound all data, including subprocess output and technical causes.
+        encoded = json.dumps(event, ensure_ascii=False)
+        if len(encoded.encode("utf-8")) > MAX_EVENT_BYTES:
+            keep = {"schema_version", "timestamp", "severity", "code", "message", "component", "session_id", "process_id",
+                    "parent_session_id", "exception", "exception_truncated", "job_id", "image_id", "stage_instance_id",
+                    "attempt", "preview_request_id", "worker_run_id"}
+            event = {k: v for k, v in event.items() if k in keep}
+            event["truncated"] = True
+            encoded = json.dumps(event, ensure_ascii=False)
+            if len(encoded.encode("utf-8")) > MAX_EVENT_BYTES:
+                event = {k: v[:1000] if isinstance(v, str) else v for k, v in event.items()}
+                encoded = json.dumps(event, ensure_ascii=False)
+        self._store(event, encoded)
+
+    def emit(self, code: str, message: str, *, level="INFO", component="bootstrap", exc_info=False, **context):
+        # Context contains structured scalars/identities, never photos or weights.
+        safe_context = json.loads(redact(json.dumps(context, default=str, ensure_ascii=False)))
+        self.logger.log(getattr(logging, level), message, exc_info=exc_info,
+                        extra={"event_code": code, "component": component, "context": safe_context})
+
+
+class Diagnostics(EventLogger):
     def __init__(self, directory: Path, settings: LoggingSettings | None = None, *, session_id=None, console=None):
         self.settings = settings or LoggingSettings()
-        self.session_id = session_id or uuid.uuid4().hex
+        super().__init__(session_id or uuid.uuid4().hex, self.settings.level)
         self.console = console if console is not None else sys.stderr
         self.records = deque(maxlen=100)
         self.failure = None
@@ -44,8 +85,6 @@ class Diagnostics:
         self.stream = None
         self._size = 0
         self._part = 0
-        self.logger = logging.Logger("retouching_tool", level=self.settings.level)
-        self.logger.addHandler(_EventHandler(self))
         self._open()
 
     def _fallback(self, exc):
@@ -96,34 +135,14 @@ class Diagnostics:
             self.failure = f"LOG_RETENTION_FAILED: Cannot enforce diagnostic retention in {self.path.parent}: {redact(str(exc))}"
             self._console(self.failure)
 
-    def _write(self, record):
-        event = {"schema_version": 1, "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-                 "severity": record.levelname, "code": record.event_code,
-                 "message": redact(record.getMessage())[:4000], "component": record.component,
-                 "session_id": self.session_id, "process_id": os.getpid()}
-        if os.environ.get("AUTO_RETOUCH_PARENT_SESSION"):
-            event["parent_session_id"] = os.environ["AUTO_RETOUCH_PARENT_SESSION"]
-        event.update({key: value for key, value in record.context.items() if key not in event})
-        if record.exc_info:
-            cause = redact("".join(traceback.format_exception(*record.exc_info)))
-            event["exception"] = cause[:12000]
-            if len(cause) > 12000:
-                event["exception_truncated"] = True
-        # Bound all data, including subprocess output and technical causes.
-        encoded = json.dumps(event, ensure_ascii=False, default=str)
-        if len(encoded.encode("utf-8")) > 65536:
-            # Keep correlation and technical cause while replacing unbounded extras.
-            keep = {"schema_version", "timestamp", "severity", "code", "message", "component", "session_id", "process_id", "parent_session_id",
-                    "exception", "job_id", "image_id", "stage_instance_id", "attempt", "preview_request_id"}
-            event = {k: v for k, v in event.items() if k in keep}
-            event = {k: v[:12000] if isinstance(v, str) else v for k, v in event.items()}
-            event["truncated"] = True
-            encoded = json.dumps(event, ensure_ascii=False, default=str)
-            if len(encoded.encode("utf-8")) > 65536:
-                event = {k: v[:3000] if isinstance(v, str) else v for k, v in event.items()}
-                encoded = json.dumps(event, ensure_ascii=False, default=str)
+    def receive(self, event, encoded):
+        """Persist a validated worker event with its original timestamp and process ID."""
+        with self._handler.lock:
+            self._store(event, encoded)
+
+    def _store(self, event, encoded):
         self.records.append(event)
-        self._console(f"{record.levelname} {event['code']}: {event['message']}")
+        self._console(f"{event['severity']} {event['code']}: {event['message']}")
         if self.stream is None:
             return
         try:
@@ -142,17 +161,12 @@ class Diagnostics:
         except OSError as exc:
             self._fallback(exc)
 
-    def emit(self, code: str, message: str, *, level="INFO", component="bootstrap", exc_info=False, **context):
-        # Context contains structured scalars/identities, never photos or weights.
-        safe_context = json.loads(redact(json.dumps(context, default=str, ensure_ascii=False)))
-        self.logger.log(getattr(logging, level), message, exc_info=exc_info,
-                        extra={"event_code": code, "component": component, "context": safe_context})
-
     def close(self):
-        if self.stream is not None:
-            try:
-                self.stream.close()
-            except OSError as exc:
-                self._fallback(exc)
-            finally:
-                self.stream = None
+        with self._handler.lock:
+            if self.stream is not None:
+                try:
+                    self.stream.close()
+                except OSError as exc:
+                    self._fallback(exc)
+                finally:
+                    self.stream = None

@@ -20,10 +20,12 @@ adds lossless float32 TIFF/context storage, checksummed source metadata and safe
 manifest-based lifetime management; see [artifact evidence](verification/lossless-artifacts.md).
 The JPEG adapter in `imaging/` decodes oriented linear-sRGB states and stages
 verified JPEG exports for publication. See [JPEG evidence](verification/jpeg-boundary.md).
-Milestone 4 adds headless source indexing, batch preflight and recoverable
-sequential and staged execution. See [preflight evidence](verification/batch-preflight.md),
-[sequential job evidence](verification/sequential-jobs.md), and
-[staged job evidence](verification/staged-jobs.md).
+Milestone 4 adds headless source indexing, batch preflight, recoverable
+sequential and staged execution, and a toolkit-free batch worker. See
+[preflight evidence](verification/batch-preflight.md),
+[sequential job evidence](verification/sequential-jobs.md),
+[staged job evidence](verification/staged-jobs.md),
+[worker evidence](verification/worker-transport.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.
@@ -326,6 +328,16 @@ checkpoint store, so a committed successor allows immediate reclamation of its
 predecessor's unreferenced files. An unavailable checkpoint can replay the
 affected image from its frozen source. Pause/cancel requests take effect between
 images in sequential mode and between image-stage or export units in staged mode.
+
+`ApplicationService.job_worker` starts or resumes an existing job in a subprocess
+using the current environment interpreter. It runs the same `JobService` against
+the frozen journal and the production operation registry. The controller issues
+pause/cancel requests over a local pipe and returns an immutable run outcome.
+Readers use job status for durable progress. The workspace lock serializes
+execution across processes. The parent drains worker diagnostics and stderr in
+the background. The worker reads processing inputs from the saved job and
+artifact stores. Desktop job controls will use this service.
+See [worker evidence](verification/worker-transport.md).
 
 ## Previews and configuration persistence
 

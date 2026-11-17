@@ -48,9 +48,11 @@ The headless JPEG adapter uses pinned Pillow to apply input orientation and colo
 management, then verifies capture metadata, sRGB and processing history before
 publishing exports. Both headless schedules support restart recovery. Staged
 execution keeps a lossless checkpoint for each active image and encodes JPEG
-after the final stage releases its resources. Worker transport and desktop job
-controls remain pending. See [JPEG verification](docs/verification/jpeg-boundary.md)
-and [staged job verification](docs/verification/staged-jobs.md).
+after the final stage releases its resources. Both modes can run in a local worker
+process. Desktop job controls remain pending. See
+[JPEG verification](docs/verification/jpeg-boundary.md),
+[staged job verification](docs/verification/staged-jobs.md), and
+[worker verification](docs/verification/worker-transport.md).
 
 Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
 `prepare_env.cmd` and choose a backend (Enter selects CUDA). Setup installs the

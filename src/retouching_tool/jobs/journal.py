@@ -83,10 +83,14 @@ def runner_lock(root):
         yield
 
 
-@contextmanager
-def open_journal(root, job_id, *, create=False):
+def validate_job_id(job_id):
     if not isinstance(job_id, str) or re.fullmatch(r"[0-9a-f]{32}", job_id) is None:
         raise JournalError("Invalid job ID. Select a job saved by Auto ReTouch.")
+
+
+@contextmanager
+def open_journal(root, job_id, *, create=False):
+    validate_job_id(job_id)
     connection = None
     try:
         try:

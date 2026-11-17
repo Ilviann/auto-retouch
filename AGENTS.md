@@ -84,7 +84,9 @@ and initial disk preflight are implemented. See `docs/verification/batch-preflig
 Headless sequential and staged runners persist frozen job snapshots and verified
 JPEG receipts. Staged jobs also recover lossless image-stage checkpoints. See
 `docs/verification/sequential-jobs.md` and `docs/verification/staged-jobs.md`.
-Worker transport and desktop job controls remain pending.
+Toolkit-free worker transport now runs and controls saved jobs from the prepared
+interpreter. See `docs/verification/worker-transport.md`. Desktop job controls
+remain pending.
 No production neural stage or checkpoint has been selected. Synthetic reference
 tests do not establish portrait quality.
 

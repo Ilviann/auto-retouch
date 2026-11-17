@@ -55,7 +55,8 @@ peak memory, or portrait quality.
 ## Remaining validation
 
 See [staged job evidence](staged-jobs.md) for staged scheduling and checkpoint
-recovery. Worker transport and desktop integration remain pending. Recovery was
+recovery and [worker evidence](worker-transport.md) for subprocess execution.
+Desktop integration remains pending. Recovery was
 exercised with abrupt process exit. Physical power-loss durability and real Windows
 junction behavior still need validation. If a process exits before committing a
 JPEG receipt, the untracked `.pending` file is left for inspection. Verified

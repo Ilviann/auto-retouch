@@ -146,13 +146,15 @@ The [Runtime and launch contract](runtime.md) defines proposed script behavior,
 launch options, configuration format, and dependency validation. These contracts
 now include implemented runtime scripts and startup modules; processing contracts
 remain partly planned. Pipeline/reference contracts, headless JPEG decode/export,
-source indexing, disk preflight and both headless schedules are implemented.
-Worker transport and GUI job integration are pending. See [runtime evidence](verification/runtime-foundation.md),
+source indexing, disk preflight and both batch schedules are implemented. Both
+schedules run through a toolkit-independent worker service. GUI job integration
+is pending. See [runtime evidence](verification/runtime-foundation.md),
 [pipeline evidence](verification/pipeline-contracts.md),
 [JPEG evidence](verification/jpeg-boundary.md) and
 [batch preflight evidence](verification/batch-preflight.md),
-[sequential job evidence](verification/sequential-jobs.md), and
-[staged job evidence](verification/staged-jobs.md).
+[sequential job evidence](verification/sequential-jobs.md),
+[staged job evidence](verification/staged-jobs.md), and
+[worker evidence](verification/worker-transport.md).
 The [Logging and diagnostics contract](diagnostics.md) defines event context,
 failure presentation, retention, and local bug-report evidence.
 The [Initial stage catalog](stages.md) proposes image analysis, global correction,

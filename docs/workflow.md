@@ -11,12 +11,14 @@ TIFF artifact slice is implemented at reference level; see
 color/orientation and verified export are implemented and checked on the seven
 local study JPEGs. Headless source indexing and initial path/disk preflight are
 implemented. Headless sequential and staged job execution have generated-fixture
-coverage for pause, cancel and restart recovery. Actual retouching quality still
-requires reviewed photos and model provisioning. See
+coverage for pause, cancel and restart recovery. Both schedules run in a monitored
+local worker. Actual retouching quality still requires reviewed photos and model
+provisioning. See
 [JPEG evidence](verification/jpeg-boundary.md),
 [batch preflight evidence](verification/batch-preflight.md),
-[sequential job evidence](verification/sequential-jobs.md), and
-[staged job evidence](verification/staged-jobs.md).
+[sequential job evidence](verification/sequential-jobs.md),
+[staged job evidence](verification/staged-jobs.md), and
+[worker evidence](verification/worker-transport.md).
 
 ## Development stages
 

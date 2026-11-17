@@ -70,8 +70,9 @@ these measurements to the orchestration check.
 
 ## Remaining validation
 
-Worker transport and desktop job controls remain pending. Physical power-loss
-durability and actual Windows junction behavior still need validation. The
+Worker transport has separate [verification](worker-transport.md). Desktop job
+controls, physical power-loss durability, and actual Windows junction behavior
+still need validation. The
 reference stages exercise local orchestration and have no production inference
 sessions. Representative portrait-scale memory, retouching quality, neural stage
 resource release, and CUDA acceptance remain pending.

@@ -10,6 +10,7 @@ from .batch import BatchService
 from .contracts import StartupSnapshot
 from .job_service import JobService
 from .pipeline_service import PipelineService
+from .worker_service import WorkerService
 
 DEFAULT_PIPELINE = {"schema_version": 1, "name": "Empty foundation pipeline", "stages": []}
 
@@ -26,6 +27,7 @@ class ApplicationService:
                                  autosave=state / "last-pipeline.json")
         self.pipeline_service = editor
         self.job_service = JobService(self.root, self.batch_service, editor, self.diagnostics)
+        self.job_worker = WorkerService(self.root, backend, self.diagnostics)
         if options.sources:
             sources = options.sources
         else:

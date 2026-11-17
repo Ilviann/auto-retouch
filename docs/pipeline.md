@@ -43,12 +43,14 @@ JPEGs. XMP and IPTC-IIM join EXIF and ICC as immutable source metadata. Version-
 artifact manifests can carry optional checksummed XMP and IPTC blob references;
 earlier manifests still load. Include the decoder/color policy and relevant
 dependency versions in scheduler cache identity. Both headless schedules use
-the JPEG adapter and the same stage sessions as reference execution. Worker
-transport and desktop job controls remain pending. See
+the JPEG adapter and the same stage sessions as reference execution. The batch
+worker runs the saved snapshot using either schedule. Desktop job controls
+remain pending. See
 [artifact evidence](verification/lossless-artifacts.md),
 [JPEG evidence](verification/jpeg-boundary.md),
-[sequential job evidence](verification/sequential-jobs.md), and
-[staged job evidence](verification/staged-jobs.md).
+[sequential job evidence](verification/sequential-jobs.md),
+[staged job evidence](verification/staged-jobs.md), and
+[worker evidence](verification/worker-transport.md).
 
 ## Editor and JSON settings
 
