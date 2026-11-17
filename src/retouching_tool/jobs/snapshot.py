@@ -55,6 +55,7 @@ class FrozenInput:
     sha256: str
     width: int
     height: int
+    header_bytes: int = 0
 
     @property
     def working_bytes(self):
@@ -62,7 +63,8 @@ class FrozenInput:
 
     @classmethod
     def parse(cls, data):
-        fields(data, "image_id path relative_path stamp sha256 width height")
+        fields(data, "image_id path relative_path stamp sha256 width height" +
+               (" header_bytes" if "header_bytes" in data else ""))
         relative = Path(data["relative_path"])
         require(not relative.anchor and relative.parts and not any(part == ".." or os.path.isreserved(part)
                                                                  for part in relative.parts)
@@ -70,8 +72,11 @@ class FrozenInput:
         require(isinstance(data["image_id"], str) and data["image_id"] and digest(data["sha256"])
                 and integer(data["width"], 1) and integer(data["height"], 1)
                 and data["width"] * data["height"] <= MAX_PIXELS, "Invalid frozen JPEG identity or dimensions")
-        return cls(data["image_id"], _absolute(data["path"]), relative, parse_stamp(data["stamp"]),
-                   data["sha256"], data["width"], data["height"])
+        stamp = parse_stamp(data["stamp"])
+        header_bytes = data.get("header_bytes", 0)
+        require(integer(header_bytes) and header_bytes <= stamp.size, "Invalid frozen JPEG header size")
+        return cls(data["image_id"], _absolute(data["path"]), relative, stamp,
+                   data["sha256"], data["width"], data["height"], header_bytes)
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,7 @@ class JobSnapshot:
     models: tuple[dict, ...]
     skipped: tuple[StageSkip, ...]
     inputs: tuple[FrozenInput, ...]
+    mode: str = "sequential"
 
     @property
     def pipeline_sha256(self):
@@ -106,18 +112,23 @@ class JobSnapshot:
         # Stage tuples must use the portable pipeline schema when persisted.
         data = asdict(self)
         data["pipeline"] = self.pipeline.to_json()
-        return {"schema_version": 1, "mode": "sequential", **data}
+        if self.mode == "sequential":
+            for item in data["inputs"]:
+                del item["header_bytes"]
+        return {"schema_version": 1, **data}
 
     @classmethod
     def parse(cls, data, job_id, registry):
         fields(data, "schema_version mode job_id index_id recursive roots destination destination_identity scratch "
                      "checkpoints backend pipeline settings versions models skipped inputs")
         require(type(data["schema_version"]) is int and data["schema_version"] == 1
-                and data["mode"] == "sequential" and data["job_id"] == job_id
+                and data["mode"] in ("sequential", "staged") and data["job_id"] == job_id
                 and data["backend"] in RUNTIMES and type(data["recursive"]) is bool
                 and isinstance(data["index_id"], str), "Invalid job snapshot version, mode or identity")
         roots = tuple((_absolute(path), _identity(identity)) for path, identity in data["roots"])
         inputs = tuple(FrozenInput.parse(item) for item in data["inputs"])
+        require(data["mode"] == "sequential" or all(item.header_bytes > 0 for item in inputs),
+                "Staged jobs require frozen JPEG header sizes")
         require(inputs and roots and len({item.image_id for item in inputs}) == len(inputs)
                 and len({item.relative_path for item in inputs}) == len(inputs), "Invalid frozen input list")
         for item in inputs:
@@ -130,4 +141,4 @@ class JobSnapshot:
         return cls(job_id, data["index_id"], data["recursive"], roots,
                    _absolute(data["destination"]), _identity(data["destination_identity"]),
                    _absolute(data["scratch"]), _absolute(data["checkpoints"]), data["backend"], pipeline,
-                   JpegSettings(**data["settings"]), data["versions"], tuple(data["models"]), skipped, inputs)
+                   JpegSettings(**data["settings"]), data["versions"], tuple(data["models"]), skipped, inputs, data["mode"])

@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from PIL import Image, JpegImagePlugin
 
+from retouching_tool.application.batch import BASE_SCRATCH_BYTES
 from retouching_tool.application.job_service import JobControl
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
@@ -22,6 +23,8 @@ from retouching_tool.errors import RetouchingError
 from retouching_tool.imaging.jpeg import JpegSettings
 from retouching_tool.jobs.journal import MAX_ATTEMPTS, JobJournal, JournalError, open_journal, runner_lock
 from retouching_tool.operations.reference import Exposure
+from retouching_tool.storage.artifacts import ArtifactStore, MANIFEST_LIMIT
+from retouching_tool.storage.tiff_pixels import TIFF_OVERHEAD_LIMIT
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_JOBS = "retouching_tool.application.job_service"
@@ -81,11 +84,27 @@ app.startup(LaunchOptions((), None, None), 'directml')
 def die(*args, **kwargs):
     os._exit(79)
 
+rename = Path.rename
 def fail_pending_rename(path, target):
-    assert path.suffix == '.pending' and Path(target).suffix == '.jpg'
-    die()
+    if path.suffix == '.pending' and Path(target).suffix == '.jpg':
+        die()
+    return rename(path, target)
 
-fault = patch.object(Path, 'rename', fail_pending_rename) if boundary == 'before' else patch.object(JobJournal, 'complete', die)
+commit = JobJournal.commit_stage
+def stop_at_checkpoint(journal, image_id, stage, ref, warnings):
+    if stage == 1 and boundary == 'before_checkpoint':
+        die()
+    commit(journal, image_id, stage, ref, warnings)
+    if stage == 1 and boundary == 'after_checkpoint':
+        die()
+
+faults = {
+    'before': patch.object(Path, 'rename', fail_pending_rename),
+    'after': patch.object(JobJournal, 'complete', die),
+    'before_checkpoint': patch.object(JobJournal, 'commit_stage', stop_at_checkpoint),
+    'after_checkpoint': patch.object(JobJournal, 'commit_stage', stop_at_checkpoint),
+}
+fault = faults[boundary]
 with fault:
     app.job_service.run(job_id)
 """
@@ -93,7 +112,286 @@ with fault:
                                 capture_output=True, encoding="utf-8", timeout=20, check=False)
         self.assertEqual(worker.returncode, 79, worker.stderr)
         before = self.jobs.status(job_id)
-        self.assertEqual((before.status, before.images[0].status, before.images[0].attempts), ("running", "prepared", 1))
+        if boundary in ("before", "after"):
+            attempts = len(before.stage_ids) + 1 if before.mode == "staged" else 1
+            self.assertEqual((before.status, before.images[0].status, before.images[0].attempts),
+                             ("running", "prepared", attempts))
+        return before
+
+    def load_staged_reference(self):
+        editor = self.app.pipeline_service
+        editor.load(ROOT / "examples/pipelines/reference.json")
+        editor.set_enabled("exposure-reference", True)
+        editor.set_parameters("exposure-reference", {"stops": 2})
+
+    def pause_after_checkpoint(self, job_id, *, count=1):
+        control = JobControl()
+        commit = JobJournal.commit_stage
+        calls = []
+
+        def pause(journal, image_id, stage, ref, warnings):
+            commit(journal, image_id, stage, ref, warnings)
+            calls.append((image_id, stage))
+            if len(calls) == count:
+                control.pause.set()
+
+        with patch.object(JobJournal, "commit_stage", pause):
+            result = self.jobs.run(job_id, control=control)
+        self.assertEqual(result.status, "paused")
+        return result
+
+    def checkpoint_directories(self, job_id):
+        with open_journal(self.root, job_id) as journal:
+            scratch = Path(journal.snapshot()["scratch"])
+            return {row["image_id"]: scratch / f"auto-retouch-job-{row['store_id']}"
+                    for row in journal.images() if row["store_id"] is not None}
+
+    def test_staged_passes_match_sequential_and_restore_context(self):
+        self.jpeg("a.jpg")
+        self.jpeg("sub/b.jpg")
+        self.load_staged_reference()
+        index = self.app.batch_service.index((self.source,), recursive=True)
+        alternate = self.root / "staged-output"
+        alternate.mkdir()
+        settings = JpegSettings(quality=83, subsampling="4:2:0", progressive=True)
+        staged_id = self.jobs.create(index, alternate, mode="staged", settings=settings)
+        sequential_id = self.jobs.create(index, self.destination, settings=settings)
+        process = Exposure.process
+
+        def observe_context(operation, state):
+            self.assertEqual(state.entry("image.luminance").producer_id, "statistics-before")
+            return process(operation, state)
+
+        # Both jobs use the same settings even after the editor is changed.
+        self.app.pipeline_service.set_parameters("exposure-reference", {"stops": -2})
+        with patch.object(Exposure, "process", observe_context):
+            staged = self.open_app().job_service.run(staged_id)
+            sequential = self.jobs.run(sequential_id)
+        self.assertEqual((staged.mode, staged.status), ("staged", "completed"))
+        self.assertEqual(staged.stage_ids, ("statistics-before", "exposure-reference", "statistics-after"))
+        for a, b in zip(staged.images, sequential.images, strict=True):
+            self.assertEqual((a.completed_stages, a.attempts, a.warnings), (3, 4, b.warnings))
+            with Image.open(a.output) as left, Image.open(b.output) as right:
+                self.assertEqual(left.tobytes(), right.tobytes())
+                self.assertEqual(left.getexif(), right.getexif())
+                self.assertEqual((left.size, left.getexif()[271], left.getexif()[274]),
+                                 ((20, 36), "Generated Test Camera", 1))
+                self.assertEqual(JpegImagePlugin.get_sampling(left), 2)
+        events = [event for event in self.log.records if event.get("job_id") == staged_id
+                  and event["code"] in ("STAGE_PREPARED", "STAGE_COMPLETED", "STAGE_RELEASED")]
+        self.assertEqual([(event["stage_instance_id"], event["code"]) for event in events],
+                         [(stage, code) for stage in staged.stage_ids
+                          for code in ("STAGE_PREPARED", "STAGE_COMPLETED", "STAGE_COMPLETED", "STAGE_RELEASED")])
+        self.assertEqual(self.checkpoint_directories(staged_id), {})
+
+    def test_staged_pause_uses_the_committed_state_and_reclaims_old_pixels(self):
+        path = self.jpeg("a.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        first = self.pause_after_checkpoint(job_id)
+        item = first.images[0]
+        directory = self.checkpoint_directories(job_id)[item.image_id]
+        original_tiff, = (directory / "blobs").glob("*.tif")
+        self.assertEqual((item.status, item.completed_stages, item.attempts), ("running", 1, 1))
+        self.assertFalse(item.output.exists())
+
+        # The checkpoint has enough validated input state to run the later units.
+        path.write_bytes(b"source changed after the committed first stage")
+        with patch(APP_JOBS + ".decode_jpeg", side_effect=AssertionError("Unexpected source decode")):
+            second = self.pause_after_checkpoint(job_id)
+            self.assertEqual(second.images[0].completed_stages, 2)
+            self.assertEqual(len(list((directory / "states").glob("*.json"))), 1)
+            new_tiff, = (directory / "blobs").glob("*.tif")
+            self.assertNotEqual(original_tiff, new_tiff)
+            self.assertFalse(original_tiff.exists())
+            result = self.open_app().job_service.run(job_id)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(list((directory / "blobs").iterdir()), [])
+
+    def test_staged_real_process_exit_on_either_side_of_the_checkpoint_commit(self):
+        self.jpeg("a.jpg")
+        self.load_staged_reference()
+        for boundary, stage_count, final_attempts in (("before_checkpoint", 1, 5), ("after_checkpoint", 2, 4)):
+            with self.subTest(boundary=boundary):
+                destination = self.root / boundary
+                destination.mkdir()
+                index = self.app.batch_service.index((self.source,))
+                job_id = self.jobs.create(index, destination, mode="staged")
+                before = self.interrupted_worker(job_id, boundary)
+                self.assertEqual((before.images[0].completed_stages, before.images[0].attempts), (stage_count, 2))
+                directory, = self.checkpoint_directories(job_id).values()
+                self.assertEqual(len(list((directory / "states").glob("*.json"))), 2)
+                result = self.open_app().job_service.run(job_id)
+                self.assertEqual((result.status, result.images[0].attempts), ("completed", final_attempts))
+                self.assertEqual(list((directory / "blobs").iterdir()), [])
+
+    def test_staged_damaged_intermediate_rebuilds_only_affected_input(self):
+        self.jpeg("a.jpg")
+        self.jpeg("b.jpg")
+        self.jpeg("c.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        first = self.pause_after_checkpoint(job_id, count=3)
+        damaged_pixels, damaged_manifest, healthy = first.images
+        directories = self.checkpoint_directories(job_id)
+        tiff, = (directories[damaged_pixels.image_id] / "blobs").glob("*.tif")
+        with tiff.open("r+b") as stream:
+            stream.write(b"Bad TIFF")
+        manifest, = (directories[damaged_manifest.image_id] / "states").glob("*.json")
+        manifest.write_bytes(b"{invalid")
+        preserved = directories[healthy.image_id] / "blobs" / "operator-note.txt"
+        preserved.write_text("Keep this file", encoding="utf-8")
+
+        result = self.open_app().job_service.run(job_id)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual([image.attempts for image in result.images], [6, 5, 4])
+        self.assertEqual(preserved.read_text(encoding="utf-8"), "Keep this file")
+        replayed = [event for event in self.log.records if event.get("job_id") == job_id
+                    and event["code"] == "JOB_ARTIFACT_REPLAY"]
+        self.assertEqual({event["image_id"] for event in replayed}, {damaged_pixels.image_id, damaged_manifest.image_id})
+        invalid = [event for event in self.log.records if event.get("job_id") == job_id and event["code"] == "ARTIFACT_INVALID"]
+        self.assertEqual(len(invalid), 2)
+        self.assertTrue(all("Traceback" in event["exception"] and event["stage_instance_id"] for event in invalid))
+
+    def test_staged_disk_error_keeps_the_predecessor_for_resume(self):
+        self.jpeg("a.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        self.pause_after_checkpoint(job_id)
+        with patch.object(ArtifactStore, "commit", side_effect=OSError(errno.ENOSPC, "fixture disk full")):
+            self.failure("JOB_DISK_FULL", lambda: self.jobs.run(job_id))
+        interrupted = self.jobs.status(job_id).images[0]
+        self.assertEqual((interrupted.status, interrupted.completed_stages), ("running", 1))
+        event = next(event for event in self.log.records if event["code"] == "JOB_UNIT_INTERRUPTED")
+        self.assertEqual((event["job_id"], event["image_id"], event["stage_instance_id"]),
+                         (job_id, interrupted.image_id, "exposure-reference"))
+        self.assertIn("fixture disk full", event["exception"])
+        with patch(APP_JOBS + ".decode_jpeg", side_effect=AssertionError("Unexpected source decode")):
+            result = self.open_app().job_service.run(job_id)
+        self.assertEqual((result.status, result.images[0].attempts), ("completed", 5))
+
+    def test_staged_repeated_artifact_corruption_reaches_a_bounded_failure(self):
+        self.jpeg("a.jpg")
+        self.jpeg("b.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        damaged = self.jobs.status(job_id).images[0].image_id
+        commit = JobJournal.commit_stage
+
+        def corrupt(journal, image_id, stage, ref, warnings):
+            commit(journal, image_id, stage, ref, warnings)
+            if image_id == damaged and stage == 0:
+                scratch = Path(journal.snapshot()["scratch"])
+                directory = scratch / f"auto-retouch-job-{ref['store_id']}"
+                tiff, = (directory / "blobs").glob("*.tif")
+                tiff.write_bytes(b"Bad TIFF")
+
+        with patch.object(JobJournal, "commit_stage", corrupt):
+            result = self.jobs.run(job_id)
+        self.assertEqual(result.status, "completed_with_errors")
+        failed, good = result.images
+        self.assertEqual((failed.code, failed.attempts), ("JOB_ARTIFACT_REPLAYS_EXHAUSTED", 6))
+        self.assertEqual(failed.warnings, 5)  # Three sRGB assumptions and two replay warnings.
+        self.assertEqual((good.status, good.attempts), ("completed", 4))
+
+    def test_staged_resume_reserves_only_a_replacement_when_all_inputs_are_checkpointed(self):
+        self.jpeg("a.jpg")
+        self.jpeg("b.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        self.pause_after_checkpoint(job_id, count=2)
+        with patch.object(self.jobs, "_check_space", wraps=self.jobs._check_space) as space:
+            result = self.jobs.run(job_id)
+        expected = BASE_SCRATCH_BYTES + (36 * 20 * 12) + TIFF_OVERHEAD_LIMIT + MANIFEST_LIMIT
+        self.assertEqual(space.call_args_list[0].args[1], expected)
+        self.assertEqual(result.status, "completed")
+
+    def test_staged_late_collision_and_unit_exhaustion_still_allow_a_neighbor_to_complete(self):
+        self.jpeg("a.jpg")
+        self.jpeg("b.jpg")
+        self.jpeg("c.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        occupied = self.destination / "a.jpg"
+        occupied.write_bytes(b"user file")
+        with patch.object(JobJournal, "commit_stage", side_effect=JournalError("fixture journal failure")):
+            for _ in range(MAX_ATTEMPTS):
+                self.failure("JOB_JOURNAL_FAILED", lambda: self.jobs.run(job_id))
+        result = self.open_app().job_service.run(job_id)
+        self.assertEqual(result.status, "completed_with_errors")
+        collision, exhausted, good = result.images
+        self.assertEqual((collision.code, collision.attempts), ("OUTPUT_COLLISION", 0))
+        self.assertEqual((exhausted.code, exhausted.attempts), ("JOB_ATTEMPTS_EXHAUSTED", MAX_ATTEMPTS))
+        self.assertEqual((good.status, good.completed_stages), ("completed", 3))
+        self.assertEqual(occupied.read_bytes(), b"user file")
+
+    def test_staged_export_receipt_recovers_without_intermediate_or_reencoding(self):
+        self.jpeg("a.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        before = self.interrupted_worker(job_id, "after")
+        output = before.images[0].output
+        original = output.read_bytes()
+        directory, = self.checkpoint_directories(job_id).values()
+        tiff, = (directory / "blobs").glob("*.tif")
+        tiff.unlink()
+        control = JobControl()
+        control.cancel.set()
+        with patch(APP_JOBS + ".export_jpeg", side_effect=AssertionError("Unexpected JPEG encode")):
+            result = self.jobs.run(job_id, control=control)
+        self.assertEqual((result.status, result.images[0].attempts), ("completed", 4))
+        self.assertEqual(output.read_bytes(), original)
+        self.assertEqual(self.checkpoint_directories(job_id), {})
+
+    def test_staged_cancel_releases_stage_and_cleans_only_job_artifacts(self):
+        self.jpeg("a.jpg")
+        self.jpeg("b.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        first = self.pause_after_checkpoint(job_id)
+        directory, = self.checkpoint_directories(job_id).values()
+        unrelated = directory.parent / "keep.bin"
+        unrelated.write_bytes(b"keep")
+        control = JobControl()
+        control.cancel.set()
+        result = self.jobs.run(job_id, control=control)
+        self.assertEqual(result.status, "canceled")
+        self.assertEqual([image.status for image in result.images], ["canceled", "canceled"])
+        self.assertEqual([image.attempts for image in result.images], [1, 0])
+        self.assertTrue(all(not image.output.exists() for image in result.images))
+        self.assertEqual(list((directory / "states").iterdir()), [])
+        self.assertEqual(unrelated.read_bytes(), b"keep")
+        self.assertEqual(self.jobs.run(job_id), result)
+        self.assertEqual(first.images[0].completed_stages, 1)
+
+    def test_staged_empty_pipeline_and_isolated_stage_failure(self):
+        a = self.jpeg("a.jpg")
+        self.jpeg("b.jpg")
+        empty_destination = self.root / "empty"
+        empty_destination.mkdir()
+        index = self.app.batch_service.index((self.source,))
+        empty = self.jobs.run(self.jobs.create(index, empty_destination, mode="staged"))
+        self.assertEqual((empty.status, empty.stage_ids), ("completed", ()))
+        self.assertTrue(all((item.completed_stages, item.attempts) == (0, 1) for item in empty.images))
+
+        self.load_staged_reference()
+        job_id = self.jobs.create(index, self.destination, mode="staged")
+        process = Exposure.process
+
+        def fail_first(operation, state):
+            if operation.runtime.image_id == index.images[0].image_id:
+                raise ValueError("fixture stage failure")
+            return process(operation, state)
+
+        with patch.object(Exposure, "process", fail_first):
+            result = self.jobs.run(job_id)
+        self.assertEqual(result.status, "completed_with_errors")
+        failed, good = result.images
+        self.assertEqual((failed.source, failed.status, failed.completed_stages), (a, "failed", 1))
+        self.assertEqual((good.status, good.completed_stages), ("completed", 3))
+        event = next(event for event in self.log.records if event["code"] == "STAGE_PROCESS_FAILED")
+        self.assertEqual((event["image_id"], event["stage_instance_id"]), (failed.image_id, "exposure-reference"))
+        self.assertIn("fixture stage failure", event["exception"])
 
     def failure(self, code, action):
         with self.assertRaises(RetouchingError) as caught:

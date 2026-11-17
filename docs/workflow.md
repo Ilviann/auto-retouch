@@ -10,12 +10,13 @@ TIFF artifact slice is implemented at reference level; see
 [artifact evidence](verification/lossless-artifacts.md). Headless JPEG
 color/orientation and verified export are implemented and checked on the seven
 local study JPEGs. Headless source indexing and initial path/disk preflight are
-implemented. Headless sequential job execution and restart recovery have generated
-fixture coverage. Staged execution remains planned. Actual retouching quality
-still requires reviewed photos and model provisioning. See
-[JPEG evidence](verification/jpeg-boundary.md) and
-[batch preflight evidence](verification/batch-preflight.md) and
-[sequential job evidence](verification/sequential-jobs.md).
+implemented. Headless sequential and staged job execution have generated-fixture
+coverage for pause, cancel and restart recovery. Actual retouching quality still
+requires reviewed photos and model provisioning. See
+[JPEG evidence](verification/jpeg-boundary.md),
+[batch preflight evidence](verification/batch-preflight.md),
+[sequential job evidence](verification/sequential-jobs.md), and
+[staged job evidence](verification/staged-jobs.md).
 
 ## Development stages
 

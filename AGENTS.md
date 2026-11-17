@@ -81,9 +81,10 @@ implemented; see `docs/verification/lossless-artifacts.md`. Headless JPEG decode
 ICC/orientation normalization and verified export are implemented; see
 `docs/verification/jpeg-boundary.md`. Headless source indexing, path validation
 and initial disk preflight are implemented. See `docs/verification/batch-preflight.md`.
-The headless sequential runner now persists job snapshots, image progress and
-verified JPEG recovery receipts. See `docs/verification/sequential-jobs.md`.
-Next portable batch work is staged execution and lossless intermediate recovery.
+Headless sequential and staged runners persist frozen job snapshots and verified
+JPEG receipts. Staged jobs also recover lossless image-stage checkpoints. See
+`docs/verification/sequential-jobs.md` and `docs/verification/staged-jobs.md`.
+Worker transport and desktop job controls remain pending.
 No production neural stage or checkpoint has been selected. Synthetic reference
 tests do not establish portrait quality.
 

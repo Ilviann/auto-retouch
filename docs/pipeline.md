@@ -42,12 +42,13 @@ headless JPEG adapter initializes oriented image states and exports verified sRG
 JPEGs. XMP and IPTC-IIM join EXIF and ICC as immutable source metadata. Version-1
 artifact manifests can carry optional checksummed XMP and IPTC blob references;
 earlier manifests still load. Include the decoder/color policy and relevant
-dependency versions in scheduler cache identity. The headless sequential runner
-now uses the JPEG adapter and the same stage sessions as reference execution.
-Staged scheduling and GUI wiring remain pending. See
+dependency versions in scheduler cache identity. Both headless schedules use
+the JPEG adapter and the same stage sessions as reference execution. Worker
+transport and desktop job controls remain pending. See
 [artifact evidence](verification/lossless-artifacts.md),
-[JPEG evidence](verification/jpeg-boundary.md) and
-[sequential job evidence](verification/sequential-jobs.md).
+[JPEG evidence](verification/jpeg-boundary.md),
+[sequential job evidence](verification/sequential-jobs.md), and
+[staged job evidence](verification/staged-jobs.md).
 
 ## Editor and JSON settings
 
@@ -217,7 +218,8 @@ Sequential:
 Staged:
 load A -> A(1), A(2), A(3) -> persist results -> release A
 load B -> B(1), B(2), B(3) -> persist results -> release B
-load C -> C(1), C(2), C(3) -> export results  -> release C
+load C -> C(1), C(2), C(3) -> persist results -> release C
+export 1, 2, 3
 ```
 
 Staged mode trades intermediate disk space and I/O for fewer model loads. It does
@@ -229,6 +231,11 @@ boundaries if they cannot coexist in memory.
 Stage preparation normally occurs once per uninterrupted stage pass, with no
 promise that a crash/retry can avoid a reload. A stage may manage multiple local
 assets internally, but the manager must not preload every pipeline stage at once.
+
+The final export pass uses the verified JPEG receipt protocol shared with
+sequential mode. An empty or all-disabled staged job goes directly to decode and
+export. Staged pause/cancel requests are checked before each image-stage or export
+unit. Pausing releases the current stage and keeps its committed checkpoints.
 
 Match image normalization, intermediate precision, operation versions, model
 assets, parameters, and per-input seeds across modes. Define numerical tolerances
@@ -247,6 +254,9 @@ from validation; do not claim universal bitwise-identical GPU inference.
   dependencies have been reclaimed, recompute them from the source as needed.
 - Keep only dependencies needed for resume and the next stage, unless retention
   was requested. Delete a predecessor only after its successor is committed.
+  The staged runner keeps one journaled checkpoint per active image. If it is
+  missing or corrupt, the affected image may rebuild from its frozen source up
+  to twice. Other images keep their current checkpoints.
 - A failed stage blocks downstream execution for that image; it does not silently
   pass through an unretouched image as a successful result.
 - Cleanup is limited to manifest-owned job artifacts. Successful completion,

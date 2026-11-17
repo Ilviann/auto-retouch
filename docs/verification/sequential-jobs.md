@@ -54,9 +54,9 @@ peak memory, or portrait quality.
 
 ## Remaining validation
 
-Staged scheduling, recovery from lossless intermediates, per-stage controls,
-worker transport and desktop integration remain pending. Recovery was exercised
-with abrupt process exit. Physical power-loss durability and real Windows
+See [staged job evidence](staged-jobs.md) for staged scheduling and checkpoint
+recovery. Worker transport and desktop integration remain pending. Recovery was
+exercised with abrupt process exit. Physical power-loss durability and real Windows
 junction behavior still need validation. If a process exits before committing a
 JPEG receipt, the untracked `.pending` file is left for inspection. Verified
 exports and job journals are retained. Reference runs do not establish CUDA,

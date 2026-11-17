@@ -45,9 +45,12 @@ reference-aware cleanup. `tifffile` is pinned in the main shared dependencies.
 See [artifact evidence](docs/verification/lossless-artifacts.md).
 
 The headless JPEG adapter uses pinned Pillow to apply input orientation and color
-management, then verify capture metadata, sRGB and processing history before
-publishing exports. GUI and scheduler integration remain pending. See
-[JPEG verification](docs/verification/jpeg-boundary.md).
+management, then verifies capture metadata, sRGB and processing history before
+publishing exports. Both headless schedules support restart recovery. Staged
+execution keeps a lossless checkpoint for each active image and encodes JPEG
+after the final stage releases its resources. Worker transport and desktop job
+controls remain pending. See [JPEG verification](docs/verification/jpeg-boundary.md)
+and [staged job verification](docs/verification/staged-jobs.md).
 
 Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
 `prepare_env.cmd` and choose a backend (Enter selects CUDA). Setup installs the

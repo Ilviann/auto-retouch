@@ -14,6 +14,7 @@ from ..storage.batch_paths import current_file_stamp, output_path
 MAX_ATTEMPTS = 3
 TERMINAL = ("completed", "completed_with_errors", "canceled")
 SCHEMA_VERSION = 1
+STAGED_SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE job (
@@ -33,6 +34,15 @@ CREATE TABLE image (
     receipt TEXT,
     CHECK (status NOT IN ('prepared', 'completed') OR receipt IS NOT NULL)
 ) STRICT;
+"""
+
+STAGED_SCHEMA = """
+ALTER TABLE image ADD COLUMN next_stage INTEGER NOT NULL DEFAULT 0 CHECK (next_stage >= 0);
+ALTER TABLE image ADD COLUMN unit_attempts INTEGER NOT NULL DEFAULT 0 CHECK (unit_attempts >= 0);
+ALTER TABLE image ADD COLUMN artifact_replays INTEGER NOT NULL DEFAULT 0 CHECK (artifact_replays >= 0);
+ALTER TABLE image ADD COLUMN store_id TEXT;
+ALTER TABLE image ADD COLUMN artifact TEXT;
+CREATE UNIQUE INDEX image_store ON image(store_id) WHERE store_id IS NOT NULL;
 """
 
 
@@ -88,33 +98,38 @@ def open_journal(root, job_id, *, create=False):
             connection = sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=5)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA synchronous = FULL")
-            if not create and connection.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if not create and version not in (SCHEMA_VERSION, STAGED_SCHEMA_VERSION):
                 raise JournalError("Job uses an incomplete or unsupported SQLite schema. Retain it for inspection.")
         except (OSError, sqlite3.Error) as exc:
             raise JournalError(f"Cannot open local job {job_id}. Check job storage and permissions.") from exc
-        yield JobJournal(connection)
+        yield JobJournal(connection, version)
     finally:
         if connection is not None:
             connection.close()
 
 
 class JobJournal:
-    def __init__(self, connection):
+    def __init__(self, connection, version=SCHEMA_VERSION):
         self.connection = connection
+        self.version = version
 
     def initialize(self, snapshot, image_ids):
         encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False, default=os.fspath)
+        staged = snapshot["mode"] == "staged"
+        version = STAGED_SCHEMA_VERSION if staged else SCHEMA_VERSION
         try:
             # Schema and input rows become visible together with the version marker.
-            self.connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+            self.connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + (STAGED_SCHEMA if staged else ""))
             with self.connection:
                 self.connection.execute("INSERT INTO job VALUES (1, ?, ?, 'queued')",
                                         (encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()))
                 self.connection.executemany("INSERT INTO image(position, image_id, status) VALUES (?, ?, 'queued')",
                                             enumerate(image_ids))
-                self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                self.connection.execute(f"PRAGMA user_version = {version}")
         except sqlite3.Error as exc:
             raise JournalError("Cannot commit the initial job snapshot. Check job storage and free space.") from exc
+        self.version = version
 
     def snapshot(self):
         row = self._one("SELECT snapshot, sha256 FROM job WHERE id = 1")
@@ -162,6 +177,32 @@ class JobJournal:
         self._write("""UPDATE image SET status = 'running', attempts = attempts + 1, warnings = 0, receipt = NULL
                        WHERE image_id = ? AND status IN ('queued', 'running', 'prepared') AND attempts < ?""",
                     (image_id, MAX_ATTEMPTS), single=True)
+
+    def begin_unit(self, image_id, stage):
+        self._write("""UPDATE image SET status = 'running', attempts = attempts + 1,
+                       unit_attempts = unit_attempts + 1, receipt = NULL
+                       WHERE image_id = ? AND next_stage = ? AND unit_attempts < ?
+                       AND status IN ('queued','running','prepared')""", (image_id, stage, MAX_ATTEMPTS), single=True)
+
+    def attach_store(self, image_id, store_id):
+        self._write("UPDATE image SET store_id = ? WHERE image_id = ? AND store_id IS NULL",
+                    (store_id, image_id), single=True)
+
+    def commit_stage(self, image_id, stage, artifact, warnings):
+        self._write("""UPDATE image SET next_stage = next_stage + 1, unit_attempts = 0, artifact = ?, warnings = ?
+                       WHERE image_id = ? AND next_stage = ? AND status = 'running' AND store_id IS NOT NULL""",
+                    (json.dumps(artifact), warnings, image_id, stage), single=True)
+
+    def rewind(self, image_id):
+        self._write("""UPDATE image SET status = 'running', next_stage = 0, unit_attempts = 0, warnings = warnings + 1,
+                       artifact_replays = artifact_replays + 1, artifact = NULL, receipt = NULL
+                       WHERE image_id = ? AND status IN ('running','prepared') AND artifact_replays < ?""",
+                    (image_id, MAX_ATTEMPTS - 1), single=True)
+
+    def clear_store(self, image_id, store_id):
+        self._write("""UPDATE image SET artifact = NULL, store_id = NULL WHERE image_id = ? AND store_id = ?
+                       AND (next_stage = 0 OR status IN ('completed','failed','canceled'))""",
+                    (image_id, store_id), single=True)
 
     def prepared(self, image_id, receipt, warnings):
         self._write("UPDATE image SET status = 'prepared', receipt = ?, warnings = ? WHERE image_id = ? AND status = 'running'",

@@ -17,6 +17,7 @@ from ..storage.tiff_pixels import TIFF_OVERHEAD_LIMIT
 
 JPEG_EXTENSIONS = (".jpg", ".jpeg")
 BASE_SCRATCH_BYTES = 200_000_000
+CHECKPOINT_OVERHEAD_BYTES = MANIFEST_LIMIT + TIFF_OVERHEAD_LIMIT
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ def _space_budget(images, mode, extra_scratch_bytes):
     return SpaceBudget(
         sum(image.working_bytes for image in images), BASE_SCRATCH_BYTES,
         count * TIFF_OVERHEAD_LIMIT, sum(image.header.header_bytes for image in images),
-        count * MANIFEST_LIMIT, largest + TIFF_OVERHEAD_LIMIT + MANIFEST_LIMIT,
+        count * MANIFEST_LIMIT, largest + CHECKPOINT_OVERHEAD_BYTES,
         extra_scratch_bytes, output,
     )
 

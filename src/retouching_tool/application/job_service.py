@@ -1,14 +1,14 @@
-"""Create, run and resume one local sequential job through headless commands."""
+"""Create, run and resume local jobs through headless commands."""
 
 from dataclasses import asdict, dataclass
-import errno
 from pathlib import Path
 from threading import Event
 from uuid import uuid4
 
 from ..errors import RetouchingError
 from ..imaging.jpeg import JpegRuntime, JpegSettings, decode_jpeg, export_jpeg
-from ..jobs.journal import MAX_ATTEMPTS, TERMINAL, JournalError, open_journal, runner_lock
+from ..jobs.execution import ImageDiagnostics, disk_full
+from ..jobs.journal import MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError, open_journal, runner_lock
 from ..jobs.publication import PreparedExport, check_destination, prepare_parent, recover_export
 from ..jobs.snapshot import FrozenInput, JobSnapshot, StageSkip, model_manifests, runtime_versions
 from ..pipeline.executor import StageRuntime, StageSession
@@ -16,6 +16,7 @@ from ..pipeline.validation import validate_pipeline
 from ..storage.artifacts import fingerprint
 from ..storage.batch_paths import current_file_stamp, file_identity, output_path, resolve_folder, stamp_and_hash
 from .batch import BASE_SCRATCH_BYTES, BatchService, SourceIndex, SourceRoot, volume_budgets
+from .staged_jobs import StagedRunner, validate_staged_progress
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class JobImageStatus:
     warnings: int
     code: str | None
     message: str | None
+    completed_stages: int | None = None
 
 
 @dataclass(frozen=True)
@@ -36,49 +38,26 @@ class JobStatus:
     status: str
     images: tuple[JobImageStatus, ...]
     skipped_stages: tuple[StageSkip, ...]
+    mode: str = "sequential"
+    stage_ids: tuple[str, ...] = ()
 
 
 class JobControl:
-    """Thread-safe requests observed between images by the sequential runner."""
+    """Thread-safe requests observed between the scheduler's work units."""
 
     def __init__(self):
         self.pause = Event()
         self.cancel = Event()
 
 
-class _ImageDiagnostics:
-    def __init__(self, diagnostics):
-        self.diagnostics = diagnostics
-        self.warnings = 0
-        self.traced_error = False
-        self.failed_stage = None
-
-    def emit(self, code, message, **details):
-        if details.get("level") == "WARNING":
-            self.warnings += 1
-        if details.get("level") == "ERROR" and details.get("exc_info"):
-            self.traced_error = True
-            self.failed_stage = details.get("stage_instance_id")
-        self.diagnostics.emit(code, message, **details)
-
-
-def _disk_full(error):
-    while error is not None:
-        if isinstance(error, OSError) and (error.errno in (errno.ENOSPC, errno.EDQUOT)
-                                          or getattr(error, "winerror", None) in (39, 112)):
-            return True
-        error = error.__cause__
-    return False
-
-
-class SequentialJobService:
+class JobService:
     def __init__(self, root, batch, pipeline, diagnostics):
         self.root = root
         self.batch = batch
         self.pipeline = pipeline
         self.diagnostics = diagnostics
 
-    def create(self, index, destination, *, settings=JpegSettings(), selected_ids=None) -> str:
+    def create(self, index, destination, *, mode="sequential", settings=JpegSettings(), selected_ids=None) -> str:
         """Validate and persist a frozen job. No photos are decoded or exported here."""
         job_id = uuid4().hex
         context = {"index_id": index.index_id, "destination_path": destination}
@@ -88,7 +67,7 @@ class SequentialJobService:
             definition = self.pipeline.preflight()
             skipped = tuple(StageSkip(item.stage.id, ", ".join(issue.code for issue in item.issues) or "disabled")
                             for item in self.pipeline.status.stages if not item.stage.enabled)
-            plan = self.batch.preflight(index, destination, mode="sequential", selected_ids=selected_ids, job_id=job_id)
+            plan = self.batch.preflight(index, destination, mode=mode, selected_ids=selected_ids, job_id=job_id)
             if not plan.ready:
                 raise RetouchingError("JOB_SPACE_INSUFFICIENT", "Free the disk space reported by preflight before creating this job.")
             inputs = []
@@ -100,14 +79,14 @@ class SequentialJobService:
                 except OSError as exc:
                     raise RetouchingError("SOURCE_CHANGED", f"Cannot freeze {image.path}. Check the file and re-index the batch.") from exc
                 inputs.append(FrozenInput(image.image_id, image.path, image.relative_path, stamp, checksum,
-                                          image.header.width, image.header.height))
+                                          image.header.width, image.header.height, image.header.header_bytes))
             context.pop("image_id")
             context.pop("source_path")
             snapshot = JobSnapshot(job_id, index.index_id, index.recursive,
                                    tuple((root.path, root.identity) for root in index.roots), plan.destination,
                                    file_identity(plan.destination.stat()), plan.scratch, self.pipeline.checkpoints.resolve(),
                                    self.pipeline.backend, definition, settings, runtime_versions(self.pipeline.backend),
-                                   model_manifests(definition, self.pipeline.catalog), skipped, tuple(inputs))
+                                   model_manifests(definition, self.pipeline.catalog), skipped, tuple(inputs), plan.mode)
             with open_journal(self.root, job_id, create=True) as journal:
                 journal.initialize(snapshot.encode(), (item.image_id for item in inputs))
         except Exception as exc:
@@ -117,7 +96,7 @@ class SequentialJobService:
         for stage in snapshot.skipped:
             self._emit(job_id, "JOB_STAGE_SKIPPED", "Frozen pipeline skips this stage", stage_instance_id=stage.stage_id,
                        skip_reason=stage.reason)
-        self._emit(job_id, "JOB_CREATED", "Saved the sequential job snapshot", image_count=len(snapshot.inputs),
+        self._emit(job_id, "JOB_CREATED", "Saved the job snapshot", mode=snapshot.mode, image_count=len(snapshot.inputs),
                    pipeline_sha256=snapshot.pipeline_sha256, backend=snapshot.backend, versions=snapshot.versions, **context)
         return job_id
 
@@ -134,7 +113,9 @@ class SequentialJobService:
         try:
             with runner_lock(self.root), open_journal(self.root, job_id) as journal:
                 job = self._load(journal, job_id)
-                if journal.status() not in TERMINAL:
+                if job.mode == "staged":
+                    StagedRunner(self, journal, job, control or JobControl()).run()
+                elif journal.status() not in TERMINAL:
                     self._run(journal, job, control or JobControl())
                 return self._status(journal, job)
         except Exception as exc:
@@ -144,19 +125,26 @@ class SequentialJobService:
     def _load(self, journal, job_id):
         try:
             job = JobSnapshot.parse(journal.snapshot(), job_id, self.pipeline.registry)
-            if tuple(row["image_id"] for row in journal.images()) != tuple(item.image_id for item in job.inputs):
+            rows = journal.images()
+            if tuple(row["image_id"] for row in rows) != tuple(item.image_id for item in job.inputs):
                 raise ValueError("Journal image list differs from the frozen inputs")
+            if (journal.version == STAGED_SCHEMA_VERSION) != (job.mode == "staged"):
+                raise ValueError("Journal schema differs from the saved execution mode")
+            if job.mode == "staged":
+                validate_staged_progress(job, rows)
             return job
-        except (KeyError, TypeError, ValueError) as exc:
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise JournalError("Cannot validate the saved job. Retain its journal for inspection.") from exc
 
     @staticmethod
     def _status(journal, job):
         status, rows = journal.accounting()
         images = tuple(JobImageStatus(item.image_id, item.path, job.destination / item.relative_path,
-                                      row["status"], row["attempts"], row["warnings"], row["code"], row["message"])
+                                      row["status"], row["attempts"], row["warnings"], row["code"], row["message"],
+                                      row["next_stage"] if job.mode == "staged" else None)
                        for item, row in zip(job.inputs, rows, strict=True))
-        return JobStatus(job.job_id, status, images, job.skipped)
+        return JobStatus(job.job_id, status, images, job.skipped, job.mode,
+                         tuple(stage.id for stage in job.pipeline.stages if stage.enabled))
 
     def _validate_run(self, job):
         check_destination(job)
@@ -219,6 +207,9 @@ class SequentialJobService:
             failed = any(row["status"] == "failed" for row in journal.images())
             journal.set_status("completed_with_errors" if failed else "completed")
 
+        self._emit_accounting(journal, job)
+
+    def _emit_accounting(self, journal, job):
         result = self._status(journal, job)
         counts = {state: sum(image.status == state for image in result.images)
                   for state in ("queued", "running", "prepared", "completed", "failed", "canceled")}
@@ -226,11 +217,18 @@ class SequentialJobService:
                    counts=counts, images_with_warnings=sum(image.warnings > 0 for image in result.images))
 
     @staticmethod
-    def _check_space(job, scratch_bytes, output_bytes):
-        check_destination(job)
-        scratch, existing = resolve_folder(job.scratch, allow_missing=True)
+    def _check_scratch(job):
+        try:
+            scratch, existing = resolve_folder(job.scratch, allow_missing=True)
+        except (OSError, ValueError) as exc:
+            raise RetouchingError("JOB_FOLDER_CHANGED", f"Cannot reopen scratch storage at {job.scratch}. Restore access before resuming.") from exc
         if scratch != job.scratch:
             raise RetouchingError("JOB_FOLDER_CHANGED", "The frozen scratch folder resolves elsewhere. Restore it before resuming.")
+        return scratch, existing
+
+    def _check_space(self, job, scratch_bytes, output_bytes):
+        check_destination(job)
+        scratch, existing = self._check_scratch(job)
         volumes = volume_budgets(((job.destination, job.destination, output_bytes), (scratch, existing, scratch_bytes)))
         for volume in volumes:
             if volume.available_bytes < volume.required_bytes:
@@ -239,6 +237,7 @@ class SequentialJobService:
                                       f"Need {volume.required_bytes:,} bytes, have {volume.available_bytes:,}.")
 
     def _recover(self, journal, job, item, row):
+        attempt = row["unit_attempts"] if job.mode == "staged" else row["attempts"]
         try:
             receipt = PreparedExport.parse(row["receipt"])
         except (TypeError, ValueError) as exc:
@@ -246,45 +245,54 @@ class SequentialJobService:
         try:
             output = recover_export(job, item, receipt)
         except (RetouchingError, OSError) as exc:
-            self._record_failure(journal, job, item, row["attempts"], exc, row["warnings"], fallback="JOB_EXPORT_RECOVERY_FAILED")
+            self._record_failure(journal, job, item, attempt, exc, row["warnings"], fallback="JOB_EXPORT_RECOVERY_FAILED")
             return
         if output is not None:
             journal.complete(item.image_id)
             self._emit(job.job_id, "JOB_EXPORT_RECOVERED", "Recovered a verified export without rendering again",
-                       image_id=item.image_id, attempt=row["attempts"], output_path=output)
+                       image_id=item.image_id, attempt=attempt, output_path=output)
 
     def _process(self, journal, job, item, attempt):
-        log = _ImageDiagnostics(self.diagnostics)
+        log = ImageDiagnostics(self.diagnostics)
         runtime = JpegRuntime(log, item.image_id, job.job_id, attempt=attempt)
 
-        def prepare_receipt(pending, destination):
-            check_destination(job)
-            expected, _ = output_path(job.destination, item.relative_path)
-            if destination != expected or pending.parent != expected.parent:
-                raise RetouchingError("JOB_FOLDER_CHANGED", "Destination changed during JPEG export. Restore it before resuming.")
-            receipt = PreparedExport.capture(pending)
-            journal.prepared(item.image_id, receipt.encode(), log.warnings)
-
-        try:
-            output = prepare_parent(job, item)
-            self._check_source(item)
-            state = decode_jpeg(item.path, source_id=item.image_id, runtime=runtime, expected_sha256=item.sha256)
-            self._check_source(item)
+        def process():
+            state = self._decode(item, runtime)
             for stage in job.pipeline.stages:
                 if stage.enabled:
                     stage_runtime = StageRuntime(log, job.backend, job.checkpoints, job.job_id, stage,
                                                  image_id=item.image_id, attempt=attempt)
                     with StageSession(self.pipeline.registry, self.pipeline.catalog, stage_runtime) as session:
                         state = session.process(state, image_id=item.image_id, attempt=attempt)
-            export_jpeg(state, output, settings=job.settings, pipeline_sha256=job.pipeline_sha256,
-                        runtime=runtime, before_publish=prepare_receipt)
+            return state
+
+        try:
+            self._publish(journal, job, item, runtime, process)
         except Exception as exc:
             self._record_failure(journal, job, item, attempt, exc, log.warnings, traced=log.traced_error,
                                  stage_id=log.failed_stage)
-            return
+
+    def _publish(self, journal, job, item, runtime, load_state):
+        def prepare_receipt(pending, destination):
+            check_destination(job)
+            expected, _ = output_path(job.destination, item.relative_path)
+            if destination != expected or pending.parent != expected.parent:
+                raise RetouchingError("JOB_FOLDER_CHANGED", "Destination changed during JPEG export. Restore it before resuming.")
+            receipt = PreparedExport.capture(pending)
+            journal.prepared(item.image_id, receipt.encode(), runtime.diagnostics.warnings)
+
+        output = prepare_parent(job, item)
+        export_jpeg(load_state(), output, settings=job.settings, pipeline_sha256=job.pipeline_sha256,
+                    runtime=runtime, before_publish=prepare_receipt)
         journal.complete(item.image_id)
         self._emit(job.job_id, "JOB_IMAGE_COMPLETED", "Committed the verified JPEG result", image_id=item.image_id,
-                   attempt=attempt, output_path=output, warnings=log.warnings)
+                   attempt=runtime.attempt, output_path=output, warnings=runtime.diagnostics.warnings)
+
+    def _decode(self, item, runtime):
+        self._check_source(item)
+        state = decode_jpeg(item.path, source_id=item.image_id, runtime=runtime, expected_sha256=item.sha256)
+        self._check_source(item)
+        return state
 
     @staticmethod
     def _check_source(item):
@@ -298,7 +306,7 @@ class SequentialJobService:
                         fallback="JOB_IMAGE_FAILED"):
         if isinstance(exc, JournalError) or getattr(exc, "code", None) == "JOB_FOLDER_CHANGED":
             raise exc
-        if _disk_full(exc):
+        if disk_full(exc):
             raise RetouchingError("JOB_DISK_FULL", f"Storage ran out while processing {item.path}. Free space and resume the job.") from exc
         code = getattr(exc, "code", fallback)
         message = str(exc) or type(exc).__name__

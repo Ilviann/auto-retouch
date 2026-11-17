@@ -44,6 +44,13 @@ stage/JPEG events retain their existing image and attempt correlation. A failed
 journal write interrupts the run so uncommitted work can be recovered. See
 [sequential job evidence](verification/sequential-jobs.md).
 
+Staged jobs add per-image stage cursors and correlated artifact events.
+`JOB_IMAGE_REPLAYED` marks an interrupted unit retry. `JOB_ARTIFACT_REPLAY`
+marks a rewind to the frozen source when a checkpoint is unreadable.
+`JOB_UNIT_INTERRUPTED` links a storage or journal error to the affected image
+and stage. The status snapshot continues to show the last committed cursor.
+See [staged job evidence](verification/staged-jobs.md).
+
 Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
 `diagnostics/service.py`, with UTC millisecond times, session/process identity,
 codes, structured context, and exception chains at INFO settings. Setup child

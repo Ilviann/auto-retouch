@@ -55,8 +55,9 @@ class StageSession:
             raise
         return self
 
-    def process(self, state, *, image_id, attempt=1):
-        runtime = replace(self.runtime, image_id=image_id, attempt=attempt)
+    def process(self, state, *, image_id, attempt=1, diagnostics=None):
+        runtime = replace(self.runtime, image_id=image_id, attempt=attempt,
+                          diagnostics=self.runtime.diagnostics if diagnostics is None else diagnostics)
         if not runtime.stage.enabled:
             runtime.emit("STAGE_IMAGE_SKIPPED", "Disabled stage passed this image through unchanged")
             return state

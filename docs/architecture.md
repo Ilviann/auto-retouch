@@ -20,9 +20,10 @@ adds lossless float32 TIFF/context storage, checksummed source metadata and safe
 manifest-based lifetime management; see [artifact evidence](verification/lossless-artifacts.md).
 The JPEG adapter in `imaging/` decodes oriented linear-sRGB states and stages
 verified JPEG exports for publication. See [JPEG evidence](verification/jpeg-boundary.md).
-Milestone 4 adds headless source indexing, initial batch preflight and recoverable
-sequential execution. See [preflight evidence](verification/batch-preflight.md)
-and [sequential job evidence](verification/sequential-jobs.md).
+Milestone 4 adds headless source indexing, batch preflight and recoverable
+sequential and staged execution. See [preflight evidence](verification/batch-preflight.md),
+[sequential job evidence](verification/sequential-jobs.md), and
+[staged job evidence](verification/staged-jobs.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.
@@ -34,7 +35,7 @@ will add WebP, JPEG XL, and AVIF.
 | Application and pipeline | Python 3.14 with project-local `.venv`, confirmed | Use the user's existing system-wide Python 3.14 installation. |
 | Desktop interface | PySide6 with Qt Widgets, confirmed | Keep Qt inside a replaceable GUI adapter; validate the pinned version, preview behavior, and distribution terms. |
 | Inference | CPU reference backend, DirectML candidate for AMD development, CUDA production; use ONNX Runtime or native model adapters as compatible | Python 3.14, model format/operator compatibility, visual equivalence, memory use, and redistribution. |
-| Job storage | Python standard-library SQLite, implemented for sequential jobs | Per-image transactions and verified JPEG recovery. Stage checkpoints remain planned. |
+| Job storage | Python standard-library SQLite | Per-image progress and verified JPEG receipts in both modes, with a lossless checkpoint cursor in staged mode. |
 | JPEG decoding and color | Pillow 13.0.0 and LittleCMS, implemented | Synthetic color/orientation checks and seven local JPEG round trips; broader camera and gamut coverage pending. |
 | Verification | Automated pipeline/recovery checks and a human-reviewed image set | Functional correctness plus visual evidence. |
 
@@ -297,8 +298,9 @@ for every image.
 
 **Staged:** prepare the first enabled stage once, process every eligible input and
 persist each intermediate state, then release the stage. Prepare the next stage
-and consume the preceding committed states. The final stage exports to the
-destination. Do not keep all stages' checkpoints resident. Internal tiling retries
+and consume the preceding committed states. A final pass reads the last staged
+results and exports them to the destination after the stage releases. Keep one
+stage's model resources resident at a time. Future internal tiling retries
 reuse the prepared stage; a worker crash may require loading it again.
 
 Journal commits per `(job, input, stage)`, not just per batch. Failed items do not
@@ -311,15 +313,19 @@ needed to resume; reclaim earlier states only after downstream results are
 committed. Bounded rolling storage can keep predecessor/current stage frontiers
 instead of every historical intermediate.
 
-The headless sequential implementation runs through `ApplicationService.job_service`.
+Both headless schedules run through `ApplicationService.job_service`.
 It stores one versioned SQLite journal per job under `.state/jobs`, with a workspace
 runner lock. It freezes source hashes, pipeline, compression, backend/package
 versions and checkpoint manifests before processing. Each sequential image is a
 restart unit. The runner prepares and releases one stage at a time, checks free
 space before starting the next image, and records a receipt after JPEG verification
 and before the no-overwrite rename. Recovery validates a published or pending
-file against that receipt. Pause/cancel requests take effect between images.
-Per-stage checkpoints and staged scheduling are planned.
+file against that receipt. Staged jobs journal a checked TIFF/context reference
+and the next stage cursor after each image-stage unit. Each image has a dedicated
+checkpoint store, so a committed successor allows immediate reclamation of its
+predecessor's unreferenced files. An unavailable checkpoint can replay the
+affected image from its frozen source. Pause/cancel requests take effect between
+images in sequential mode and between image-stage or export units in staged mode.
 
 ## Previews and configuration persistence
 
@@ -376,8 +382,8 @@ for processing previews as well as batch runs; original viewing only needs sourc
 Batch preflight requires an existing destination root. It validates nested export
 parents and blocks descendant reparse points, case-insensitive planned collisions
 and existing output names. Temporary write probes use the existing parent of each
-required directory. Export subdirectories and a missing scratch root are created
-by the future execution layer.
+required directory. The execution layer creates export subdirectories and a
+missing scratch root as needed.
 
 The temporary root holds dedicated application-owned job directories. Place job
 scratch outside the scanned source tree so it cannot become an input. Validate

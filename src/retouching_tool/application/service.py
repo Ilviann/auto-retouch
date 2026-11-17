@@ -8,7 +8,7 @@ from ..errors import RetouchingError
 from ..json_io import atomic_json, read_json
 from .batch import BatchService
 from .contracts import StartupSnapshot
-from .job_service import SequentialJobService
+from .job_service import JobService
 from .pipeline_service import PipelineService
 
 DEFAULT_PIPELINE = {"schema_version": 1, "name": "Empty foundation pipeline", "stages": []}
@@ -25,7 +25,7 @@ class ApplicationService:
         editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
                                  autosave=state / "last-pipeline.json")
         self.pipeline_service = editor
-        self.job_service = SequentialJobService(self.root, self.batch_service, editor, self.diagnostics)
+        self.job_service = JobService(self.root, self.batch_service, editor, self.diagnostics)
         if options.sources:
             sources = options.sources
         else:

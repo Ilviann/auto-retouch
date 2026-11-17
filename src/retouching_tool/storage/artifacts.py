@@ -1,4 +1,4 @@
-"""Single-writer, manifest-last local artifacts for future staged schedulers.
+"""Single-writer, manifest-last local artifacts for staged schedulers.
 
 TIFF RGB float32 pixels are little-endian, C order, exactly 12 sample bytes/pixel.
 Metadata remains opaque original bytes. Content-addressed blobs let context-only
@@ -11,6 +11,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import stat
 import uuid
 
 from ..errors import RetouchingError
@@ -19,6 +21,7 @@ from ..pipeline.image_state import ImageState, SourceMetadata
 from .artifact_codec import (MAX_CONTEXT, MAX_METADATA_BYTES, OPTIONAL_METADATA, REPRESENTATION, decode_context, digest,
                              encode_context, fields, integer, require, text, validate_state)
 from . import tiff_pixels
+from .batch_paths import is_reparse
 
 MANIFEST_LIMIT = 1024 * 1024
 DEFAULT_PIXEL_LIMIT = 1024 * 1024 * 1024
@@ -72,7 +75,11 @@ class ArtifactRef:
 
 
 def _linked(path):
-    return path.is_symlink() or path.is_junction()
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    return stat.S_ISLNK(info.st_mode) or is_reparse(info)
 
 
 class ArtifactStore:
@@ -84,38 +91,42 @@ class ArtifactStore:
         self.max_pixel_bytes = max_pixel_bytes
 
     @classmethod
-    def create(cls, scratch_root, job_id, diagnostics, *, max_pixel_bytes=DEFAULT_PIXEL_LIMIT):
+    def create(cls, scratch_root, job_id, diagnostics, *, max_pixel_bytes=DEFAULT_PIXEL_LIMIT, image_id=None):
         try:
             require(text(job_id), "A nonempty job identity is required")
             require(integer(max_pixel_bytes, 1), "Artifact pixel limit must be positive")
+            require(image_id is None or text(image_id), "An image identity is required for a dedicated checkpoint store")
             root = Path(scratch_root).resolve()
             root.mkdir(parents=True, exist_ok=True)
             store_id = uuid.uuid4().hex
             directory = root / f"auto-retouch-job-{store_id}"
             directory.mkdir()  # Never adopt an existing folder, including a user's photo directory.
             marker = {"schema_version": 1, "store_id": store_id, "job_id": job_id, "owner": "Auto ReTouch"}
+            if image_id is not None:
+                marker["image_id"] = image_id
             (directory / "blobs").mkdir()
             (directory / "states").mkdir()
             atomic_json(directory / "owner.json", marker)
             diagnostics.emit("ARTIFACT_STORE_CREATED", "Created dedicated job artifact storage", component="storage",
-                             job_id=job_id, store_id=store_id)
+                             job_id=job_id, image_id=image_id, store_id=store_id)
             return cls(directory, marker, diagnostics, max_pixel_bytes)
         except Exception as exc:
             diagnostics.emit("ARTIFACT_STORE_FAILED", "Cannot create job storage; check scratch permissions and free space",
-                             level="ERROR", exc_info=True, component="storage", job_id=job_id)
+                             level="ERROR", exc_info=True, component="storage", job_id=job_id, image_id=image_id)
             raise RetouchingError("ARTIFACT_STORE_FAILED", f"Cannot create job artifact storage: {exc}") from exc
 
     @classmethod
-    def open(cls, directory, job_id, diagnostics, *, max_pixel_bytes=DEFAULT_PIXEL_LIMIT):
+    def open(cls, directory, job_id, diagnostics, *, max_pixel_bytes=DEFAULT_PIXEL_LIMIT, image_id=None):
         try:
             path = Path(directory).absolute()
             require(not _linked(path), "Job directory must not be a link/junction")
             path = path.resolve(strict=True)
             require(not _linked(path / "owner.json"), "Ownership marker must not be a link")
             marker = read_json(path / "owner.json", limit=4096)
-            fields(marker, "schema_version store_id job_id owner")
+            fields(marker, "schema_version store_id job_id owner" + (" image_id" if image_id is not None else ""))
             require(type(marker["schema_version"]) is int and marker["schema_version"] == 1
-                    and marker["owner"] == "Auto ReTouch" and marker["job_id"] == job_id and text(job_id),
+                    and marker["owner"] == "Auto ReTouch" and marker["job_id"] == job_id and text(job_id)
+                    and marker.get("image_id") == image_id,
                     "Job storage ownership/version does not match")
             # ArtifactRef also validates the store UUID.
             ArtifactRef(marker["store_id"], "0" * 64, "0" * 64)
@@ -125,7 +136,7 @@ class ArtifactStore:
             return result
         except Exception as exc:
             diagnostics.emit("ARTIFACT_STORE_FAILED", "Cannot reopen owned job artifacts; inspect ownership/version and paths",
-                             level="ERROR", exc_info=True, component="storage", job_id=job_id)
+                             level="ERROR", exc_info=True, component="storage", job_id=job_id, image_id=image_id)
             raise RetouchingError("ARTIFACT_STORE_FAILED", f"Cannot reopen job artifacts: {exc}") from exc
 
     def _emit(self, code, message, *, runtime=None, **details):
@@ -213,6 +224,9 @@ class ArtifactStore:
             require(isinstance(identity, ArtifactIdentity), "Expected an immutable artifact identity")
             require(runtime.job_id == self.marker["job_id"] and runtime.image_id is not None,
                     "Artifact commit requires matching job and image-stage diagnostic context")
+            if "image_id" in self.marker:
+                require(runtime.image_id == identity.source_id == self.marker["image_id"],
+                        "Artifact source does not belong to this image checkpoint store")
             validate_state(state, self.max_pixel_bytes)
             require(state.metadata.source_id == identity.source_id, "State source does not match frozen artifact identity")
             manifest = {"schema_version": 1, "identity": asdict(identity),
@@ -289,8 +303,8 @@ class ArtifactStore:
                        artifact_key=ref.key)
             return state
         except Exception as exc:
-            self._emit("ARTIFACT_INVALID", "Cannot reuse intermediate state; preserve evidence and recompute from a valid dependency",
-                       runtime=runtime, level="ERROR", exc_info=True)
+            self._emit("ARTIFACT_INVALID", "Cannot reuse intermediate state. Check scratch storage or recompute from a valid dependency.",
+                       runtime=runtime, level="ERROR", exc_info=True, artifact_key=ref.key if isinstance(ref, ArtifactRef) else None)
             raise RetouchingError("ARTIFACT_INVALID", f"Cannot restore image state: {exc}") from exc
 
     def discard(self, ref):
@@ -303,6 +317,60 @@ class ArtifactStore:
         except Exception as exc:
             self._emit("ARTIFACT_CLEANUP_FAILED", "Cannot retire state; retained artifacts need inspection", level="ERROR", exc_info=True)
             raise RetouchingError("ARTIFACT_CLEANUP_FAILED", f"Cannot retire state: {exc}") from exc
+
+    def retain_image_checkpoint(self, ref, *, runtime):
+        """Reclaim obsolete files in a store dedicated to one image.
+
+        The caller supplies its only journaled manifest, or None after clearing
+        the checkpoint. Blob payloads are validated on read before they can run.
+        """
+        try:
+            self._guard()
+            require(self.marker.get("image_id") == runtime.image_id and runtime.image_id is not None
+                    and runtime.job_id == self.marker["job_id"], "Cleanup requires an owned image checkpoint store")
+            keep = set()
+            if ref is not None:
+                try:
+                    data, _ = self._manifest(ref)
+                    tiff_pixels.validate_descriptor(data["pixels"], self.max_pixel_bytes)
+                    require(integer(data["width"], 1) and integer(data["height"], 1), "Invalid artifact dimensions")
+                    keep.add(tiff_pixels.filename(data["pixels"]["pixel_sha256"], data["width"], data["height"]))
+                    for name in ("exif", "icc_profile", *OPTIONAL_METADATA):
+                        if name in data:
+                            descriptor = data[name]
+                            fields(descriptor, "sha256 bytes")
+                            require(digest(descriptor["sha256"]), "Invalid metadata digest")
+                            keep.add(descriptor["sha256"] + ".bin")
+                except Exception as exc:
+                    self._emit("ARTIFACT_INVALID", "Cannot retain the journaled intermediate manifest", runtime=runtime,
+                               level="ERROR", exc_info=True, artifact_key=ref.key)
+                    raise RetouchingError("ARTIFACT_INVALID", f"Cannot restore image state: {exc}") from exc
+            candidates = []
+            for path in (self.directory / "states").iterdir():
+                if ref is not None and path.name == ref.key + ".json":
+                    continue
+                if (path.suffix == ".json" and digest(path.stem)
+                        or re.fullmatch(r"\.[0-9a-f]{64}\.json\.[a-z0-9_]+\.tmp", path.name)):
+                    candidates.append(path)
+            for path in (self.directory / "blobs").iterdir():
+                if path.name not in keep and (path.suffix in (".bin", ".tif") and digest(path.stem)
+                                              or re.fullmatch(r"[0-9a-f]{32}\.pending", path.name)):
+                    candidates.append(path)
+            # Validate the entire deletion set before removing any entries.
+            for path in candidates:
+                require(not _linked(path) and path.is_file(), "Obsolete artifact is a filesystem alias or non-file")
+            self._guard()
+            for path in candidates:
+                path.unlink()
+            if candidates:
+                self._emit("ARTIFACT_COLLECTED", "Reclaimed obsolete image checkpoint files", runtime=runtime,
+                           removed_files=len(candidates))
+        except Exception as exc:
+            if getattr(exc, "code", None) == "ARTIFACT_INVALID":
+                raise
+            self._emit("ARTIFACT_CLEANUP_FAILED", "Cannot reclaim image checkpoints; inspect scratch storage before resuming",
+                       runtime=runtime, level="ERROR", exc_info=True)
+            raise RetouchingError("ARTIFACT_CLEANUP_FAILED", f"Cannot reclaim image checkpoints: {exc}") from exc
 
     def collect(self):
         """Explicit, single-writer mark/sweep; malformed manifests stop cleanup before any deletion.
