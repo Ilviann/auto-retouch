@@ -3,11 +3,11 @@ def verify_imports() -> str:
     return QtCore.qVersion()
 
 
-def run_desktop(snapshot, pipeline_service=None) -> int:
+def run_desktop(snapshot, application) -> int:
     from PySide6.QtWidgets import QApplication
     from .main_window import MainWindow
 
     app = QApplication([])
-    window = MainWindow(snapshot, pipeline_service)
+    window = MainWindow(snapshot, application.pipeline_service, application=application)
     window.show()
     return app.exec()

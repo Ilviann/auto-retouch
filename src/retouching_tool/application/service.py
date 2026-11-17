@@ -72,13 +72,31 @@ class ApplicationService:
             if options.pipeline is not None or origin == str(state / "last-pipeline.json"):
                 atomic_json(state / "last-pipeline.json", pipeline)
             if options.sources:
-                atomic_json(state / "session.json", {"schema_version": 1, "sources": [str(p) for p in sources]})
+                self._save_sources(sources)
         except OSError as exc:
             raise RetouchingError("STATE_WRITE_FAILED", f"Cannot save last-used settings in {state}; check permissions/free space: {exc}") from exc
         self.diagnostics.emit("STARTUP_STATE_READY", "Startup settings loaded; no processing started", component="application",
                               source_count=len(sources), pipeline_origin=origin, backend=backend)
         return StartupSnapshot(sources, pipeline["name"], origin, backend, self.config.checkpoints,
                                self.config.temporary, self.config.logs, tuple(notices), stages=editor.status.stages)
+
+    def index_sources(self, sources, *, recursive=False):
+        """Index the desktop selection and remember the successfully scanned paths."""
+        sources = tuple(sources)
+        index = self.batch_service.index(sources, recursive=recursive)
+        try:
+            self._save_sources(sources)
+        except OSError as exc:
+            error = RetouchingError("SOURCE_SELECTION_WRITE_FAILED",
+                                    "Cannot save the source selection. Check access to local application state.")
+            self.diagnostics.emit(error.code, str(error), component="application", level="ERROR", exc_info=True,
+                                  index_id=index.index_id, sources=sources)
+            raise error from exc
+        return index
+
+    def _save_sources(self, sources):
+        atomic_json(self.root / ".state" / "session.json",
+                    {"schema_version": 1, "sources": [str(Path(p).absolute()) for p in sources]})
 
     @staticmethod
     def _validate_sources(sources):

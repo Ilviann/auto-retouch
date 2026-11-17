@@ -34,8 +34,8 @@ def main(argv=None) -> int:
         service = ApplicationService(root, config, log)
         snapshot = service.startup(options, backend.backend)
         from .ui.qt.startup import run_desktop
-        log.emit("GUI_STARTED", "Opening runtime foundation window; no processing started")
-        result = run_desktop(snapshot, service.pipeline_service)
+        log.emit("GUI_STARTED", "Opening Auto ReTouch; no batch started")
+        result = run_desktop(snapshot, service)
         log.emit("LAUNCH_EXITED", "Desktop application closed", exit_code=result)
         return result
     except Exception as exc:

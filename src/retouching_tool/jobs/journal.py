@@ -51,13 +51,16 @@ class JournalError(RetouchingError):
         super().__init__("JOB_JOURNAL_FAILED", message)
 
 
-def _jobs_folder(root: Path) -> Path:
+def _jobs_folder(root: Path, *, create=False) -> Path:
     root = root.resolve(strict=True)
     relative = Path(".state/jobs/job")
     folder = root
     for name in relative.parts[:-1]:
         folder /= name
-        folder.mkdir(exist_ok=True)
+        if create:
+            folder.mkdir(exist_ok=True)
+        else:
+            folder.lstat()
         # Validate existing components before creating descendants.
         output_path(root, folder.relative_to(root) / "job", allow_existing=True)
     return folder
@@ -67,7 +70,7 @@ def _jobs_folder(root: Path) -> Path:
 def runner_lock(root):
     import msvcrt
 
-    directory = _jobs_folder(root)
+    directory = _jobs_folder(root, create=True)
     lock = directory / "runner.lock"
     try:
         with lock.open("xb"):
@@ -88,13 +91,22 @@ def validate_job_id(job_id):
         raise JournalError("Invalid job ID. Select a job saved by Auto ReTouch.")
 
 
+def saved_job_files(root):
+    try:
+        directory = _jobs_folder(root)
+    except FileNotFoundError:
+        return ()
+    return tuple(path for path in directory.iterdir()
+                 if re.fullmatch(r"[0-9a-f]{32}\.sqlite3", path.name))
+
+
 @contextmanager
 def open_journal(root, job_id, *, create=False):
     validate_job_id(job_id)
     connection = None
     try:
         try:
-            path = _jobs_folder(root) / (job_id + ".sqlite3")
+            path = _jobs_folder(root, create=create) / (job_id + ".sqlite3")
             if create:
                 with path.open("xb"):
                     pass

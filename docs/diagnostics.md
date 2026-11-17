@@ -60,6 +60,14 @@ The parent captures the last 8 KiB of stderr and indicates truncation.
 and stage where available. `WorkerOutcome` exposes incomplete diagnostic delivery
 alongside execution errors. See [worker evidence](verification/worker-transport.md).
 
+The desktop Job tab shows committed per-image outcomes, warning counts, stage
+progress and worker errors. It surfaces incomplete worker diagnostic delivery
+and keeps session log-storage failures visible across tabs. Saved-job discovery
+reports unreadable journal entries with `JOB_DISCOVERY_SKIPPED`, the job ID, and
+the technical cause. An unexpected desktop command exception is recorded as
+`DESKTOP_BATCH_COMMAND_FAILED`. Full log search and redacted reports are pending.
+See [desktop batch evidence](verification/desktop-batch.md).
+
 Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
 `diagnostics/service.py`, with UTC millisecond times, session/process identity,
 codes, structured context, and exception chains at INFO settings. Setup child

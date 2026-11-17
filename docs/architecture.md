@@ -26,6 +26,8 @@ sequential and staged execution, and a toolkit-free batch worker. See
 [sequential job evidence](verification/sequential-jobs.md),
 [staged job evidence](verification/staged-jobs.md),
 [worker evidence](verification/worker-transport.md).
+Milestone 5a connects the Qt Widgets batch setup and job monitor to those
+services. See [desktop batch evidence](verification/desktop-batch.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.
@@ -336,8 +338,11 @@ pause/cancel requests over a local pipe and returns an immutable run outcome.
 Readers use job status for durable progress. The workspace lock serializes
 execution across processes. The parent drains worker diagnostics and stderr in
 the background. The worker reads processing inputs from the saved job and
-artifact stores. Desktop job controls will use this service.
-See [worker evidence](verification/worker-transport.md).
+artifact stores. The desktop adapter schedules indexing, preflight, job
+creation, saved-job discovery and status reads on a single background thread.
+It displays committed progress and waits for a safe pause when the window is
+closed during an active run. See [worker evidence](verification/worker-transport.md)
+and [desktop batch evidence](verification/desktop-batch.md).
 
 ## Previews and configuration persistence
 

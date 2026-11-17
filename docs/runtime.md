@@ -7,10 +7,10 @@ environment metadata, and startup skeleton below. Milestone 3a adds registered
 pipeline validation and reference-stage cards. The headless application service
 supports sequential and staged job execution and recovery, including execution in
 a worker subprocess. The worker uses the environment interpreter and backend
-selected at application startup. GUI job controls and model provisioning remain
-later work. See the
+selected at application startup. The Qt desktop window exposes batch setup and
+saved-job controls. Model provisioning awaits checkpoint selection. See the
 [runtime evidence](verification/runtime-foundation.md) and
-[worker evidence](verification/worker-transport.md).
+[desktop batch evidence](verification/desktop-batch.md).
 
 The 3b artifact slice adds pinned `tifffile==2026.10.15` to shared dependencies
 for uncompressed float32 intermediate TIFF. The user explicitly authorized this
@@ -194,6 +194,10 @@ silently select another pipeline. With no explicit pipeline, restore the last va
 pipeline, falling back to a visible default only as documented in the pipeline
 contract. A successfully loaded valid pipeline becomes the current pipeline and
 participates in normal last-used persistence.
+The desktop also remembers paths after a successful source scan. Scan the
+restored or command-line sources to build a fresh index. Recursion, destination,
+schedule and JPEG options start at their setup defaults, while reopened jobs
+use their frozen settings.
 
 Resolve relative CLI file/directory paths against the caller's working directory.
 Resolve an explicit configuration-file path the same way. Paths inside that file

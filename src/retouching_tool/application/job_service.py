@@ -1,6 +1,7 @@
 """Create, run and resume local jobs through headless commands."""
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
 from uuid import uuid4
@@ -8,7 +9,8 @@ from uuid import uuid4
 from ..errors import RetouchingError
 from ..imaging.jpeg import JpegRuntime, JpegSettings, decode_jpeg, export_jpeg
 from ..jobs.execution import ImageDiagnostics, disk_full
-from ..jobs.journal import MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError, open_journal, runner_lock
+from ..jobs.journal import (MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError,
+                            open_journal, runner_lock, saved_job_files)
 from ..jobs.publication import PreparedExport, check_destination, prepare_parent, recover_export
 from ..jobs.snapshot import FrozenInput, JobSnapshot, StageSkip, model_manifests, runtime_versions
 from ..pipeline.executor import StageRuntime, StageSession
@@ -40,6 +42,19 @@ class JobStatus:
     skipped_stages: tuple[StageSkip, ...]
     mode: str = "sequential"
     stage_ids: tuple[str, ...] = ()
+    pipeline_name: str = ""
+    destination: Path | None = None
+    settings: JpegSettings = JpegSettings()
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in TERMINAL
+
+
+@dataclass(frozen=True)
+class SavedJob:
+    job_id: str
+    modified: datetime
 
 
 class JobControl:
@@ -56,6 +71,25 @@ class JobService:
         self.batch = batch
         self.pipeline = pipeline
         self.diagnostics = diagnostics
+
+    def saved_jobs(self) -> tuple[SavedJob, ...]:
+        """Discover local journal IDs without opening or resuming their jobs."""
+        try:
+            paths = saved_job_files(self.root)
+        except (OSError, RetouchingError) as exc:
+            error = JournalError("Cannot list saved jobs. Check access to local job storage.")
+            self.diagnostics.emit(error.code, str(error), component="job", level="ERROR", exc_info=True)
+            raise error from exc
+        result = []
+        for path in paths:
+            try:
+                stamp = current_file_stamp(path)
+                modified = datetime.fromtimestamp(stamp.modified_ns / 1_000_000_000, timezone.utc)
+                result.append(SavedJob(path.stem, modified))
+            except (OSError, ValueError, OverflowError):
+                self._emit(path.stem, "JOB_DISCOVERY_SKIPPED", "Cannot inspect this saved journal. Check local job storage.",
+                           journal_path=path, level="WARNING", exc_info=True)
+        return tuple(sorted(result, key=lambda job: (job.modified, job.job_id), reverse=True))
 
     def create(self, index, destination, *, mode="sequential", settings=JpegSettings(), selected_ids=None) -> str:
         """Validate and persist a frozen job. No photos are decoded or exported here."""
@@ -144,7 +178,8 @@ class JobService:
                                       row["next_stage"] if job.mode == "staged" else None)
                        for item, row in zip(job.inputs, rows, strict=True))
         return JobStatus(job.job_id, status, images, job.skipped, job.mode,
-                         tuple(stage.id for stage in job.pipeline.stages if stage.enabled))
+                         tuple(stage.id for stage in job.pipeline.stages if stage.enabled),
+                         job.pipeline.name, job.destination, job.settings)
 
     def _validate_run(self, job):
         check_destination(job)

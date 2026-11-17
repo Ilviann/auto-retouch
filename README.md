@@ -48,11 +48,13 @@ The headless JPEG adapter uses pinned Pillow to apply input orientation and colo
 management, then verifies capture metadata, sRGB and processing history before
 publishing exports. Both headless schedules support restart recovery. Staged
 execution keeps a lossless checkpoint for each active image and encodes JPEG
-after the final stage releases its resources. Both modes can run in a local worker
-process. Desktop job controls remain pending. See
+after the final stage releases its resources. Both modes run in a local worker
+process. The **Batch setup** tab scans JPEGs, validates storage, and starts a batch
+with the selected schedule and compression settings. The **Job** tab shows
+progress and opens saved jobs for review or resume. See
 [JPEG verification](docs/verification/jpeg-boundary.md),
 [staged job verification](docs/verification/staged-jobs.md), and
-[worker verification](docs/verification/worker-transport.md).
+[desktop batch verification](docs/verification/desktop-batch.md).
 
 Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
 `prepare_env.cmd` and choose a backend (Enter selects CUDA). Setup installs the
@@ -76,12 +78,18 @@ Pipeline files use version 1 and registered operation versions. Try the referenc
 cards with `run.cmd --pipeline examples\pipelines\reference.json`. This example is
 not a Natural or Beauty preset. Unknown operations/parameters fail explicitly.
 Valid explicit settings replace last-used selection; corrupt restored state
-produces a visible warning. No selected photo is decoded or modified.
+produces a visible warning.
 
-Run ordinary app checks in the existing environment:
+To export a batch, choose the sources, select **Scan sources**, and choose an
+existing destination folder. Set the schedule and JPEG options, then select
+**Check disk space** and **Start batch**. Pause and cancel take effect after the
+current work unit. Use **Job → Open saved job** to resume a paused job after
+relaunching.
+
+Run focused desktop batch checks in the existing environment:
 
 ```bat
-.venv\Scripts\python.exe -B -m unittest discover -s tests -v
+.venv\Scripts\python.exe -B -m unittest discover -s tests -p test_desktop_batch.py -v
 ```
 
 Setup-specific checks are opt-in and reserved for setup work:

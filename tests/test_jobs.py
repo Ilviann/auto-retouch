@@ -416,6 +416,9 @@ with fault:
         job_id = self.create(settings=settings)
         queued = self.jobs.status(job_id)
         self.assertEqual((queued.status, queued.images[0].status), ("queued", "queued"))
+        self.assertEqual((queued.pipeline_name, queued.destination, queued.settings),
+                         (definition.name, self.destination, settings))
+        self.assertFalse(queued.terminal)
         self.assertFalse(queued.images[0].output.exists())
         editor.set_parameters(exposure.id, {"stops": -2})
         result = self.open_app().job_service.run(job_id)
@@ -436,7 +439,25 @@ with fault:
         self.assertEqual([event["stage_instance_id"] for event in events if event["code"] == "STAGE_RELEASED"],
                          [stage.id for stage in definition.stages if stage.enabled])
         self.assertEqual(len(result.skipped_stages), 1)
+        self.assertTrue(result.terminal)
         self.assertEqual(self.jobs.run(job_id), result)
+
+    def test_saved_jobs_discovers_existing_journals_without_running_them(self):
+        folder = self.root / ".state" / "jobs"
+        self.assertEqual(self.jobs.saved_jobs(), ())
+        self.assertFalse(folder.exists())
+        self.jpeg("a.jpg")
+        job_id = self.create()
+        (folder / "unrelated.sqlite3").touch()
+        invalid = "f" * 32
+        (folder / f"{invalid}.sqlite3").mkdir()
+        reopened = self.open_app().job_service
+        self.assertEqual([job.job_id for job in reopened.saved_jobs()], [job_id])
+        self.assertEqual(reopened.status(job_id).status, "queued")
+        self.assertEqual(list(self.destination.iterdir()), [])
+        warning = next(event for event in self.log.records if event["code"] == "JOB_DISCOVERY_SKIPPED")
+        self.assertEqual(warning["job_id"], invalid)
+        self.assertIn("Traceback", warning["exception"])
 
     def test_bad_entropy_and_valid_neighbor_are_both_accounted_for(self):
         broken = self.jpeg("a-truncated.jpg")

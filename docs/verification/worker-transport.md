@@ -51,6 +51,7 @@ Injected diagnostic overflow and an invalid frame were surfaced while committed
 job progress remained readable. A simulated launch denial preserved its cause
 and a later launch succeeded.
 
-Desktop batch controls and job discovery remain pending. The worker checks did
-not exercise native driver crashes or GPU inference. Portrait quality and
-CUDA acceptance still require separate validation.
+Desktop batch controls and job discovery are covered in
+[desktop batch verification](desktop-batch.md). The worker checks did not
+exercise native driver crashes or GPU inference. Portrait quality and CUDA
+acceptance still require separate validation.
