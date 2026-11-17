@@ -21,6 +21,7 @@ identified in their design documents.
 | 5. Operation inputs and outputs | U09, U33, U36–U38 | Implemented. Cards derive pixel and metadata effects and typed context inputs, outputs, and retention rules from the registered operation descriptors. [Evidence](verification/desktop-workspace.md). |
 | 5. Automatic disk estimates | U13, U18–U20, U44, U45 | Implemented. Estimates appear after indexing and refresh with photo inclusion and schedule before a destination is chosen. The explicit disk check shows required and free space per volume. Both use binary units. [Evidence](verification/desktop-workspace.md). |
 | 5. Remaining desktop workflow | U17, U26, U30–U32, U48 | Configuration editing, searchable diagnostics, redacted reports, full-resolution detail inspection, and queued GPU previews remain pending. |
+| 5. Desktop workspace redesign | U03, U06, U09–U20, U30–U41, U44–U45, U48 | Deferred proposal. Use the [workspace design and review walkthroughs](desktop-redesign.md) when planning the later desktop pass. |
 | Product identity alignment | U35, U47 | Auto ReTouch and Neyrome appear in runtime/UI/CLI and source package metadata. Verified JPEG provenance records Auto ReTouch and the application version while retaining source photographer credits. |
 | 6. Distribution and target-hardware acceptance | U01, U07, U21–U29, U42 | Pending: release dependency/license audit, asset provisioning instructions, offline full workflow, minimum 6 GB NVIDIA/16 GB RAM approximately 500-photo acceptance. |
 
