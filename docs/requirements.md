@@ -1,7 +1,7 @@
 # Product requirements
 
-Auto Retouch (by Neyrome) automates repetitive color correction and skin retouching for large
-studio portrait batches. The intended workflow is to configure an ordered
+Auto ReTouch, authored by Neyrome, automates repetitive color correction and skin
+retouching for large studio portrait batches. The intended workflow is to configure an ordered
 pipeline, inspect previews, select source and destination folders, and let the
 computer finish the batch unattended. Natural and Beauty are reusable pipeline
 presets rather than fixed processing paths.
@@ -44,7 +44,7 @@ presets rather than fixed processing paths.
 | U32 | Keep the GUI separate behind an application boundary so another toolkit can replace it if problems arise. |
 | U33 | Stages return image state: they may change pixels, add/update contextual analysis data, or do both. Later operations can use optional context such as face/eye/teeth/person regions. |
 | U34 | Transfer source EXIF metadata, including camera and capture information, to the final image, and add information identifying processing by this tool. |
-| U35 | Working product name: Auto Retouch (by Neyrome). |
+| U35 | App name: Auto ReTouch (exact capitalization). |
 | U36 | Every editable pipeline stage can be skipped by turning it off. |
 | U37 | A stage missing a required AI model file must be turned off and show an error status on its own UI card. |
 | U38 | Plan a model-acquisition action on the stage card: a link to the model's download page, or later a button to download the required files. |
@@ -56,6 +56,8 @@ presets rather than fixed processing paths.
 | U44 | After source indexing, reserve temporary space of at least the largest uncompressed source image plus 200 MB in sequential mode, or all source images uncompressed plus 200 MB in staged mode. |
 | U45 | Reserve output free space estimated as twice the total compressed size of the selected source files. |
 | U46 | Development hardware is an AMD Ryzen 7 7840HS APU with Radeon 780M Graphics and reported DirectX 12 Ultimate support; NVIDIA CUDA hardware is unavailable here. |
+| U47 | App author: Neyrome. |
+| U48 | Provide an in-app UI for editing application configuration. |
 
 The following sections are the proposed MVP baseline, rather than additional
 user-confirmed requirements. Typical image dimensions, retouching examples, CPU
@@ -102,6 +104,7 @@ will provide representative test photos later; they are not available yet.
 | F34 | Recheck assets after pipeline/configuration changes, on explicit recheck, and before execution. When restored, clear the asset error but leave an automatically disabled stage off until the user enables it. Log the transition and revalidate downstream context dependencies. |
 | F35 | Proposed first acquisition UI is Open model page using a publisher URL from the model catalog. Direct downloading is a later enhancement with explicit user action, progress/cancel, version/checksum validation, and atomic placement in the checkpoint folder. Never download models automatically on load, startup, preview, or processing. |
 | F36 | Estimate scratch/output reservations after indexing and whenever the mode, folders, input list, or relevant processing settings change. Show the assumptions and required/available space per storage volume; prevent start when the required reservation cannot be met. |
+| F37 | Provide a settings editor for machine-local configuration, including checkpoint, temporary-artifact, and log folders plus logging options. Show effective values and the active configuration file; validate through shared application services, save atomically, and show actionable validation/write errors. Cancel discards unsaved edits. Keep backend selection setup-only and preserve active job snapshots. |
 
 ## Disk space budgeting
 
@@ -312,6 +315,15 @@ only faces cannot by themselves satisfy this scope.
     unknown dimensions, pipeline changes, resume, and low-disk transitions. Measure
     CPU memory against 16 GB and include multi-person/full-body skin examples in
     subsequent visual validation.
+19. **Configuration editor:** edit and persist machine-local settings in the UI,
+    reopen the application, and verify the saved values and configuration-relative
+    paths. Check cancel, invalid values, failed writes without losing the last
+    valid configuration, checkpoint revalidation, and unchanged active job
+    snapshots. Verify the editor cannot change the setup-owned backend.
+20. **Product identity:** verify the app name is exactly `Auto ReTouch` and the
+    app author is `Neyrome` in application identity and distribution metadata.
+    Export software provenance uses the app name/version without replacing the
+    source photographer's author/copyright metadata.
 
 ## Initial exclusions and open decisions
 

@@ -130,8 +130,9 @@ model adapters, configuration, image processing, storage, and diagnostic events.
 These modules must import and run without a QApplication or Qt event loop.
 
 The application layer exposes typed plain-Python commands and results for source
-indexing, folder validation, pipeline edits/load/save, previews, batch start/pause/
-cancel/resume, history, and diagnostics. Use dataclasses and small protocols where
+indexing, folder validation, configuration editing/validation/save, pipeline
+edits/load/save, previews, batch start/pause/cancel/resume, history, and diagnostics.
+Use dataclasses and small protocols where
 they clarify contracts; do not build a generic abstraction for every widget.
 Validate actions in application services so rules are consistent for any GUI.
 Stage snapshots include enabled state, asset availability, missing/invalid asset
@@ -180,8 +181,9 @@ demonstrate the abstraction.
 
 ## Processing components
 
-1. **Qt GUI adapter:** source/destination/temporary folder controls, recursion toggle,
-   thumbnail grid, ordered stage list, parameter panels, preview controls, and job
+1. **Qt GUI adapter:** application configuration editor, source/destination/temporary
+   folder controls, recursion toggle, thumbnail grid, ordered stage list, parameter
+   panels, preview controls, and job
    progress. It calls toolkit-independent application services and does not execute
    inference on the UI thread.
 2. **Pipeline definition and registry:** versioned JSON settings plus operation
@@ -289,6 +291,12 @@ committed. Bounded rolling storage can keep predecessor/current stage frontiers
 instead of every historical intermediate.
 
 ## Previews and configuration persistence
+
+The desktop UI must provide application configuration editing. The proposed
+settings editor displays the active configuration file and effective folder/logging
+values, with validation and atomic persistence in shared application services.
+Keep machine-local settings separate from portable pipeline parameters and retain
+setup-only backend selection. See the [Runtime contract](runtime.md#machine-local-configuration).
 
 Previews must use the same settings and compatible image/color processing as final
 exports. Provide full-resolution detail crops where a downscaled preview would

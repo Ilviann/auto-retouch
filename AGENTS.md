@@ -9,7 +9,7 @@ work. Preserve the distinction between
 confirmed user requirements, proposed defaults, and unvalidated assumptions.
 
 - Windows 11 desktop only; photo processing is fully local.
-- Working product name: Auto Retouch (by Neyrome).
+- App name: Auto ReTouch. App author: Neyrome.
 - Stages may modify pixels, typed context, or both. Preserve immutable source EXIF;
   validate context provenance/coordinates and required/optional dependencies.
 - Exports preserve source capture metadata and add tool/version provenance. Update
@@ -22,6 +22,8 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
 - Root CMD scripts check/prepare the environment and launch via its interpreter;
   launch supports photo sources and an explicit pipeline override.
 - Machine-local configuration sets checkpoint and temporary-artifact folders.
+- Provide an in-app UI for editing application configuration; backend selection
+  remains setup-only.
 - Detailed local logging must support warning/error diagnosis and bug fixes. Follow
   `docs/diagnostics.md` for structured context, tracebacks, retention, and reports.
 - Keep operations modular behind shared descriptors/lifecycle contracts so adding

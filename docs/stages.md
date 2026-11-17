@@ -1,7 +1,7 @@
 # Initial stage catalog and image state
 
-Auto Retouch (by Neyrome) uses an ordered pipeline whose stages can change pixels,
-add or update analysis context, or do both. The following operation set and order
+Auto ReTouch, authored by Neyrome, uses an ordered pipeline whose stages can change
+pixels, add or update analysis context, or do both. The following operation set and order
 are proposals; models, algorithms, and numeric preset defaults require evaluation.
 Analysis outputs must be visible and reusable rather than hidden in a retouching
 operation's private state.
@@ -116,8 +116,9 @@ is a separate value. Regenerate or explicitly remove stale embedded thumbnails
 rather than retaining an unretouched thumbnail as the exported preview.
 
 Set the output Software field to the exact product name and application version:
-`Auto Retouch (by Neyrome) <version>`. Append an editing/export provenance record
-with processing time, tool version, and a compact pipeline identifier/hash using
+`Auto ReTouch <version>`. Neyrome is the application author, not a replacement for
+the source photographer's author/copyright metadata. Append an editing/export
+provenance record with processing time, tool version, and a compact pipeline identifier/hash using
 validated metadata fields, proposed as XMP history. Preserve prior history and
 retain a previous Software value in provenance rather than silently discarding it.
 Keep full pipeline settings and checkpoint details in job history/diagnostics;

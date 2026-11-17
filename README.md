@@ -1,4 +1,6 @@
-# Auto Retouch (by Neyrome)
+# Auto ReTouch
+
+Author: Neyrome.
 
 A Windows 11 desktop project for fully local batch retouching of studio portraits.
 Stages can change pixels, produce reusable region/mask context, or do both.
@@ -9,6 +11,7 @@ The application targets Python 3.14, already installed system-wide, with all
 application packages in a project-local virtual environment. Root CMD scripts
 will prepare/check that environment and launch the app with source/pipeline
 options. Configuration specifies checkpoint and temporary-artifact folders.
+An in-app configuration editor is required and planned for the desktop workflow.
 Setup asks for CUDA (default), DirectML, or CPU and installs only the selected
 backend support plus shared dependencies. Launch always uses the recorded backend.
 NVIDIA acceptance requires testing on actual NVIDIA hardware.
