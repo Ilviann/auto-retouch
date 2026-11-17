@@ -10,6 +10,7 @@ from .batch import BatchService
 from .contracts import StartupSnapshot
 from .job_service import JobService
 from .pipeline_service import PipelineService
+from .preview import PreviewService
 from .worker_service import WorkerService
 
 DEFAULT_PIPELINE = {"schema_version": 1, "name": "Empty foundation pipeline", "stages": []}
@@ -26,6 +27,7 @@ class ApplicationService:
         editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
                                  autosave=state / "last-pipeline.json")
         self.pipeline_service = editor
+        self.preview_service = PreviewService(self.batch_service, editor, self.diagnostics)
         self.job_service = JobService(self.root, self.batch_service, editor, self.diagnostics)
         self.job_worker = WorkerService(self.root, backend, self.diagnostics)
         if options.sources:

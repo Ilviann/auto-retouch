@@ -225,6 +225,11 @@ class BatchTests(unittest.TestCase):
         index = self.batch.index((self.source,))
         sequential = self.batch.preflight(index, self.output, mode="sequential")
         staged = self.batch.preflight(index, self.output, mode="staged", extra_scratch_bytes=423)
+        self.assertEqual(self.batch.estimate(index, mode="sequential"), sequential.budget)
+        selected = self.batch.estimate(index, mode="staged", selected_ids=(index.images[0].image_id,))
+        self.assertEqual(selected.working_bytes, index.images[0].working_bytes)
+        self.assertEqual(selected.output_bytes, 2 * index.images[0].stamp.size)
+        self.assertIsNone(self.batch.estimate(index, mode="staged", selected_ids=()))
         expected_output = 2 * sum(image.path.stat().st_size for image in index.images)
         largest = 80 * 15 * 12
         self.assertEqual(sequential.budget.scratch_bytes, BASE_SCRATCH_BYTES + largest)

@@ -147,8 +147,11 @@ launch options, configuration format, and dependency validation. These contracts
 now include implemented runtime scripts and startup modules; processing contracts
 remain partly planned. Pipeline/reference contracts, headless JPEG decode/export,
 source indexing, disk preflight and both batch schedules are implemented. Both
-schedules run through a toolkit-independent worker service. GUI job integration
-is pending. See [runtime evidence](verification/runtime-foundation.md),
+schedules run through a toolkit-independent worker service. The Qt desktop
+workspace supports source discovery, thumbnails, pipeline editing, fit-to-window
+previews, batch controls, and saved-job monitoring. See
+[desktop workspace evidence](verification/desktop-workspace.md),
+[runtime evidence](verification/runtime-foundation.md),
 [pipeline evidence](verification/pipeline-contracts.md),
 [JPEG evidence](verification/jpeg-boundary.md) and
 [batch preflight evidence](verification/batch-preflight.md),

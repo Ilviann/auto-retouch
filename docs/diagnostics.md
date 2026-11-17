@@ -22,6 +22,10 @@ creation/collection use job/store IDs. No pixel or metadata blob bytes enter the
 records. See [artifact failure evidence](verification/lossless-artifacts.md).
 
 JPEG events include job, image, attempt and preview request IDs where supplied.
+Processing preview preflight and stage events carry the preview request ID for
+correlation with picture failures. Thumbnail failures identify the indexed photo
+and appear on its tile. Display and processing errors preserve their technical
+causes in the local logs.
 `INPUT_JPEG_DECODED` records oriented dimensions and color handling.
 `INPUT_EXIF_THUMBNAIL_INVALID` and `INPUT_SRGB_ASSUMED` expose recoverable input
 issues. Input metadata/decode errors, unsupported export metadata, write errors,

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 
 
 class StageCard(QGroupBox):
-    def __init__(self, stage_id, descriptor, *, on_enable, on_parameter, on_recheck, on_move, on_remove):
+    def __init__(self, stage_id, descriptor, *, on_enable, on_parameter, on_recheck, on_move, on_remove, on_preview):
         super().__init__(descriptor.title)
         self.descriptor = descriptor
         self.setObjectName(f"stage-{stage_id}")
@@ -32,6 +32,15 @@ class StageCard(QGroupBox):
         self.status_label = QLabel(objectName="stageStatus", wordWrap=True)
         self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.status_label)
+        data = QLabel(self._data_contract(), objectName="stageDataContract", wordWrap=True)
+        data.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(data)
+        self.preview = QPushButton("Preview operation", objectName="previewStage")
+        self.preview.setToolTip("Run this operation on the original selected photo.")
+        self.preview.setEnabled(False)
+        self._preview_ready = False
+        self.preview.clicked.connect(lambda: on_preview(stage_id))
+        layout.addWidget(self.preview)
 
         form = QFormLayout()
         self.parameters = {}
@@ -62,10 +71,36 @@ class StageCard(QGroupBox):
         self.link.clicked.connect(self._open_model_page)
         layout.addWidget(self.link)
 
+    def _data_contract(self):
+        descriptor = self.descriptor
+        inputs = ["pixels", "source metadata"]
+        inputs.extend(f"{spec.key} v{spec.version} (required)" for spec in descriptor.requires)
+        inputs.extend(f"{spec.key} v{spec.version} (optional)" for spec in descriptor.optional)
+        pixel_effect = "May change pixels" if descriptor.changes_pixels else "Passes pixels through"
+        outputs = [f"{pixel_effect} and preserves source metadata"]
+        if descriptor.changes_geometry:
+            outputs.append("may change geometry")
+        outputs += [f"produces {spec.key} v{spec.version}" for spec in descriptor.provides]
+        if descriptor.preserves and not descriptor.changes_geometry:
+            outputs.append(f"can retain {', '.join(descriptor.preserves)}")
+        if descriptor.invalidates:
+            outputs.append(f"invalidates {', '.join(descriptor.invalidates)}")
+        if descriptor.changes_geometry:
+            outputs.append("drops upstream context")
+        elif descriptor.changes_pixels:
+            outputs.append("drops pixel-dependent and unpreserved context")
+        else:
+            outputs.append("passes other compatible context through")
+        return f"Uses {', '.join(inputs)}\n{', '.join(outputs)}"
+
+    def set_preview_available(self, available):
+        self.preview.setEnabled(available and self._preview_ready)
+
     def show_status(self, status, *, can_move_up, can_move_down):
         with QSignalBlocker(self.toggle):
             self.toggle.setChecked(status.stage.enabled)
         self.toggle.setEnabled(not status.issues)
+        self._preview_ready = not status.issues
         self.move_up.setEnabled(can_move_up)
         self.move_down.setEnabled(can_move_down)
         text = {"ready": "Ready", "skipped": "Off — settings retained", "blocked": "Error: required analysis context is missing",

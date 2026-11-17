@@ -11,7 +11,7 @@ class MainWindow(QMainWindow):
     def __init__(self, snapshot: StartupSnapshot, pipeline_service=None, *, application=None):
         super().__init__()
         self.setWindowTitle(f"{PRODUCT_NAME} {__version__}")
-        self.resize(920, 740)
+        self.resize(1180, 760)
         content = QWidget()
         layout = QVBoxLayout(content)
         title = QLabel(f"{PRODUCT_NAME} · by {APP_AUTHOR}")
@@ -22,9 +22,10 @@ class MainWindow(QMainWindow):
         if application is None:
             layout.addWidget(self.pipeline_page)
         else:
-            self.batch_panel = BatchPanel(snapshot.sources, application)
-            self.batch_panel.addTab(self.pipeline_page, "Pipeline")
+            self.batch_panel = BatchPanel(snapshot.sources, application, self.pipeline_page)
             self.batch_panel.pipeline_locked.connect(self.pipeline_page.set_locked)
+            self.batch_panel.operation_preview_available.connect(self.pipeline_page.set_preview_available)
+            self.pipeline_page.preview_requested.connect(self.batch_panel.preview_stage)
             self.pipeline_page.changed.connect(self.batch_panel.refresh_pipeline)
             self.batch_panel.ready_to_close.connect(self.close)
             layout.addWidget(self.batch_panel)

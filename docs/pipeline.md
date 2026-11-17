@@ -195,6 +195,15 @@ and place them at the paths shown on the card under the configured model folder
 | Through selected stage, proposed | Run the enabled prefix through the selected stage | Inspect that operation in its actual upstream context. |
 | Context analysis | Run selected analysis and display region/mask overlays or measurements | Inspect output even when pixels are unchanged. |
 
+The desktop picture window implements original, whole-pipeline, and standalone
+operation views. The latter two can switch between the original and the result
+and display available reference luminance measurements. Originals and thumbnails
+use local orientation and color conversion. Processing previews use full working
+resolution and convert the result to display RGB with a longest edge of at most
+1,600 pixels. Requests run on the desktop command thread while the batch worker
+is idle. Display data stays in memory. See
+[desktop workspace evidence](verification/desktop-workspace.md).
+
 An operation-only preview explicitly requests a ready operation, even if manually
 disabled in the batch pipeline. An unavailable operation cannot be previewed;
 display its recovery actions. Whole/prefix previews honor enable flags. If an operation
@@ -205,11 +214,11 @@ compatible with the preview input. Do not apply a later-stage mask to an origina
 image merely because their dimensions match.
 
 All processing previews require valid destination settings, as requested for any
-processing. Store preview artifacts in the application's temporary/cache area;
-only an explicit export creates a final destination image. Distinguish a quick
-downscaled preview from full-resolution detail so texture assessment is meaningful.
-Queue GPU previews behind an active sequential image or staged stage pass, showing
-the pending state. They must not load a second inference stack alongside a batch.
+processing. Only an explicit export creates a final destination image. Any future
+on-disk preview cache belongs in the application's temporary area. A future
+full-resolution detail view will distinguish zoomed inspection from the fitted
+preview. GPU preview queuing remains planned and must serialize model work with
+active sequential images or staged passes.
 
 ## Equivalent schedules
 

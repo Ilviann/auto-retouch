@@ -28,8 +28,13 @@ sequential and staged execution, and a toolkit-free batch worker. See
 [worker evidence](verification/worker-transport.md).
 Milestone 5a connects the Qt Widgets batch setup and job monitor to those
 services. See [desktop batch evidence](verification/desktop-batch.md).
-Milestone 5b connects the Pipeline tab to the shared editor and operation
+Milestone 5b connects the pipeline editor to the shared editor and operation
 registry. See [desktop pipeline evidence](verification/desktop-pipeline.md).
+The desktop workspace places the pipeline editor alongside a thumbnail grid,
+with folder paths above and estimates, export settings, and expandable job
+progress on the same screen. Thumbnail and picture commands return plain RGB
+display data. Qt owns the display objects and picture window. See
+[desktop workspace evidence](verification/desktop-workspace.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.
@@ -357,6 +362,12 @@ setup-only backend selection. See the [Runtime contract](runtime.md#machine-loca
 Previews must use the same settings and compatible image/color processing as final
 exports. Provide full-resolution detail crops where a downscaled preview would
 hide texture or blending artifacts.
+
+The first desktop implementation runs one processing preview at a time, while
+the batch worker is idle. It uses the shared JPEG decoder and prepared stage
+lifecycle on a background thread. Full-resolution processing produces
+fit-to-window display data for an original/result comparison. Full-resolution
+detail inspection and worker-process scheduling remain pending.
 
 Support whole-pipeline and standalone-operation previews; cumulative preview
 through a stage is an additional proposed convenience. Run previews using the

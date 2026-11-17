@@ -14,6 +14,7 @@ from .stage_card import StageCard
 
 class PipelinePanel(QWidget):
     changed = Signal()
+    preview_requested = Signal(str)
 
     def __init__(self, snapshot, service):
         super().__init__()
@@ -22,6 +23,7 @@ class PipelinePanel(QWidget):
         self.origin = snapshot.pipeline_origin
         self.stage_cards = {}
         self.reveal_stage = None
+        self.preview_available = False
         self.refresh_timer = QTimer(self, interval=0, singleShot=True)
         self.refresh_timer.timeout.connect(self._refresh_cards)
 
@@ -30,10 +32,29 @@ class PipelinePanel(QWidget):
         self.details.setObjectName("startupDetails")
         self.details.setReadOnly(True)
         self.details.setMaximumHeight(150)
-        layout.addWidget(self.details)
         self._show_details(snapshot.pipeline_name)
         if service is None:
+            layout.addWidget(self.details)
             return
+
+        files = QHBoxLayout()
+        open_file = QPushButton("Open JSON…", objectName="openPipeline")
+        open_file.clicked.connect(self._open)
+        files.addWidget(open_file)
+        save_file = QPushButton("Save JSON…", objectName="savePipeline")
+        save_file.clicked.connect(self._save)
+        files.addWidget(save_file)
+        details_toggle = QPushButton("Session details", checkable=True)
+        details_toggle.toggled.connect(self.details.setVisible)
+        files.addStretch()
+        files.addWidget(details_toggle)
+        layout.addLayout(files)
+        layout.addWidget(self.details)
+        self.details.hide()
+        if snapshot.notices:
+            notices = QLabel("\n".join(snapshot.notices), objectName="startupNotices", wordWrap=True)
+            notices.setTextFormat(Qt.TextFormat.PlainText)
+            layout.addWidget(notices)
 
         tools = QHBoxLayout()
         self.operations = QComboBox()
@@ -50,12 +71,6 @@ class PipelinePanel(QWidget):
         add.setEnabled(self.operations.count() > 0)
         add.clicked.connect(self._add_stage)
         tools.addWidget(add)
-        open_file = QPushButton("Open JSON…", objectName="openPipeline")
-        open_file.clicked.connect(self._open)
-        tools.addWidget(open_file)
-        save_file = QPushButton("Save JSON…", objectName="savePipeline")
-        save_file.clicked.connect(self._save)
-        tools.addWidget(save_file)
         layout.addLayout(tools)
 
         self.message = QLabel(objectName="pipelineCommandError", wordWrap=True)
@@ -76,10 +91,12 @@ class PipelinePanel(QWidget):
         snapshot = self.snapshot
         text = "\n".join([
             f"Pipeline: {name}", f"Loaded from: {self.origin}", f"Backend: {snapshot.backend}", "",
-            "Selected sources:", *([str(p) for p in snapshot.sources] or ["No sources selected"]), "",
+            "Sources at launch:", *([str(p) for p in snapshot.sources] or ["No sources selected"]), "",
             f"Checkpoints: {snapshot.checkpoints}", f"Temporary artifacts: {snapshot.temporary}",
-            f"Logs: {snapshot.logs}", "", *snapshot.notices,
+            f"Logs: {snapshot.logs}",
         ])
+        if self.service is None and snapshot.notices:
+            text += "\n\n" + "\n".join(snapshot.notices)
         if text != self.details.toPlainText():
             self.details.setPlainText(text)
 
@@ -88,6 +105,11 @@ class PipelinePanel(QWidget):
         if not locked:
             self._refresh_cards()
             self.changed.emit()
+
+    def set_preview_available(self, available):
+        self.preview_available = available
+        for card in self.stage_cards.values():
+            card.set_preview_available(available)
 
     def _refresh_cards(self):
         pipeline = self.service.status
@@ -112,6 +134,7 @@ class PipelinePanel(QWidget):
                     on_recheck=lambda: self._command(self.service.recheck),
                     on_move=self._move_stage,
                     on_remove=lambda key: self._command(self.service.remove, key),
+                    on_preview=self.preview_requested.emit,
                 )
                 self.stage_cards[stage.id] = card
                 self.cards.insertWidget(index, card)
@@ -119,6 +142,7 @@ class PipelinePanel(QWidget):
                 self.cards.removeWidget(card)
                 self.cards.insertWidget(index, card)
             card.show_status(status, can_move_up=index > 0, can_move_down=index + 1 < len(stages))
+            card.set_preview_available(self.preview_available)
         if self.reveal_stage in self.stage_cards:
             self.cards.activate()
             self.scroll.ensureWidgetVisible(self.stage_cards[self.reveal_stage])

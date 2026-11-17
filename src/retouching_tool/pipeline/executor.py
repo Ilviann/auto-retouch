@@ -14,16 +14,18 @@ class StageRuntime:
     diagnostics: object
     backend: str
     checkpoints: Path
-    job_id: str
+    job_id: str | None
     stage: StageDefinition
     image_id: str | None = None
     attempt: int = 1
+    preview_request_id: str | None = None
 
     def emit(self, code, message, *, level="INFO", exc_info=False, **details):
         self.diagnostics.emit(code, message, level=level, exc_info=exc_info, component="pipeline",
             job_id=self.job_id, image_id=self.image_id, stage_instance_id=self.stage.id,
             operation=self.stage.operation, operation_version=self.stage.operation_version,
-            backend=self.backend, attempt=self.attempt, model_ref=self.stage.model_ref, **details)
+            backend=self.backend, attempt=self.attempt, model_ref=self.stage.model_ref,
+            preview_request_id=self.preview_request_id, **details)
 
 
 class StageSession:

@@ -133,6 +133,15 @@ class BatchService:
         self.scratch = scratch
         self.diagnostics = diagnostics
 
+    def estimate(self, index: SourceIndex, *, mode: str, selected_ids=None) -> SpaceBudget | None:
+        """Estimate from indexed headers alone, without needing a destination."""
+        if mode not in ("sequential", "staged"):
+            raise RetouchingError("BATCH_SETTINGS_INVALID", "Select sequential or staged mode.")
+        images = self._select(index, selected_ids, allow_empty=True)
+        if not images or any(image.header is None for image in images):
+            return None
+        return _space_budget(images, mode, 0)
+
     def index(self, sources, *, recursive: bool = False) -> SourceIndex:
         """Combine launch/UI sources. The first selected folder owning a file supplies its relative path."""
         index_id = uuid4().hex
@@ -223,9 +232,11 @@ class BatchService:
         return IndexedImage(image_id, path, relative, stamp, header)
 
     def preflight(self, index: SourceIndex, destination: Path, *, mode: str,
-                  selected_ids=None, extra_scratch_bytes: int = 0, job_id: str | None = None) -> BatchPlan:
+                  selected_ids=None, extra_scratch_bytes: int = 0, job_id: str | None = None,
+                  preview_request_id: str | None = None) -> BatchPlan:
         """Revalidate a frozen selection and estimate initial space. Call again at job start."""
-        context = {"index_id": index.index_id, "job_id": job_id, "mode": mode, "destination_path": destination}
+        context = {"index_id": index.index_id, "job_id": job_id, "mode": mode, "destination_path": destination,
+                   "preview_request_id": preview_request_id}
         try:
             if mode not in ("sequential", "staged") or type(extra_scratch_bytes) is not int or extra_scratch_bytes < 0:
                 raise RetouchingError("BATCH_SETTINGS_INVALID", "Select sequential or staged mode and a nonnegative extra scratch budget.")
@@ -262,7 +273,7 @@ class BatchService:
         return plan
 
     @staticmethod
-    def _select(index, selected_ids):
+    def _select(index, selected_ids, *, allow_empty=False):
         if selected_ids is None:
             selected = index.images
         else:
@@ -270,7 +281,7 @@ class BatchService:
             selected = tuple(image for image in index.images if image.image_id in wanted)
             if len(selected) != len(wanted):
                 raise RetouchingError("BATCH_SELECTION_INVALID", "Select JPEGs from the current index.")
-        if not selected:
+        if not selected and not allow_empty:
             raise RetouchingError("BATCH_SELECTION_INVALID", "Select one or more JPEGs from the current index.")
         return selected
 

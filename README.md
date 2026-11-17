@@ -49,12 +49,12 @@ management, then verifies capture metadata, sRGB and processing history before
 publishing exports. Both headless schedules support restart recovery. Staged
 execution keeps a lossless checkpoint for each active image and encodes JPEG
 after the final stage releases its resources. Both modes run in a local worker
-process. The **Batch setup** tab scans JPEGs, validates storage, and starts a batch
-with the selected schedule and compression settings. The **Job** tab shows
-progress and opens saved jobs for review or resume. See
+process. The desktop workspace keeps the pipeline editor, source and destination
+paths, photo thumbnails, and JPEG settings on one screen. **Job progress and
+history** opens the monitor below the batch controls. See
 [JPEG verification](docs/verification/jpeg-boundary.md),
 [staged job verification](docs/verification/staged-jobs.md), and
-[desktop batch verification](docs/verification/desktop-batch.md).
+[desktop workspace verification](docs/verification/desktop-workspace.md).
 
 Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
 `prepare_env.cmd` and choose a backend (Enter selects CUDA). Setup installs the
@@ -80,11 +80,15 @@ not a Natural or Beauty preset. Unknown operations/parameters fail explicitly.
 Valid explicit settings replace last-used selection; corrupt restored state
 produces a visible warning.
 
-To export a batch, choose the sources, select **Scan sources**, and choose an
-existing destination folder. Set the schedule and JPEG options, then select
-**Check disk space** and **Start batch**. Pause and cancel take effect after the
-current work unit. Use **Job → Open saved job** to resume a paused job after
-relaunching.
+Choosing sources starts a scan and shows thumbnails and disk estimates. Use the
+thumbnail checkboxes to include photos in a batch. Select a photo to **View
+original**, or choose a destination to use **Preview pipeline** or **Preview
+operation**. Processing previews open a picture window with an original toggle.
+
+To export, set the schedule and JPEG options, then select **Check disk space**
+and **Start batch**. Pause and cancel take effect after the current work unit.
+To resume after relaunching, expand **Job progress and history** and select
+**Open saved job**.
 
 Run focused desktop batch checks in the existing environment:
 

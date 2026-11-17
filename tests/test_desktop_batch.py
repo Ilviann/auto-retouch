@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from threading import Event
 from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
@@ -12,7 +13,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image, JpegImagePlugin
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QPushButton
 
 from retouching_tool.application.service import ApplicationService
@@ -31,6 +33,11 @@ class DesktopBatchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.qt = QApplication.instance() or QApplication([])
+        if not QFontDatabase.families():
+            font = Path(os.environ["WINDIR"]) / "Fonts" / "segoeui.ttf"
+            if QFontDatabase.addApplicationFont(str(font)) < 0:
+                raise RuntimeError(f"Cannot load test font: {font}")
+            cls.qt.setFont(QFont("Segoe UI", 10))
 
     def setUp(self):
         work = ROOT / ".test-work"
@@ -58,12 +65,17 @@ class DesktopBatchTests(unittest.TestCase):
         snapshot = application.startup(LaunchOptions(sources, pipeline, None), "directml")
         window = MainWindow(snapshot, application.pipeline_service, application=application)
         window.show()
-        self.addCleanup(self.close_window, window)
+        self.addCleanup(self.dispose_window, window)
         return window, window.batch_panel
 
     def close_window(self, window):
         window.close()
         self.until(lambda: not window.isVisible(), "window did not close")
+
+    def dispose_window(self, window):
+        self.close_window(window)
+        window.deleteLater()
+        self.qt.sendPostedEvents(window, QEvent.Type.DeferredDelete)
 
     def until(self, predicate, message):
         deadline = monotonic() + 15
@@ -72,9 +84,9 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertLess(monotonic(), deadline, message)
             sleep(0.01)
 
-    def click_scan(self, panel, expected):
-        panel.scan.click()
-        self.until(lambda: panel.images.rowCount() == expected, panel.setup_message.text())
+    def wait_for_scan(self, panel, expected):
+        self.until(lambda: panel.images.count() == expected and panel.scan.isEnabled(),
+                   "automatic source scan did not finish")
 
     def check_space(self, panel, *, ready=True):
         panel.check_space.click()
@@ -103,10 +115,10 @@ class DesktopBatchTests(unittest.TestCase):
         try:
             with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.source)):
                 panel.findChild(QPushButton, "chooseSourceFolder").click()
-            self.click_scan(panel, 2)
+            self.wait_for_scan(panel, 2)
             panel.recursive.setChecked(True)
-            self.assertEqual(panel.images.rowCount(), 0)
-            self.click_scan(panel, 3)
+            self.assertEqual(panel.images.count(), 0)
+            self.wait_for_scan(panel, 3)
             self.assertIn("1 unreadable", panel.source_summary.text())
 
             panel.destination.setText(str(self.nested))
@@ -115,11 +127,13 @@ class DesktopBatchTests(unittest.TestCase):
             panel.destination.setText(str(self.destination))
             self.check_space(panel, ready=False)
             self.assertIn("BATCH_INDEX_INCOMPLETE", panel.setup_message.text())
-            row = next(row for row in range(3) if panel.images.item(row, 2).text() == "Unreadable")
-            panel.images.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
+            row = next(row for row in range(3) if panel.images.item(row).text() == corrupt.name)
+            panel.images.item(row).setCheckState(Qt.CheckState.Unchecked)
             self.assertIn("1 excluded", panel.source_summary.text())
+            self.assertIn("Estimated temporary space", panel.space.text())
             self.check_space(panel)
-            self.assertIn("bytes required", panel.space.text())
+            self.assertIn("MiB", panel.space.text())
+            self.assertIn("required", panel.space.text())
             collision = self.destination / "a.jpg"
             collision.write_bytes(b"occupied after preflight")
             panel.start.click()
@@ -158,9 +172,9 @@ class DesktopBatchTests(unittest.TestCase):
         window, panel = self.open_window(tuple(self.originals), pipeline=pipeline)
         panel.application.pipeline_service.set_enabled("exposure-reference", True)
         panel.refresh_pipeline()
-        self.assertEqual(panel.images.rowCount(), 0)
+        self.assertEqual(panel.images.count(), 0)
         self.assertFalse(panel.application.job_service.saved_jobs())
-        self.click_scan(panel, 2)
+        self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
         self.check_space(panel)
         panel.mode.setCurrentIndex(panel.mode.findData("staged"))
@@ -178,6 +192,8 @@ class DesktopBatchTests(unittest.TestCase):
         window, panel = self.open_window()
         self.assertIn(str(self.nested / "фото.jpg"), panel.source_text.text())
         self.assertTrue(panel.job_heading.text().startswith("No job selected"))
+        self.wait_for_scan(panel, 2)
+        panel.job_details.click()
         with patch.object(QInputDialog, "getItem", side_effect=lambda *args, **kwargs: (args[3][0], True)):
             panel.history.click()
             self.until(lambda: panel.resume.isEnabled(), "saved job did not reopen")
@@ -193,7 +209,7 @@ class DesktopBatchTests(unittest.TestCase):
 
     def test_close_pauses_then_reopened_job_finishes(self):
         window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
-        self.click_scan(panel, 2)
+        self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
         panel.mode.setCurrentIndex(panel.mode.findData("staged"))
         self.check_space(panel)
@@ -205,6 +221,8 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertEqual(list(self.destination.iterdir()), [])
 
         _, panel = self.open_window()
+        self.wait_for_scan(panel, 2)
+        panel.job_details.click()
         with patch.object(QInputDialog, "getItem", side_effect=lambda *args, **kwargs: (args[3][0], True)):
             panel.history.click()
             self.until(lambda: panel.resume.isEnabled(), "saved paused job did not reopen")
@@ -216,7 +234,7 @@ class DesktopBatchTests(unittest.TestCase):
     def test_pipeline_change_during_freeze_leaves_job_queued_for_review(self):
         pipeline = ROOT / "examples/pipelines/reference.json"
         _, panel = self.open_window(tuple(self.originals), pipeline=pipeline)
-        self.click_scan(panel, 2)
+        self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
         self.check_space(panel)
         editor = panel.application.pipeline_service
@@ -236,7 +254,7 @@ class DesktopBatchTests(unittest.TestCase):
 
     def test_worker_exit_is_visible_and_saved_job_can_start_again(self):
         _, panel = self.open_window(tuple(self.originals))
-        self.click_scan(panel, 2)
+        self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
         self.check_space(panel)
         worker = panel.application.job_worker
@@ -258,3 +276,73 @@ class DesktopBatchTests(unittest.TestCase):
         panel.resume.click()
         self.until(lambda: panel.history.isEnabled(), "restarted job did not finish")
         self.assertIn("2 exported", panel.job_counts.text())
+
+    def test_thumbnail_workspace_previews_and_live_estimates(self):
+        window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 2)
+        self.assertTrue(window.pipeline_page.isVisible())
+        self.assertTrue(panel.images.isVisible())
+        self.assertTrue(panel.destination.isVisible())
+        self.assertTrue(panel.export.isVisible())
+        self.assertFalse(panel.preview.isEnabled())
+        self.assertIn("Estimated temporary space", panel.space.text())
+        self.assertIn("MiB", panel.space.text())
+        initial = panel.space.text()
+        panel.mode.setCurrentIndex(panel.mode.findData("staged"))
+        staged = panel.space.text()
+        self.assertNotEqual(initial, staged)
+        panel.images.item(1).setCheckState(Qt.CheckState.Unchecked)
+        self.assertNotEqual(staged, panel.space.text())
+        panel.images.setCurrentRow(1)
+        item = panel.images.currentItem()
+        self.until(lambda: item.icon().cacheKey() != panel.images._placeholder.cacheKey(), "thumbnail not shown")
+        self.assertIn("фото.jpg", item.toolTip())
+
+        service = panel.application.preview_service
+        picture = service.picture
+        release = Event()
+
+        def delayed(*args, **kwargs):
+            if not release.wait(10):
+                raise TimeoutError("Preview test did not release its request")
+            return picture(*args, **kwargs)
+
+        with patch.object(service, "picture", delayed):
+            panel.original.click()
+            panel.images.setCurrentRow(0)
+            release.set()
+            self.until(panel.original.isEnabled, "obsolete original request did not finish")
+            self.assertIsNone(panel._picture_window)
+
+        panel.original.click()
+        self.until(lambda: panel._picture_window is not None, "original window did not open")
+        original = panel._picture_window
+        self.assertTrue(original.isWindow())
+        self.assertTrue(original.windowTitle().startswith("Original"))
+        self.assertIsNotNone(original.picture.pixmap())
+        self.assertFalse(original.original_toggle.isVisible())
+        panel.destination.setText(str(self.source))
+        panel.preview.click()
+        self.until(panel.preview.isEnabled, "invalid preview destination did not return")
+        self.assertIn("DESTINATION_IS_SOURCE", panel.setup_message.text())
+
+        panel.destination.setText(str(self.destination))
+        panel.preview.click()
+        self.until(lambda: panel._picture_window is not original, "whole pipeline window did not open")
+        whole = panel._picture_window
+        self.assertTrue(whole.original_toggle.isVisible())
+        self.assertIsNotNone(whole.findChild(type(whole.picture), "previewStatistics"))
+        exposure = window.pipeline_page.stage_cards["exposure-reference"]
+        editor = panel.application.pipeline_service
+        window.pipeline_page._command(editor.set_parameter, "exposure-reference", "stops", 1)
+        self.qt.processEvents()
+        self.assertFalse(exposure.toggle.isChecked())
+        exposure.preview.click()
+        self.until(lambda: panel._picture_window is not whole, "operation window did not open")
+        operation = panel._picture_window
+        self.assertTrue(operation.windowTitle().startswith("Exposure"))
+        sample = operation.result.toImage().pixelColor(0, 0)
+        operation.original_toggle.click()
+        self.assertGreater(sample.red(), operation.picture.pixmap().toImage().pixelColor(0, 0).red())
+        self.assertEqual(list(self.destination.iterdir()), [])
+        self.assertFalse(panel.application.job_service.saved_jobs())

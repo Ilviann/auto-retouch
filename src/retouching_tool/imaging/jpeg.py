@@ -218,9 +218,9 @@ def _report_failure(runtime, error, path, fallback_code, fallback_message, path_
     raise RetouchingError(fallback_code, fallback_message) from error
 
 
-def decode_jpeg(path, *, source_id, runtime: JpegRuntime, expected_sha256: str | None = None):
-    """Open one JPEG and retain its original EXIF, ICC, XMP and IPTC-IIM bytes."""
-    started = perf_counter()
+@contextmanager
+def read_srgb_jpeg(path, *, source_id, runtime: JpegRuntime, expected_sha256=None, draft_size=None):
+    """Share orientation and color handling with local display reads."""
     try:
         with Path(path).open("rb") as stream:
             if expected_sha256 is not None:
@@ -239,21 +239,31 @@ def decode_jpeg(path, *, source_id, runtime: JpegRuntime, expected_sha256: str |
                 if exif.thumbnail_issue:
                     runtime.emit("INPUT_EXIF_THUMBNAIL_INVALID", "Ignored an invalid EXIF preview thumbnail.",
                                  level="WARNING", source_path=str(path), technical_cause=exif.thumbnail_issue)
+                if draft_size is not None:
+                    image.draft(image.mode, (draft_size, draft_size))
                 image.load()
                 oriented = _orient(image, orientation)
                 rgb, handling = _convert_to_srgb(oriented, metadata, exif, xmp_color_space, runtime, path)
-                state = ImageState.from_pixels(_linear_pixels(rgb), metadata)
-        runtime.emit("INPUT_JPEG_DECODED", "Decoded JPEG to oriented linear sRGB", source_path=str(path),
-                     source_id=source_id, width=state.width, height=state.height, orientation=orientation,
-                     color_handling=handling, duration_ms=(perf_counter() - started) * 1000)
-        return state
+                yield rgb, metadata, orientation, handling
     except Exception as exc:
         _report_failure(runtime, exc, path, "INPUT_DECODE_FAILED",
                         "Cannot decode source JPEG. Check that the file is readable and complete.", "source_path")
         raise
 
 
-def _encoded_pixels(state):
+def decode_jpeg(path, *, source_id, runtime: JpegRuntime, expected_sha256: str | None = None):
+    """Open one JPEG and retain its original EXIF, ICC, XMP and IPTC-IIM bytes."""
+    started = perf_counter()
+    with read_srgb_jpeg(path, source_id=source_id, runtime=runtime, expected_sha256=expected_sha256) as (
+            rgb, metadata, orientation, handling):
+        state = ImageState.from_pixels(_linear_pixels(rgb), metadata)
+        runtime.emit("INPUT_JPEG_DECODED", "Decoded JPEG to oriented linear sRGB", source_path=str(path),
+                     source_id=source_id, width=state.width, height=state.height, orientation=orientation,
+                     color_handling=handling, duration_ms=(perf_counter() - started) * 1000)
+    return state
+
+
+def encode_rgb_samples(state):
     import numpy as np
 
     if not isinstance(state, ImageState) or state.representation != "linear-srgb-float32":
@@ -310,7 +320,7 @@ def export_jpeg(state, destination, *, settings: JpegSettings, pipeline_sha256: 
                 r"[0-9a-f]{64}", pipeline_sha256):
             raise RetouchingError("OUTPUT_SETTINGS_INVALID", "JPEG export requires compression settings and a pipeline SHA-256.")
         try:
-            pixels = _encoded_pixels(state)
+            pixels = encode_rgb_samples(state)
         except ValueError as exc:
             raise RetouchingError("OUTPUT_STATE_INVALID", "The image state is invalid or exceeds the JPEG working limit.") from exc
         size = (state.width, state.height)
