@@ -79,10 +79,13 @@ Pipeline contracts/reference stages (3a) are now implemented; see
 `docs/verification/pipeline-contracts.md`. The 3b lossless TIFF artifact slice is
 implemented; see `docs/verification/lossless-artifacts.md`. Headless JPEG decode,
 ICC/orientation normalization and verified export are implemented; see
-`docs/verification/jpeg-boundary.md`. Next portable batch work is source indexing,
-destination validation and disk preflight. No production neural stage or
-checkpoint has been selected. Synthetic reference/card tests do not establish
-portrait quality.
+`docs/verification/jpeg-boundary.md`. Headless source indexing, path validation
+and initial disk preflight are implemented. See `docs/verification/batch-preflight.md`.
+The headless sequential runner now persists job snapshots, image progress and
+verified JPEG recovery receipts. See `docs/verification/sequential-jobs.md`.
+Next portable batch work is staged execution and lossless intermediate recovery.
+No production neural stage or checkpoint has been selected. Synthetic reference
+tests do not establish portrait quality.
 
 ## Working rules
 

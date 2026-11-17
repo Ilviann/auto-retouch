@@ -9,9 +9,13 @@ level; see [pipeline evidence](verification/pipeline-contracts.md). The 3b lossl
 TIFF artifact slice is implemented at reference level; see
 [artifact evidence](verification/lossless-artifacts.md). Headless JPEG
 color/orientation and verified export are implemented and checked on the seven
-local study JPEGs. Batch indexing and preflight are pending. Actual retouching
-quality still requires reviewed photos and model provisioning. See
-[JPEG evidence](verification/jpeg-boundary.md).
+local study JPEGs. Headless source indexing and initial path/disk preflight are
+implemented. Headless sequential job execution and restart recovery have generated
+fixture coverage. Staged execution remains planned. Actual retouching quality
+still requires reviewed photos and model provisioning. See
+[JPEG evidence](verification/jpeg-boundary.md) and
+[batch preflight evidence](verification/batch-preflight.md) and
+[sequential job evidence](verification/sequential-jobs.md).
 
 ## Development stages
 

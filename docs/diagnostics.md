@@ -31,6 +31,19 @@ collisions and `OUTPUT_VALIDATION_FAILED` carry causes or tracebacks.
 publication. Failed cleanup has its own event. See
 [JPEG verification](verification/jpeg-boundary.md).
 
+Batch preparation records header and scan failures with the index ID, source path
+and image ID where applicable. It reports invalid or changed paths, conflicts and
+write-probe failures with tracebacks, and includes the job ID when supplied.
+`BATCH_SPACE_AVAILABLE` and `BATCH_SPACE_INSUFFICIENT` report paths and byte totals
+per volume. See [batch preflight evidence](verification/batch-preflight.md).
+
+Sequential jobs emit creation, skipped-stage, image result, bounded replay and
+verified export recovery events. The SQLite journal holds durable per-image
+attempts, warning counts and failures. Run summaries report status counts, and
+stage/JPEG events retain their existing image and attempt correlation. A failed
+journal write interrupts the run so uncommitted work can be recovered. See
+[sequential job evidence](verification/sequential-jobs.md).
+
 Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
 `diagnostics/service.py`, with UTC millisecond times, session/process identity,
 codes, structured context, and exception chains at INFO settings. Setup child

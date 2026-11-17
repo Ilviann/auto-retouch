@@ -6,7 +6,9 @@ from ..cli import LaunchOptions
 from ..config import AppConfig
 from ..errors import RetouchingError
 from ..json_io import atomic_json, read_json
+from .batch import BatchService
 from .contracts import StartupSnapshot
+from .job_service import SequentialJobService
 from .pipeline_service import PipelineService
 
 DEFAULT_PIPELINE = {"schema_version": 1, "name": "Empty foundation pipeline", "stages": []}
@@ -15,6 +17,7 @@ DEFAULT_PIPELINE = {"schema_version": 1, "name": "Empty foundation pipeline", "s
 class ApplicationService:
     def __init__(self, root: Path, config: AppConfig, diagnostics):
         self.root, self.config, self.diagnostics = root, config, diagnostics
+        self.batch_service = BatchService(config.temporary, diagnostics)
 
     def startup(self, options: LaunchOptions, backend: str) -> StartupSnapshot:
         notices = []
@@ -22,6 +25,7 @@ class ApplicationService:
         editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
                                  autosave=state / "last-pipeline.json")
         self.pipeline_service = editor
+        self.job_service = SequentialJobService(self.root, self.batch_service, editor, self.diagnostics)
         if options.sources:
             sources = options.sources
         else:

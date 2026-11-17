@@ -1,8 +1,10 @@
 """JPEG boundary for oriented linear-sRGB image states and verified exports."""
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
+import hashlib
 from io import BytesIO
 import os
 from pathlib import Path
@@ -51,6 +53,13 @@ class JpegSettings:
             raise ValueError("Set JPEG quality to 1–95, chroma to 4:4:4/4:2:2/4:2:0 and progressive to on/off")
 
 
+@dataclass(frozen=True)
+class JpegHeader:
+    width: int
+    height: int
+    header_bytes: int
+
+
 def _bound_header(stream):
     if stream.read(2) != b"\xff\xd8":
         raise ValueError("Input is not a JPEG")
@@ -61,8 +70,9 @@ def _bound_header(stream):
         if start != b"\xff" or not marker or marker in (b"\0", b"\xff", b"\xd8", b"\xd9"):
             raise ValueError("Invalid JPEG header before scan data")
         if marker == b"\xda":
+            header_bytes = stream.tell()
             stream.seek(0)
-            return
+            return header_bytes
         if marker == b"\x01" or 0xD0 <= marker[0] <= 0xD7:
             raise ValueError("Unexpected standalone marker before JPEG scan data")
         raw_length = stream.read(2)
@@ -71,6 +81,31 @@ def _bound_header(stream):
             raise ValueError("Invalid JPEG segment length")
         stream.seek(length - 2, os.SEEK_CUR)
     raise ValueError("JPEG headers exceed the supported size limit")
+
+
+@contextmanager
+def _open_jpeg(stream):
+    from PIL import Image
+
+    header_bytes = _bound_header(stream)
+    try:
+        opened = Image.open(stream, formats=("JPEG",))
+    except Image.DecompressionBombError as exc:
+        raise RetouchingError("INPUT_IMAGE_TOO_LARGE",
+                              f"JPEG exceeds the {MAX_PIXELS:,}-pixel working limit.") from exc
+    with opened as image:
+        if image.format != "JPEG":
+            raise ValueError("Expected a single JPEG image")
+        if image.width * image.height > MAX_PIXELS:
+            raise RetouchingError("INPUT_IMAGE_TOO_LARGE",
+                                  f"JPEG exceeds the {MAX_PIXELS:,}-pixel working limit.")
+        yield image, header_bytes
+
+
+def inspect_jpeg_header(stream) -> JpegHeader:
+    """Read stored dimensions without decoding pixels or validating capture metadata."""
+    with _open_jpeg(stream) as (image, header_bytes):
+        return JpegHeader(image.width, image.height, header_bytes)
 
 
 def _metadata(image, source_id):
@@ -183,20 +218,16 @@ def _report_failure(runtime, error, path, fallback_code, fallback_message, path_
     raise RetouchingError(fallback_code, fallback_message) from error
 
 
-def decode_jpeg(path, *, source_id, runtime: JpegRuntime):
+def decode_jpeg(path, *, source_id, runtime: JpegRuntime, expected_sha256: str | None = None):
     """Open one JPEG and retain its original EXIF, ICC, XMP and IPTC-IIM bytes."""
     started = perf_counter()
     try:
-        from PIL import Image
-
         with Path(path).open("rb") as stream:
-            _bound_header(stream)
-            with Image.open(stream, formats=("JPEG",)) as image:
-                if image.format != "JPEG":
-                    raise ValueError("Expected a single JPEG image")
-                if image.width * image.height > MAX_PIXELS:
-                    raise RetouchingError("INPUT_IMAGE_TOO_LARGE",
-                                          f"JPEG exceeds the {MAX_PIXELS:,}-pixel working limit.")
+            if expected_sha256 is not None:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != expected_sha256:
+                    raise RetouchingError("SOURCE_CHANGED", "JPEG content differs from the frozen job input. Re-index it for a new job.")
+                stream.seek(0)
+            with _open_jpeg(stream) as (image, _):
                 try:
                     metadata = _metadata(image, source_id)
                     exif, xmp = read_exif(metadata.exif), Xmp(metadata.xmp)
@@ -261,8 +292,9 @@ def _verify(path, size, expected_exif, raw_exif, xmp, profile, iptc):
             image.load()
 
 
-def export_jpeg(state, destination, *, settings: JpegSettings, pipeline_sha256: str, runtime: JpegRuntime):
-    """Stage, verify and publish a new JPEG. Windows rename is atomic and refuses collisions."""
+def export_jpeg(state, destination, *, settings: JpegSettings, pipeline_sha256: str,
+                runtime: JpegRuntime, before_publish=None):
+    """Verify a pending JPEG, optionally journal it, then publish without replacing a file."""
     pending = None
     started = perf_counter()
     try:
@@ -310,6 +342,8 @@ def export_jpeg(state, destination, *, settings: JpegSettings, pipeline_sha256: 
         except Exception as exc:
             raise RetouchingError("OUTPUT_VALIDATION_FAILED",
                                   "JPEG did not pass verification. Check technical details before retrying.") from exc
+        if before_publish is not None:
+            before_publish(pending, destination)
         try:
             pending.rename(destination)
         except FileExistsError as exc:

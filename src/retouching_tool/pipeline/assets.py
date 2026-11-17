@@ -51,8 +51,11 @@ class ModelCatalog:
             self._models[manifest.ref] = manifest
 
     def publisher_url(self, ref):
-        model = self._models.get(ref)
+        model = self.manifest(ref)
         return model.publisher_url if model else None
+
+    def manifest(self, ref) -> ModelManifest | None:
+        return self._models.get(ref)
 
     def check(self, ref, root: Path, backend: str):
         if ref is None:

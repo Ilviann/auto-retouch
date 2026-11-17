@@ -6,6 +6,8 @@ import math
 from ..errors import RetouchingError
 from .definition import ContextSpec
 
+RGB_FLOAT32_BYTES_PER_PIXEL = 3 * 4
+
 
 @dataclass(frozen=True)
 class SourceMetadata:

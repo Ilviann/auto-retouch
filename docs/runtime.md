@@ -4,9 +4,11 @@ The application targets Windows 11 only and runs on the user's system-wide
 Python 3.14 through a project-local
 virtual environment. Milestone 1a implements the script names, flags, configuration,
 environment metadata, and startup skeleton below. Milestone 3a adds registered
-pipeline validation and reference-stage cards. Photo processing, job recovery,
-and model provisioning remain later work. See the
-[verification record](verification/runtime-foundation.md) for actual coverage.
+pipeline validation and reference-stage cards. Sequential execution and recovery
+are available through the headless application service. Staged execution, job
+controls in the GUI and model provisioning remain later work. See the
+[runtime evidence](verification/runtime-foundation.md) and
+[sequential job evidence](verification/sequential-jobs.md).
 
 The 3b artifact slice adds pinned `tifffile==2026.10.15` to shared dependencies
 for uncompressed float32 intermediate TIFF. The user explicitly authorized this

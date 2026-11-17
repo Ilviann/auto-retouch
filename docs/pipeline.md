@@ -42,9 +42,12 @@ headless JPEG adapter initializes oriented image states and exports verified sRG
 JPEGs. XMP and IPTC-IIM join EXIF and ICC as immutable source metadata. Version-1
 artifact manifests can carry optional checksummed XMP and IPTC blob references;
 earlier manifests still load. Include the decoder/color policy and relevant
-dependency versions in scheduler cache identity. Scheduler and GUI wiring remain
-pending. See [artifact evidence](verification/lossless-artifacts.md) and
-[JPEG evidence](verification/jpeg-boundary.md).
+dependency versions in scheduler cache identity. The headless sequential runner
+now uses the JPEG adapter and the same stage sessions as reference execution.
+Staged scheduling and GUI wiring remain pending. See
+[artifact evidence](verification/lossless-artifacts.md),
+[JPEG evidence](verification/jpeg-boundary.md) and
+[sequential job evidence](verification/sequential-jobs.md).
 
 ## Editor and JSON settings
 

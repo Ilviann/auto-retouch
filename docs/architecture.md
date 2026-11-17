@@ -20,6 +20,9 @@ adds lossless float32 TIFF/context storage, checksummed source metadata and safe
 manifest-based lifetime management; see [artifact evidence](verification/lossless-artifacts.md).
 The JPEG adapter in `imaging/` decodes oriented linear-sRGB states and stages
 verified JPEG exports for publication. See [JPEG evidence](verification/jpeg-boundary.md).
+Milestone 4 adds headless source indexing, initial batch preflight and recoverable
+sequential execution. See [preflight evidence](verification/batch-preflight.md)
+and [sequential job evidence](verification/sequential-jobs.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.
@@ -31,7 +34,7 @@ will add WebP, JPEG XL, and AVIF.
 | Application and pipeline | Python 3.14 with project-local `.venv`, confirmed | Use the user's existing system-wide Python 3.14 installation. |
 | Desktop interface | PySide6 with Qt Widgets, confirmed | Keep Qt inside a replaceable GUI adapter; validate the pinned version, preview behavior, and distribution terms. |
 | Inference | CPU reference backend, DirectML candidate for AMD development, CUDA production; use ONNX Runtime or native model adapters as compatible | Python 3.14, model format/operator compatibility, visual equivalence, memory use, and redistribution. |
-| Job storage | SQLite | Transactional local job state and restart recovery. |
+| Job storage | Python standard-library SQLite, implemented for sequential jobs | Per-image transactions and verified JPEG recovery. Stage checkpoints remain planned. |
 | JPEG decoding and color | Pillow 13.0.0 and LittleCMS, implemented | Synthetic color/orientation checks and seven local JPEG round trips; broader camera and gamut coverage pending. |
 | Verification | Automated pipeline/recovery checks and a human-reviewed image set | Functional correctness plus visual evidence. |
 
@@ -64,6 +67,8 @@ src/retouching_tool/
     application/
         service.py
         contracts.py
+        batch.py
+        job_service.py
         events.py
     diagnostics/
         events.py
@@ -306,6 +311,16 @@ needed to resume; reclaim earlier states only after downstream results are
 committed. Bounded rolling storage can keep predecessor/current stage frontiers
 instead of every historical intermediate.
 
+The headless sequential implementation runs through `ApplicationService.job_service`.
+It stores one versioned SQLite journal per job under `.state/jobs`, with a workspace
+runner lock. It freezes source hashes, pipeline, compression, backend/package
+versions and checkpoint manifests before processing. Each sequential image is a
+restart unit. The runner prepares and releases one stage at a time, checks free
+space before starting the next image, and records a receipt after JPEG verification
+and before the no-overwrite rename. Recovery validates a published or pending
+file against that receipt. Pause/cancel requests take effect between images.
+Per-stage checkpoints and staged scheduling are planned.
+
 ## Previews and configuration persistence
 
 The desktop UI must provide application configuration editing. The proposed
@@ -339,6 +354,15 @@ sequence. The [Pipeline contract](pipeline.md) defines recovery and job snapshot
 
 ## Folder and artifact validation
 
+`ApplicationService.batch_service` uses `application/batch.py`,
+`storage/batch_paths.py`, and the bounded JPEG header reader. It returns an immutable
+index and processes a selected subset into an immutable export plan. Folder inputs
+supply relative paths in selection order. Explicit files also contribute their
+containing directory to path validation. Unreadable JPEG headers remain visible in
+the index and require correction or deselection before planning. File IDs, sizes
+and modification times detect ordinary edits between indexing and preflight. Job
+content hashing and execution-time verification belong to the scheduler.
+
 Use a shared path-validation service for UI feedback and worker preflight.
 Resolve directory aliases and compare filesystem locations case-insensitively as
 appropriate for the Windows volume. Reject destination equal to source, and reject
@@ -349,6 +373,11 @@ input manifest and skips directory links by default.
 Preserve relative input paths under destination. Validate each planned export
 against original inputs and output collisions. A writable destination is required
 for processing previews as well as batch runs; original viewing only needs source.
+Batch preflight requires an existing destination root. It validates nested export
+parents and blocks descendant reparse points, case-insensitive planned collisions
+and existing output names. Temporary write probes use the existing parent of each
+required directory. Export subdirectories and a missing scratch root are created
+by the future execution layer.
 
 The temporary root holds dedicated application-owned job directories. Place job
 scratch outside the scanned source tree so it cannot become an input. Validate
@@ -372,6 +401,12 @@ compressed source total for outputs. Compute against the actual intermediate
 representation, adding known masks, file overhead, and transactional peak space
 explicitly. Reclaim predecessors per committed image to avoid retaining two full
 batch generations. Aggregate reservations when folders share a storage volume.
+The initial budget uses 12 bytes per working pixel, the artifact TIFF and manifest
+limits, source header bytes as an upper bound on retained metadata, and one
+transactional TIFF and manifest replacement. Callers can supply known extra
+scratch bytes. Preflight reports required and available space by filesystem
+device without allocating the estimated space. The pending JPEG is renamed at
+publication and contributes to the output estimate as one file.
 
 Check free space after indexing/configuration changes and before a job; monitor it
 while running. Handle exhaustion without corrupting committed states, reducing
