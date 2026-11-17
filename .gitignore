@@ -23,6 +23,7 @@ photos/
 exports/
 
 # Model checkpoints and weights
+/models/
 checkpoints/
 *.onnx
 *.safetensors

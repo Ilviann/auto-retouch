@@ -15,10 +15,15 @@ versions, pixel/geometry revisions, dimensions and explicit oriented coordinates
 Required stale/wrong-source/wrong-version context fails; stale optional context
 is absent. Pixel edits invalidate appearance measurements; spatial context can
 survive only an explicitly declared preservation, and geometry changes invalidate
-it. Source metadata bytes are retained across stages. Decode/profile conversion,
-lossless context artifacts, masks/transforms, model-version artifact identity, and
-validated JPEG metadata transfer remain milestone 3b/4 work. No portrait-quality
-or file-metadata acceptance follows from synthetic state tests.
+it. Source metadata bytes are retained across stages.
+
+The 3b artifact slice now persists this reference representation and current typed
+statistics/measurement context in float32 TIFF plus strict JSON manifests, retaining
+EXIF, ICC, XMP and IPTC-IIM bytes exactly and verifying source/revision/coordinate
+provenance. The JPEG adapter applies input orientation and converts to working
+linear sRGB. Dense masks and transforms remain pending.
+See [artifact evidence](verification/lossless-artifacts.md) and
+[JPEG evidence](verification/jpeg-boundary.md).
 
 ## Proposed first catalog
 
@@ -132,19 +137,17 @@ rather than retaining an unretouched thumbnail as the exported preview.
 Set the output Software field to the exact product name and application version:
 `Auto ReTouch <version>`. Neyrome is the application author, not a replacement for
 the source photographer's author/copyright metadata. Append an editing/export
-provenance record with processing time, tool version, and a compact pipeline identifier/hash using
-validated metadata fields, proposed as XMP history. Preserve prior history and
+provenance record with processing time, tool version and the pipeline snapshot's
+SHA-256 in XMP history. Preserve prior history and
 retain a previous Software value in provenance rather than silently discarding it.
 Keep full pipeline settings and checkpoint details in job history/diagnostics;
 do not embed face coordinates, dense masks, or machine-local paths by default.
 
-Select the metadata adapter only after Python 3.14 and JPEG round-trip validation.
-Check capture tags after writing the final file. Required EXIF loss or an inability
-to write the processing marker fails export validation rather than silently
-producing an apparently successful metadata-stripped result. Report malformed or
-unsupported metadata with useful context; handle proprietary MakerNotes and their
-offsets explicitly rather than claiming that arbitrary tag reserialization is safe.
-Source files without EXIF remain valid inputs; do not invent missing capture data.
+The adapter checks capture tags and provenance by reopening the temporary export.
+It removes the old EXIF and XMP thumbnails and carries standard XMP and Photoshop
+IPTC-IIM. Source files without EXIF remain valid inputs. Malformed capture EXIF
+and proprietary MakerNotes with unverified offsets have explicit failure paths.
+See [JPEG metadata policy](decisions/0003-jpeg-boundary.md).
 
 ## Validation priorities
 

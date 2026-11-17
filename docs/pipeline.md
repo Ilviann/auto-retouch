@@ -31,12 +31,20 @@ atomic autosaves leave the current editor snapshot and previous file intact.
 Qt currently renders loaded stages, parameters, toggles, rechecks and model-page
 links. Add/remove/reorder widgets and file dialogs belong to milestone 5.
 
-Pipeline preflight checks operation/assets/context only. It does not authorize
-photo processing: destination/path/disk validation, decoding, actual previews,
-schedulers, artifact persistence and export remain unimplemented. Reference
-sessions operate only on explicitly constructed normalized image states in tests.
+Pipeline preflight checks operation, assets and context. Batch and preview
+execution still require destination, path and disk validation.
 No neural operation/model is registered in the production catalog. Model-state
 acceptance currently uses synthetic local bytes and injected test operations.
+
+The 3b storage slice persists reference states with lossless float32 TIFF,
+strict versioned manifests, typed context and cache identity/checksums. The
+headless JPEG adapter initializes oriented image states and exports verified sRGB
+JPEGs. XMP and IPTC-IIM join EXIF and ICC as immutable source metadata. Version-1
+artifact manifests can carry optional checksummed XMP and IPTC blob references;
+earlier manifests still load. Include the decoder/color policy and relevant
+dependency versions in scheduler cache identity. Scheduler and GUI wiring remain
+pending. See [artifact evidence](verification/lossless-artifacts.md) and
+[JPEG evidence](verification/jpeg-boundary.md).
 
 ## Editor and JSON settings
 
@@ -162,13 +170,10 @@ editor and future jobs; an active job keeps its snapshot. If an asset needed by 
 active job disappears, handle the actual failure explicitly rather than silently
 dropping the stage for subsequent images.
 
-Proposed initial recovery actions are Recheck and Open model page. The model
-catalog provides canonical publisher/file URLs, versions, and asset identity data.
-Opening a link is explicit user navigation; no startup/import/preview action
-automatically contacts a download service. Later, Download required files can show
-progress/cancel and validate a completed download before atomic installation under
-the checkpoint root. Partial downloads never make a stage ready. The action
-downloads model assets only and does not alter the setup-selected backend.
+Use Open model page to visit the publisher. The model catalog provides the
+publisher URL, version and expected file identities. Download the required files
+and place them at the paths shown on the card under the configured model folder
+(`models/` by default). Select Recheck to verify the installed files locally.
 
 ## Preview meaning
 

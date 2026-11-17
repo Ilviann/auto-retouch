@@ -8,6 +8,18 @@ pipeline validation and reference-stage cards. Photo processing, job recovery,
 and model provisioning remain later work. See the
 [verification record](verification/runtime-foundation.md) for actual coverage.
 
+The 3b artifact slice adds pinned `tifffile==2026.10.15` to shared dependencies
+for uncompressed float32 intermediate TIFF. The user explicitly authorized this
+dependency addition to the main `.venv`; DirectML selection and packages were
+retained. No preparation/backend probe was rerun. See the
+[storage decision](decisions/0002-lossless-tiff-artifacts.md).
+
+The 3b JPEG adapter adds hash-pinned `Pillow==13.0.0` for JPEG decoding and
+encoding with LittleCMS ICC conversion. The local interpreter and DirectML
+selection were retained, and the prepared lock identity was refreshed after
+checking the installed pins and codec support. See
+[JPEG verification](verification/jpeg-boundary.md).
+
 ## Python environment
 
 - Target Python 3.14.x. The proposed initial target is standard 64-bit CPython on
@@ -213,7 +225,7 @@ Proposed default file: `<app-root>\config.json`, with a versioned
 {
   "schema_version": 1,
   "paths": {
-    "checkpoints": "./checkpoints",
+    "checkpoints": "./models",
     "temporary": "./.work",
     "logs": "./logs"
   },
@@ -226,7 +238,8 @@ Proposed default file: `<app-root>\config.json`, with a versioned
 }
 ```
 
-- `paths.checkpoints` locates the local model catalog and checkpoint files.
+- `paths.checkpoints` locates the model files. Its default is `./models`, and
+  existing explicit paths continue to take precedence.
 - `paths.temporary` is the root for app-owned per-job scratch/cache directories.
 - `paths.logs` holds persistent diagnostic logs, outside disposable processing
   artifacts. Logging level/size/age limits use the proposed defaults above.
@@ -241,10 +254,9 @@ Proposed default file: `<app-root>\config.json`, with a versioned
   a structurally valid pipeline still opens. An invalid/unavailable asset prevents
   stage activation and preview until recovery. Revalidate after checkpoint-root
   changes; folder configuration never causes an automatic checkpoint download.
-- Catalog source URLs support an explicit Open model page action. An in-app
-  download action is a later enhancement, initiated by the user and limited to
-  validated model assets; startup, setup, launch, and processing do not fetch them
-  automatically. Backend selection remains owned by the setup script.
+- Open model page leads to the publisher. The user downloads the specified
+  version, places the files at the reported destination paths, and uses Recheck
+  to validate the local installation. Backend selection remains setup-only.
 - Validate scratch writeability, free space, and source relationships before
   processing. Changing the setting affects future jobs; existing jobs retain
   their recorded artifact locations so recovery/cleanup can find them.

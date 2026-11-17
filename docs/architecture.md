@@ -15,7 +15,11 @@ Add execution from pending portrait-model and CUDA acceptance. Milestone 3a adds
 immutable pipeline definitions, a registry, local asset readiness, typed image
 state, and a prepared-stage executor with CPU contract references. See
 [pipeline evidence](verification/pipeline-contracts.md). Other processing modules
-below remain proposals until their milestones are implemented.
+below remain proposals until their milestones are implemented. Milestone 3b now
+adds lossless float32 TIFF/context storage, checksummed source metadata and safe
+manifest-based lifetime management; see [artifact evidence](verification/lossless-artifacts.md).
+The JPEG adapter in `imaging/` decodes oriented linear-sRGB states and stages
+verified JPEG exports for publication. See [JPEG evidence](verification/jpeg-boundary.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.
@@ -28,7 +32,7 @@ will add WebP, JPEG XL, and AVIF.
 | Desktop interface | PySide6 with Qt Widgets, confirmed | Keep Qt inside a replaceable GUI adapter; validate the pinned version, preview behavior, and distribution terms. |
 | Inference | CPU reference backend, DirectML candidate for AMD development, CUDA production; use ONNX Runtime or native model adapters as compatible | Python 3.14, model format/operator compatibility, visual equivalence, memory use, and redistribution. |
 | Job storage | SQLite | Transactional local job state and restart recovery. |
-| Image decoding and color | Evaluate image libraries with explicit ICC and EXIF handling | Correctness on reference JPEGs; do not assume all decoders apply profiles. |
+| JPEG decoding and color | Pillow 13.0.0 and LittleCMS, implemented | Synthetic color/orientation checks and seven local JPEG round trips; broader camera and gamut coverage pending. |
 | Verification | Automated pipeline/recovery checks and a human-reviewed image set | Functional correctness plus visual evidence. |
 
 Select and pin dependencies, CUDA libraries, cuDNN, and model runtimes compatible
@@ -98,10 +102,10 @@ src/retouching_tool/
         staged.py
         repository.py
     imaging/
-        metadata.py
-        exporters/
-            base.py
-            jpeg.py
+        exif.py
+        iptc.py
+        jpeg.py
+        xmp.py
     storage/
     previews/
 tests/
@@ -261,9 +265,9 @@ initial operations are in the [Stage catalog and image state](stages.md).
 Import captures original EXIF before normalization. Export transfers capture and
 descriptive metadata, updates output-specific technical fields, and records the
 product name/version and processing provenance. Keep this infrastructure outside
-the removable stage list. Validate metadata after encoding; a failed required
-transfer is not a successful export. Select its Python 3.14-compatible adapter
-after testing real JPEGs and proprietary metadata cases.
+the removable stage list. The JPEG adapter reads and verifies the temporary
+export before publication. Its supported metadata and explicit failure policy
+are recorded in the [JPEG decision](decisions/0003-jpeg-boundary.md).
 
 Initially, operations act on one image independently of other batch items. They
 must not learn or update state according to traversal order. Where randomness is
@@ -353,7 +357,10 @@ user photos as a disposable job directory. Cleanup acts only on owned artifacts.
 
 Choose a lossless intermediate representation that round-trips the working image
 precision, range, color metadata, and auxiliary artifacts. Repeated JPEG encoding
-is excluded. Benchmark disk space and I/O as well as GPU work: even one raw float32
+is excluded. The reference-state store now uses uncompressed float32 RGB TIFF plus
+strict JSON manifests and opaque source EXIF/profile blobs; see the
+[storage decision](decisions/0002-lossless-tiff-artifacts.md). It supports current
+statistics/measurement context, not dense masks yet. Benchmark disk space and I/O as well as GPU work: even one raw float32
 RGB state for a hypothetical 24-megapixel image is about 288 MB, or 144 GB for
 500 images before auxiliary artifacts and compression. This is a size calculation,
 not an estimate of the user's actual inputs or a measured storage requirement.

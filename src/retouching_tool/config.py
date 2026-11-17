@@ -40,7 +40,7 @@ def load_config(root: Path, explicit: Path | None = None) -> AppConfig:
     paths = data.get("paths", {})
     _keys(paths, ["checkpoints", "temporary", "logs"], "paths")
     resolved = {}
-    for name, default in (("checkpoints", "checkpoints"), ("temporary", ".work"), ("logs", "logs")):
+    for name, default in (("checkpoints", "models"), ("temporary", ".work"), ("logs", "logs")):
         value = paths.get(name, default)
         if not isinstance(value, str) or not value.strip() or "\x00" in value:
             raise RetouchingError("CONFIG_INVALID", f"paths.{name} must be a nonempty path")

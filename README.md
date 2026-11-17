@@ -36,9 +36,18 @@ The runtime foundation (milestone 1a) and pipeline contracts/reference stages (3
 are implemented. The Qt window shows startup settings and loaded stage cards with
 on/off controls, numeric parameters, asset errors, and dependency status. Headless
 services support add/remove/reorder, atomic JSON save/load, and last-used restore.
-CPU statistics and manual exposure are contract references; photo import/processing,
-Natural/Beauty presets, and exports remain pending. No portrait models
-have been selected or downloaded, and no retouching quality has been benchmarked.
+CPU statistics and manual exposure are contract references. Natural and Beauty
+presets and portrait models remain pending.
+
+The 3b storage slice now uses uncompressed float32 TIFF intermediates with typed
+context manifests, immutable source metadata blobs, checksum validation and
+reference-aware cleanup. `tifffile` is pinned in the main shared dependencies.
+See [artifact evidence](docs/verification/lossless-artifacts.md).
+
+The headless JPEG adapter uses pinned Pillow to apply input orientation and color
+management, then verify capture metadata, sRGB and processing history before
+publishing exports. GUI and scheduler integration remain pending. See
+[JPEG verification](docs/verification/jpeg-boundary.md).
 
 Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
 `prepare_env.cmd` and choose a backend (Enter selects CUDA). Setup installs the
@@ -53,6 +62,10 @@ setup or change backends only for setup improvements or bug fixes. Launch with
 options. Launch never installs packages or starts processing automatically.
 Copy `config.example.json` to `config.json` to customize local folders; without it,
 the window shows the documented defaults.
+
+When a model is required, download the specified files from the publisher and
+place them at the paths shown on the stage card. The default model folder is
+`models/`, configurable through `paths.checkpoints`. Use Recheck after placement.
 
 Pipeline files use version 1 and registered operation versions. Try the reference
 cards with `run.cmd --pipeline examples\pipelines\reference.json`. This example is

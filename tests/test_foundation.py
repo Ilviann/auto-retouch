@@ -62,6 +62,7 @@ class FoundationTests(unittest.TestCase):
     def test_config_defaults_and_file_relative_paths(self):
         config = load_config(self.root)
         self.assertTrue(config.using_defaults)
+        self.assertEqual(config.checkpoints, self.root / "models")
         self.assertEqual(config.temporary, self.root / ".work")
         path = self.write("settings/config.json", {"schema_version": 1, "paths": {"checkpoints": "../модели"}})
         config = load_config(self.root, path)

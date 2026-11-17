@@ -5,9 +5,13 @@ then to a reliable desktop batch application. Implementation was authorized on
 2026-11-17. Runtime foundation (1a) is complete at the available-hardware level;
 see [backlog](backlog.md) and [evidence](verification/runtime-foundation.md).
 Pipeline contracts/reference stages (3a) are complete at the synthetic contract
-level; see [pipeline evidence](verification/pipeline-contracts.md). Next portable
-work is 3b precision/artifact/metadata validation; actual portrait quality still
-requires representative user photos and reviewed model provisioning.
+level; see [pipeline evidence](verification/pipeline-contracts.md). The 3b lossless
+TIFF artifact slice is implemented at reference level; see
+[artifact evidence](verification/lossless-artifacts.md). Headless JPEG
+color/orientation and verified export are implemented and checked on the seven
+local study JPEGs. Batch indexing and preflight are pending. Actual retouching
+quality still requires reviewed photos and model provisioning. See
+[JPEG evidence](verification/jpeg-boundary.md).
 
 ## Development stages
 
@@ -33,8 +37,9 @@ record unsupported candidates rather than silently using an older Python version
 Runtime foundation work begins with application implementation authorization, not
 as an implicit side effect of editing these requirements.
 
-Representative user testing photos and retouched references are not available yet;
-the user plans to provide them later. Continue foundation and functional checks
+The user supplied a local source folder on 2026-11-17 containing seven JPEG study
+shots, authorized for local testing. Coverage and retouched references remain
+unreviewed. Continue foundation and functional checks
 with generated/synthetic fixtures, but keep visual-quality and representative
 model acceptance pending. Do not present synthetic orchestration tests as evidence
 of good full-body or multi-person retouching. Confirm actual checkpoint commercial

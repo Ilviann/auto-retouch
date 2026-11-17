@@ -52,7 +52,7 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
 - Every editable stage can be turned off. Missing required AI model files force
   that stage off with an error on its card. Preserve settings, revalidate context
   dependencies, and leave it off after recovery until the user enables it. Offer
-  model-page links; direct downloading is a later explicit action, never automatic.
+  model-page links and exact required file paths for manual installation.
 - Source folder with optional recursion; destination required for processing,
   distinct from source and outside source when recursive search is enabled.
 - Thumbnail grid and selected-image previews of the whole pipeline or one operation.
@@ -67,12 +67,22 @@ Python 3.14 and virtual-environment delivery are fixed. PySide6 Essentials 6.12.
 (Qt Widgets), ONNX Runtime 1.24.4 CPU/DirectML, and their pinned dependencies have
 foundation-level import/inference checks on Windows 11/Python 3.14.7. CUDA hardware
 acceptance and actual portrait-model compatibility/quality remain unvalidated.
-Do not download model checkpoints as an incidental part of application work.
-Representative user photos will be provided later; visual acceptance is pending.
+When an AI model is needed, ask the user to download the exact files from the
+publisher and place them under the configured model folder (`models/` by default).
+Provide the model version, publisher link, expected filenames and destination
+paths. The user performs the download and placement. Verify local files after
+the user supplies them.
+The user supplied a local testing folder with seven JPEG study shots on 2026-11-17.
+All seven passed JPEG round-trip checks. Representative coverage and retouching
+visual acceptance are pending. Keep these images outside source control.
 Pipeline contracts/reference stages (3a) are now implemented; see
-`docs/verification/pipeline-contracts.md`. The next portable milestone is 3b
-precision/artifact/metadata validation. No production neural stage or checkpoint
-has been selected. Synthetic reference/card tests do not establish portrait quality.
+`docs/verification/pipeline-contracts.md`. The 3b lossless TIFF artifact slice is
+implemented; see `docs/verification/lossless-artifacts.md`. Headless JPEG decode,
+ICC/orientation normalization and verified export are implemented; see
+`docs/verification/jpeg-boundary.md`. Next portable batch work is source indexing,
+destination validation and disk preflight. No production neural stage or
+checkpoint has been selected. Synthetic reference/card tests do not establish
+portrait quality.
 
 ## Working rules
 

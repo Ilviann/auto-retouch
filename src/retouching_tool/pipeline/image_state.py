@@ -12,10 +12,13 @@ class SourceMetadata:
     source_id: str
     exif: bytes = b""
     icc_profile: bytes = b""
+    xmp: bytes = b""
+    iptc: bytes = b""
 
     def __post_init__(self):
-        if not isinstance(self.source_id, str) or not self.source_id or type(self.exif) is not bytes or type(self.icc_profile) is not bytes:
-            raise ValueError("Source metadata requires an identity and immutable EXIF/profile bytes")
+        if (not isinstance(self.source_id, str) or not self.source_id
+                or any(type(value) is not bytes for value in (self.exif, self.icc_profile, self.xmp, self.iptc))):
+            raise ValueError("Source metadata requires an identity and immutable EXIF/profile/XMP/IPTC bytes")
 
 
 @dataclass(frozen=True)

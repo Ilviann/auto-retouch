@@ -15,6 +15,22 @@ issues include their captured technical cause. The initial Qt cards expose
 readiness and command errors and retain a diagnostics-storage warning after a
 command. Worker transport and full diagnostic search/export are still pending.
 
+The 3b artifact store adds `ARTIFACT_COMMITTED`, `ARTIFACT_VALIDATED`,
+`ARTIFACT_WRITE_FAILED`, `ARTIFACT_INVALID`, `ARTIFACT_STORE_FAILED` and explicit
+retirement/collection outcomes. Write/read failures preserve technical causes and
+tracebacks; image-stage writes carry the existing runtime correlation. Storage
+creation/collection use job/store IDs. No pixel or metadata blob bytes enter these
+records. See [artifact failure evidence](verification/lossless-artifacts.md).
+
+JPEG events include job, image, attempt and preview request IDs where supplied.
+`INPUT_JPEG_DECODED` records oriented dimensions and color handling.
+`INPUT_EXIF_THUMBNAIL_INVALID` and `INPUT_SRGB_ASSUMED` expose recoverable input
+issues. Input metadata/decode errors, unsupported export metadata, write errors,
+collisions and `OUTPUT_VALIDATION_FAILED` carry causes or tracebacks.
+`OUTPUT_JPEG_VERIFIED` records the pipeline hash and compression options after
+publication. Failed cleanup has its own event. See
+[JPEG verification](verification/jpeg-boundary.md).
+
 Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
 `diagnostics/service.py`, with UTC millisecond times, session/process identity,
 codes, structured context, and exception chains at INFO settings. Setup child

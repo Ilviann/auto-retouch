@@ -47,7 +47,7 @@ presets rather than fixed processing paths.
 | U35 | App name: Auto ReTouch (exact capitalization). |
 | U36 | Every editable pipeline stage can be skipped by turning it off. |
 | U37 | A stage missing a required AI model file must be turned off and show an error status on its own UI card. |
-| U38 | Plan a model-acquisition action on the stage card: a link to the model's download page, or later a button to download the required files. |
+| U38 | Ask the user to download required AI model files and place them in the configured model folder (`models/` by default). Provide the model version, publisher link, required filenames and destination paths. |
 | U39 | Retouch all exposed human skin, including multiple people in one photo. Face/neck-only coverage is insufficient for the first version. |
 | U40 | Provide export settings. Initial export support is JPEG with compression controls. |
 | U41 | Plan WebP, JPEG XL, and AVIF export support for later versions. |
@@ -62,7 +62,8 @@ presets rather than fixed processing paths.
 The following sections are the proposed MVP baseline, rather than additional
 user-confirmed requirements. Typical image dimensions, retouching examples, CPU
 requirements, and model compatibility/quality remain to be established. The user
-will provide representative test photos later; they are not available yet.
+has now provided a local testing folder with seven JPEG study shots (2026-11-17).
+Representative coverage and visual acceptance remain unreviewed.
 
 ## Proposed functional baseline
 
@@ -102,7 +103,7 @@ will provide representative test photos later; they are not available yet.
 | F32 | Keep EXIF preservation and final processing markers in mandatory export infrastructure. Validate required metadata after writing; report metadata loss/marker failure as export failure. |
 | F33 | Distinguish manually skipped stages, ready stages, and unavailable/error stages. Missing-model cards show the required files, expected local locations, and a recovery action with text/icon feedback. Keep parameters editable and prevent activation until all required assets are valid. |
 | F34 | Recheck assets after pipeline/configuration changes, on explicit recheck, and before execution. When restored, clear the asset error but leave an automatically disabled stage off until the user enables it. Log the transition and revalidate downstream context dependencies. |
-| F35 | Proposed first acquisition UI is Open model page using a publisher URL from the model catalog. Direct downloading is a later enhancement with explicit user action, progress/cancel, version/checksum validation, and atomic placement in the checkpoint folder. Never download models automatically on load, startup, preview, or processing. |
+| F35 | The stage card shows the required files and paths and provides Open model page using the publisher URL. The user downloads and places the files, then selects Recheck to validate them locally. |
 | F36 | Estimate scratch/output reservations after indexing and whenever the mode, folders, input list, or relevant processing settings change. Show the assumptions and required/available space per storage volume; prevent start when the required reservation cannot be met. |
 | F37 | Provide a settings editor for machine-local configuration, including checkpoint, temporary-artifact, and log folders plus logging options. Show effective values and the active configuration file; validate through shared application services, save atomically, and show actionable validation/write errors. Cancel discards unsaved edits. Keep backend selection setup-only and preserve active job snapshots. |
 
@@ -144,10 +145,11 @@ provisioning and any other known storage needs are accounted for separately.
 The [Runtime and launch contract](runtime.md) defines proposed script behavior,
 launch options, configuration format, and dependency validation. These contracts
 now include implemented runtime scripts and startup modules; processing contracts
-remain partly planned: pipeline/reference contracts are now implemented in 3a,
-while photo decoding/export and schedulers are pending. See
+remain partly planned. Pipeline/reference contracts and the headless JPEG
+decode/export adapter are implemented. Scheduler and GUI integration are pending. See
 [runtime evidence](verification/runtime-foundation.md) and
-[pipeline evidence](verification/pipeline-contracts.md).
+[pipeline evidence](verification/pipeline-contracts.md) and
+[JPEG evidence](verification/jpeg-boundary.md).
 The [Logging and diagnostics contract](diagnostics.md) defines event context,
 failure presentation, retention, and local bug-report evidence.
 The [Initial stage catalog](stages.md) proposes image analysis, global correction,
@@ -311,7 +313,7 @@ only faces cannot by themselves satisfy this scope.
     required model files, disabled/error cards on import and last-used restore,
     expected filenames/paths, activation prevention, recheck/recovery without
     auto-enabling, and dependency messages after a producer is disabled. Confirm
-    no automatic downloads and no silent stage omission from an active job.
+    manual model installation and no silent stage omission from an active job.
 18. **Export and resource planning:** verify JPEG settings reach the exporter,
     metadata survives, and output size assumptions remain visible. Check disk
     formulas on empty/single/mixed-resolution batches, shared/separate volumes,
