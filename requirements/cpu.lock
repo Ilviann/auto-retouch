@@ -1,0 +1,4 @@
+# Windows x86-64, standard CPython 3.14. PyPI wheel hashes, resolved 2026-11-17.
+# Install via prepare_env.cmd; do not mix backend profiles.
+-r shared.lock
+onnxruntime==1.24.4 --hash=sha256:311e309f573bf3c12aa5723e23823077f83d5e412a18499d4485c7eb41040858

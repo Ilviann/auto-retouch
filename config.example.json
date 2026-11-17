@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "paths": {
+    "checkpoints": "./checkpoints",
+    "temporary": "./.work",
+    "logs": "./logs"
+  },
+  "logging": {
+    "level": "INFO",
+    "max_file_mb": 10,
+    "max_total_mb": 200,
+    "retention_days": 14
+  }
+}

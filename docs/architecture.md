@@ -1,4 +1,4 @@
-# Implementation proposal
+# Architecture and implementation status
 
 The architecture prioritizes visual quality, offline operation, recoverable
 batches, editable operation pipelines, and a 6 GB GPU memory budget. Sequential
@@ -7,6 +7,12 @@ project-local virtual environment, and PySide6 with Qt Widgets for the initial G
 are fixed requirements. The GUI is a replaceable adapter around toolkit-independent
 application services. Other stack choices, models, and exact package/runtime
 versions remain subject to validation.
+Milestone 1a now supplies setup/launch, strict config and CLI handling, bootstrap
+diagnostics, headless startup services, and a minimal Qt Widgets adapter. The
+[runtime decision](decisions/0001-runtime-foundation.md) pins the foundation stack;
+[verification](verification/runtime-foundation.md) distinguishes real CPU/DirectML
+Add execution from pending portrait-model and CUDA acceptance. Processing modules
+below remain a proposal until their milestones are implemented.
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.

@@ -1,0 +1,4 @@
+# Windows x86-64, standard CPython 3.14. PyPI wheel hashes, resolved 2026-11-17.
+# Install via prepare_env.cmd; do not mix backend profiles.
+-r shared.lock
+onnxruntime-gpu==1.24.4 --hash=sha256:4dde3d2f1039060c42b12fd446fc0da5b836cc65dceb4020ca60a04cffa1d90d

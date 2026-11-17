@@ -1,8 +1,9 @@
 # Development and agent workflow
 
 Development proceeds from an agreed portrait workflow to measured engine quality,
-then to a reliable desktop batch application. Current work establishes the plan;
-application implementation begins when the user asks to proceed.
+then to a reliable desktop batch application. Implementation was authorized on
+2026-11-17. Runtime foundation (1a) is complete at the available-hardware level;
+see [backlog](backlog.md) and [evidence](verification/runtime-foundation.md).
 
 ## Development stages
 
@@ -59,6 +60,12 @@ the run script does not provide backend switching.
 
 Until level 3 is available, complete portable development work and mark CUDA
 acceptance as pending.
+
+On this machine, ordinary application development uses the prepared DirectML
+environment. Setup testing and backend changes are reserved for tasks that improve
+or fix setup scripts (user instruction, 2026-11-17). Do not rerun preparation or
+switch backends as a routine application check; headless core tests can run in
+the existing DirectML environment without invoking neural inference.
 
 ## Agent responsibilities
 

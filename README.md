@@ -1,6 +1,6 @@
 # Auto Retouch (by Neyrome)
 
-A planned Windows 11 desktop tool for fully local batch retouching of studio portraits.
+A Windows 11 desktop project for fully local batch retouching of studio portraits.
 Stages can change pixels, produce reusable region/mask context, or do both.
 Exports preserve source capture EXIF and record processing by the tool.
 The initial GUI uses PySide6 with Qt Widgets, isolated behind toolkit-independent
@@ -29,8 +29,48 @@ validated destination. Sequential mode completes one photo at a time, while stag
 mode processes the batch one operation at a time using temporary artifacts and
 releasing model resources between stages.
 
-The project is currently in requirements and architecture planning. No application
-or retouching engine has been implemented or benchmarked.
+The runtime foundation (milestone 1a) is implemented. It opens a minimal Qt Widgets
+window showing effective startup settings; photo processing, pipeline operations,
+Natural/Beauty presets, and exports are not implemented yet. No portrait models
+have been selected or downloaded, and no retouching quality has been benchmarked.
+
+Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
+`prepare_env.cmd` and choose a backend (Enter selects CUDA). Setup installs the
+hash-pinned dependency set in `.venv` and validates actual provider execution.
+GPU setup fails when its provider cannot execute; it never silently falls back.
+CUDA also requires compatible NVIDIA drivers/CUDA/cuDNN runtime provisioning;
+that profile has not been hardware-tested here.
+
+On this development machine, **use the existing DirectML environment**. Rerun
+setup or change backends only for setup improvements or bug fixes. Launch with
+`run.cmd`; `run.cmd --help` lists repeatable `--source`, `--pipeline`, and `--config`
+options. Launch never installs packages or starts processing automatically.
+Copy `config.example.json` to `config.json` to customize local folders; without it,
+the window shows the documented defaults.
+
+For this milestone, pipeline files must have version 1, a name, and an empty
+`stages` array. Nonempty operation lists fail explicitly until milestone 3.
+Valid explicit settings replace last-used selection; corrupt restored state
+produces a visible warning. No selected photo is decoded or modified.
+
+Run ordinary app checks in the existing environment:
+
+```bat
+.venv\Scripts\python.exe -B -m unittest discover -s tests -v
+```
+
+Setup-specific checks are opt-in and reserved for setup work:
+
+```bat
+.venv\Scripts\python.exe -B -m unittest discover -s tests -p setup_checks.py -v
+.venv\Scripts\python.exe -B tools\verify_clean_setup.py
+```
+
+The second setup command installs packages in a disposable Unicode-path copy and
+switches that copy between CPU and DirectML; it leaves the main environment alone.
+See [milestone evidence](docs/verification/runtime-foundation.md), the
+[implementation backlog](docs/backlog.md), and the
+[dependency decision and terms](docs/decisions/0001-runtime-foundation.md).
 
 - [Product requirements](docs/requirements.md)
 - [Implementation proposal](docs/architecture.md)

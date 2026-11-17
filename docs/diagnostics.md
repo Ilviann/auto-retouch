@@ -1,9 +1,33 @@
 # Logging and diagnostics contract
 
 Logging must make warnings, failures, and unexpected processing results useful
-for product improvement and bug investigation. This is a specification; logging
-services, UI, and report export are not implemented yet. The user's requirement
-is detailed diagnostic feedback; the format and defaults below are proposed.
+for product improvement and bug investigation. Foundation bootstrap logging is
+implemented; worker transport, the full diagnostics panel, batch summaries, and
+report export remain planned. The user's requirement is detailed diagnostic
+feedback; unimplemented parts of the format and defaults below remain proposed.
+
+Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
+`diagnostics/service.py`, with UTC millisecond times, session/process identity,
+codes, structured context, and exception chains at INFO settings. Setup child
+processes have distinct log files and `parent_session_id` correlation. Output from
+their package manager/provider checks is captured by setup, with bounded tails
+and credential redaction. Individual records are limited to 64 KiB; truncation is
+marked, and memory fallback retains the latest 100 events.
+
+Bootstrap/config-error fallback is `<app-root>/logs`. If this directory fails,
+use the console and memory with an explicit `LOG_WRITE_FAILED`; no successful
+persistence is claimed. A failed configured log path is also shown in startup
+notices. Retention acts only on owned UUID-named JSONL files; retention failures
+are distinct from write failures. Logging is synchronous during this low-volume
+bootstrap milestone; move processing/worker delivery to the dedicated writer
+before adding inference workloads.
+
+Before Python or the installed package can run, CMD scripts record fixed codes in
+`logs/bootstrap-errors.log` and print remediation. This minimal fallback uses
+local shell timestamps and rotates at 64 KiB with one backup; configurable age
+retention applies to JSONL, not this early shell fallback. Failed fallback writes
+are reported in the console. Native crash capture and complete worker failure
+monitoring are not claimed by this milestone.
 
 ## Outputs and presentation
 

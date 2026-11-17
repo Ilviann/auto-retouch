@@ -1,0 +1,34 @@
+# Project-local Python environment
+.venv/
+
+# Python bytecode and package metadata
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build and distribution artifacts
+build/
+dist/
+
+# Machine-local configuration and application state
+config.json
+.state/
+
+# Temporary processing artifacts and diagnostic logs
+.work/
+logs/
+
+# Local photos and exported images
+photos/
+exports/
+
+# Model checkpoints and weights
+checkpoints/
+*.onnx
+*.safetensors
+*.pt
+*.pth
+
+# Test artifacts and dependency-resolution reports
+.test-work/
+.*resolution.json

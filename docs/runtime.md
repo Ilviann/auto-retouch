@@ -2,8 +2,10 @@
 
 The application targets Windows 11 only and runs on the user's system-wide
 Python 3.14 through a project-local
-virtual environment. The script names, flags, and JSON layout below are proposed
-implementation contracts. The scripts and package are not implemented yet.
+virtual environment. Milestone 1a implements the script names, flags, configuration,
+environment metadata, and startup skeleton below. Full operation validation,
+processing, job recovery, and model provisioning remain later work. See the
+[verification record](verification/runtime-foundation.md) for actual coverage.
 
 ## Python environment
 
@@ -26,7 +28,14 @@ The user reports an AMD Ryzen 7 7840HS APU with Radeon 780M Graphics, DirectX 12
 Ultimate capability, and no NVIDIA CUDA GPU. Keep the RTX 20-series / 6 GB production
 target and make most development validation possible through CPU and AMD backends.
 The setup menu selects one installed backend. Model/runtime compatibility is
-still subject to validation; no successful GPU execution here is claimed.
+still subject to validation. A generated Add graph has executed on CPU and
+DirectML; this establishes neither portrait-model compatibility nor CUDA acceptance.
+
+Development-machine policy (confirmed 2026-11-17): use the prepared DirectML
+environment for ordinary application development. Run setup tests and change
+computing backends only for setup-script improvements or bug fixes. Routine
+application verification must use the existing environment without preparation
+or backend switching.
 
 | Profile | Intended use | Candidate inference package |
 | --- | --- | --- |
@@ -152,7 +161,7 @@ Proposed root script: `run.cmd`.
 | `--config FILE` | Use this machine-local configuration file instead of the default root `config.json`. |
 | `--help` | Show usage without creating a GUI, loading checkpoints, or starting work. |
 
-Illustrative CMD invocations after implementation:
+CMD invocations (nonempty operation pipelines require milestone 3):
 
 ```bat
 prepare_env.cmd

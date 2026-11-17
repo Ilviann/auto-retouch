@@ -59,12 +59,13 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
 
 ## Current phase
 
-The user requested requirements, implementation planning, and agent workflow
-first. Maintain planning artifacts now. Begin application implementation or model
-downloads when the user asks to proceed. Python 3.14 and virtual-environment
-delivery are fixed; package compatibility and model choices are not yet validated.
-PySide6 with Qt Widgets is selected; its exact package version and application
-integration are not yet validated.
+The user authorized implementation on 2026-11-17. Runtime foundation (milestone 1a)
+is implemented; see `docs/verification/runtime-foundation.md` and `docs/backlog.md`.
+Python 3.14 and virtual-environment delivery are fixed. PySide6 Essentials 6.12.0
+(Qt Widgets), ONNX Runtime 1.24.4 CPU/DirectML, and their pinned dependencies have
+foundation-level import/inference checks on Windows 11/Python 3.14.7. CUDA hardware
+acceptance and actual portrait-model compatibility/quality remain unvalidated.
+Do not download model checkpoints as an incidental part of application work.
 Representative user photos will be provided later; visual acceptance is pending.
 
 ## Working rules
@@ -102,3 +103,7 @@ Representative user photos will be provided later; visual acceptance is pending.
 - Use a single agent by default. Do not spawn sub-agents unless the user explicitly
   requests delegation. Workflow roles do not themselves authorize spawning.
 - Follow `docs/workflow.md` for task completion and review evidence.
+- On this development machine, use the prepared DirectML backend for main
+  application development. Run setup tests or change computing backends only
+  when the task concerns setup-script improvements or bug fixes; ordinary app
+  development must not switch backends or rerun preparation.
