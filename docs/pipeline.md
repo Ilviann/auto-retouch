@@ -1,11 +1,42 @@
 # Pipeline contract
 
 The application edits an ordered sequence of operation instances. Both scheduling
-modes execute that same sequence. This is a planning contract; operation names and
-parameters below are illustrative until their implementations are selected.
+modes execute that same sequence. Version-1 definitions, registry/lifecycle,
+headless editing/persistence, and reference-stage readiness are implemented in
+milestone 3a. Other behaviors remain planning contracts; the portrait example's
+operation names and parameters are illustrative until selected.
 Stages may edit pixels, produce/update context, or do both. The
 [Initial stage catalog and image state](stages.md) defines the proposed operations,
 context validity/dependencies, and required metadata preservation/provenance.
+
+## Implemented reference boundary (3a)
+
+`examples/pipelines/reference.json` contains registered `analysis.image_statistics`
+and `core.exposure`, both operation version 1. Exposure accepts numeric `stops`
+from −3 to +3, defaults to zero, scales normalized linear-sRGB float32 samples,
+and warns when channel samples clip. It is a manual contract reference, not an
+accepted automatic portrait correction. Statistics produces `image.luminance`
+version 1 with 256 bins and reuses the input pixel buffer.
+
+The parser rejects unknown fields, duplicate instance IDs, unsupported operation
+versions, non-boolean enable flags, unknown parameters, and nonfinite/out-of-range
+numbers. Missing numeric parameters receive descriptor defaults. Definitions are
+frozen with tuple members; a pipeline preflight returns an independent snapshot.
+Imports are bounded to 1 MiB, 64 JSON nesting levels, 256 stages, 200-character
+names and 100-character IDs.
+
+The headless service implements add/remove/reorder, enable, numeric parameter
+changes, explicit save/load and autosave. Structurally invalid imports and failed
+atomic autosaves leave the current editor snapshot and previous file intact.
+Qt currently renders loaded stages, parameters, toggles, rechecks and model-page
+links. Add/remove/reorder widgets and file dialogs belong to milestone 5.
+
+Pipeline preflight checks operation/assets/context only. It does not authorize
+photo processing: destination/path/disk validation, decoding, actual previews,
+schedulers, artifact persistence and export remain unimplemented. Reference
+sessions operate only on explicitly constructed normalized image states in tests.
+No neural operation/model is registered in the production catalog. Model-state
+acceptance currently uses synthetic local bytes and injected test operations.
 
 ## Editor and JSON settings
 

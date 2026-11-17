@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "CPU contract reference (no portrait retouching)",
+  "stages": [
+    {
+      "id": "statistics-before",
+      "operation": "analysis.image_statistics",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {}
+    },
+    {
+      "id": "exposure-reference",
+      "operation": "core.exposure",
+      "operation_version": 1,
+      "enabled": false,
+      "parameters": { "stops": 0.0 }
+    },
+    {
+      "id": "statistics-after",
+      "operation": "analysis.image_statistics",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {}
+    }
+  ]
+}

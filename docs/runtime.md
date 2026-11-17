@@ -3,8 +3,9 @@
 The application targets Windows 11 only and runs on the user's system-wide
 Python 3.14 through a project-local
 virtual environment. Milestone 1a implements the script names, flags, configuration,
-environment metadata, and startup skeleton below. Full operation validation,
-processing, job recovery, and model provisioning remain later work. See the
+environment metadata, and startup skeleton below. Milestone 3a adds registered
+pipeline validation and reference-stage cards. Photo processing, job recovery,
+and model provisioning remain later work. See the
 [verification record](verification/runtime-foundation.md) for actual coverage.
 
 ## Python environment
@@ -161,7 +162,7 @@ Proposed root script: `run.cmd`.
 | `--config FILE` | Use this machine-local configuration file instead of the default root `config.json`. |
 | `--help` | Show usage without creating a GUI, loading checkpoints, or starting work. |
 
-CMD invocations (nonempty operation pipelines require milestone 3):
+CMD invocations (registered reference operations are supported as of milestone 3a):
 
 ```bat
 prepare_env.cmd

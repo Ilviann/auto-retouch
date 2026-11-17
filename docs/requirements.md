@@ -144,7 +144,10 @@ provisioning and any other known storage needs are accounted for separately.
 The [Runtime and launch contract](runtime.md) defines proposed script behavior,
 launch options, configuration format, and dependency validation. These contracts
 now include implemented runtime scripts and startup modules; processing contracts
-remain planned. See [milestone evidence](verification/runtime-foundation.md).
+remain partly planned: pipeline/reference contracts are now implemented in 3a,
+while photo decoding/export and schedulers are pending. See
+[runtime evidence](verification/runtime-foundation.md) and
+[pipeline evidence](verification/pipeline-contracts.md).
 The [Logging and diagnostics contract](diagnostics.md) defines event context,
 failure presentation, retention, and local bug-report evidence.
 The [Initial stage catalog](stages.md) proposes image analysis, global correction,

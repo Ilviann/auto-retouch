@@ -32,7 +32,7 @@ def validate_python() -> None:
             or platform.machine().lower() not in ("amd64", "x86_64") or platform.python_implementation() != "CPython"):
         raise RetouchingError("PYTHON_INCOMPATIBLE", "Use standard 64-bit x86 CPython 3.14; no Python downgrade is supported")
     if sys.platform != "win32" or sys.getwindowsversion().build < 22000:
-        raise RetouchingError("PLATFORM_UNSUPPORTED", "Auto Retouch requires Windows 11 (build 22000 or later)")
+        raise RetouchingError("PLATFORM_UNSUPPORTED", "Auto ReTouch requires Windows 11 (build 22000 or later)")
     if hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled():
         raise RetouchingError("PYTHON_INCOMPATIBLE", "Use standard CPython 3.14 rather than the free-threaded build")
 
@@ -125,7 +125,7 @@ def probe_graph() -> bytes:
     node = _message(1, "x") + _message(1, "y") + _message(2, "z") + _message(4, "Add")
     graph = _message(1, node) + _message(2, "auto-retouch-provider-probe")
     graph += _message(11, value_info("x")) + _message(11, value_info("y")) + _message(12, value_info("z"))
-    return _number(1, 8) + _message(2, "Auto Retouch") + _message(7, graph) + _message(8, _number(2, 13))
+    return _number(1, 8) + _message(2, "Auto ReTouch") + _message(7, graph) + _message(8, _number(2, 13))
 
 
 def probe_backend(backend: str) -> BackendInfo:

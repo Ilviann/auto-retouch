@@ -6,6 +6,20 @@ are proposals; models, algorithms, and numeric preset defaults require evaluatio
 Analysis outputs must be visible and reusable rather than hidden in a retouching
 operation's private state.
 
+Milestone 3a implements CPU image-statistics and manual-exposure references only;
+see [verification](verification/pipeline-contracts.md). Their in-memory working
+representation is normalized H×W×3 linear-sRGB float32 (12 pixel bytes per pixel),
+with bytes-backed read-only arrays and immutable source EXIF/profile bytes.
+Statistics carries source identity, producer/settings hash, operation/context
+versions, pixel/geometry revisions, dimensions and explicit oriented coordinates.
+Required stale/wrong-source/wrong-version context fails; stale optional context
+is absent. Pixel edits invalidate appearance measurements; spatial context can
+survive only an explicitly declared preservation, and geometry changes invalidate
+it. Source metadata bytes are retained across stages. Decode/profile conversion,
+lossless context artifacts, masks/transforms, model-version artifact identity, and
+validated JPEG metadata transfer remain milestone 3b/4 work. No portrait-quality
+or file-metadata acceptance follows from synthetic state tests.
+
 ## Proposed first catalog
 
 | Operation | Outputs | Main controls and dependencies |

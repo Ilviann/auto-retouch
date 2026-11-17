@@ -69,6 +69,10 @@ foundation-level import/inference checks on Windows 11/Python 3.14.7. CUDA hardw
 acceptance and actual portrait-model compatibility/quality remain unvalidated.
 Do not download model checkpoints as an incidental part of application work.
 Representative user photos will be provided later; visual acceptance is pending.
+Pipeline contracts/reference stages (3a) are now implemented; see
+`docs/verification/pipeline-contracts.md`. The next portable milestone is 3b
+precision/artifact/metadata validation. No production neural stage or checkpoint
+has been selected. Synthetic reference/card tests do not establish portrait quality.
 
 ## Working rules
 

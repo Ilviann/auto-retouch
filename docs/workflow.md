@@ -4,6 +4,10 @@ Development proceeds from an agreed portrait workflow to measured engine quality
 then to a reliable desktop batch application. Implementation was authorized on
 2026-11-17. Runtime foundation (1a) is complete at the available-hardware level;
 see [backlog](backlog.md) and [evidence](verification/runtime-foundation.md).
+Pipeline contracts/reference stages (3a) are complete at the synthetic contract
+level; see [pipeline evidence](verification/pipeline-contracts.md). Next portable
+work is 3b precision/artifact/metadata validation; actual portrait quality still
+requires representative user photos and reviewed model provisioning.
 
 ## Development stages
 

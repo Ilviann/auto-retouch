@@ -11,8 +11,11 @@ Milestone 1a now supplies setup/launch, strict config and CLI handling, bootstra
 diagnostics, headless startup services, and a minimal Qt Widgets adapter. The
 [runtime decision](decisions/0001-runtime-foundation.md) pins the foundation stack;
 [verification](verification/runtime-foundation.md) distinguishes real CPU/DirectML
-Add execution from pending portrait-model and CUDA acceptance. Processing modules
-below remain a proposal until their milestones are implemented.
+Add execution from pending portrait-model and CUDA acceptance. Milestone 3a adds
+immutable pipeline definitions, a registry, local asset readiness, typed image
+state, and a prepared-stage executor with CPU contract references. See
+[pipeline evidence](verification/pipeline-contracts.md). Other processing modules
+below remain proposals until their milestones are implemented.
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.
@@ -104,12 +107,21 @@ src/retouching_tool/
 tests/
 ```
 
-This is a proposed structure, not an existing implementation or a commitment to
+This is a proposed structure, not a complete existing implementation or a commitment to
 the example operation algorithms. Keep CLI/configuration, UI, pipeline contracts,
 operations, model backends, schedulers, image handling, and artifact storage
 separate. Operation modules depend on shared contracts and model services, not UI
 widgets or either batch scheduler. Both schedulers and previews use one common
 operation executor.
+
+Implemented 3a files use `pipeline/definition.py`, `registry.py`, `assets.py`,
+`validation.py`, `image_state.py`, and `executor.py`, with lifecycle protocol in
+`operations/base.py` and CPU references in `operations/reference.py`.
+`application/pipeline_service.py` owns transactional edits and readiness; the Qt
+shell renders `stage_card.py`. NumPy is imported only when processing arrays,
+and no inference runtime is imported by these services. The initial parameter
+schema supports finite numeric ranges; extend it when an operation needs other
+types. No neural operation or production model manifest is bundled.
 
 Adding an operation consists of implementing its descriptor, parameter schema,
 and processing lifecycle in a dedicated module, registering it, and providing

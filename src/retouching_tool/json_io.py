@@ -17,15 +17,37 @@ def _unique(pairs):
     return result
 
 
+def _check_depth(raw, limit=64):
+    """Bound nesting before decoding, ignoring brackets inside JSON strings."""
+    depth, quoted, escaped = 0, False, False
+    for char in raw:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == 92:
+                escaped = True
+            elif char == 34:
+                quoted = False
+        elif char == 34:
+            quoted = True
+        elif char in (91, 123):
+            depth += 1
+            if depth > limit:
+                raise ValueError(f"JSON nesting exceeds {limit} levels")
+        elif char in (93, 125):
+            depth -= 1
+
+
 def read_json(path: Path, *, limit: int = 1_048_576):
     try:
         with path.open("rb") as stream:
             raw = stream.read(limit + 1)
         if len(raw) > limit:
             raise ValueError(f"JSON exceeds {limit} bytes")
+        _check_depth(raw)
         return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_unique,
                           parse_constant=lambda v: (_ for _ in ()).throw(ValueError(v)))
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         raise RetouchingError("JSON_INVALID", f"Cannot read {path}: {exc}") from exc
 
 

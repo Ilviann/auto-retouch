@@ -1,4 +1,4 @@
-"""Foundation startup state. No indexing, processing, or checkpoint access yet."""
+"""Headless startup state and pipeline selection. Launch never starts processing."""
 
 from pathlib import Path
 
@@ -7,20 +7,9 @@ from ..config import AppConfig
 from ..errors import RetouchingError
 from ..json_io import atomic_json, read_json
 from .contracts import StartupSnapshot
+from .pipeline_service import PipelineService
 
 DEFAULT_PIPELINE = {"schema_version": 1, "name": "Empty foundation pipeline", "stages": []}
-
-
-def _foundation_pipeline(path: Path):
-    data = read_json(path)
-    if (not isinstance(data, dict) or set(data) != {"schema_version", "name", "stages"}
-            or type(data["schema_version"]) is not int or data["schema_version"] != 1
-            or not isinstance(data["name"], str) or not data["name"].strip()
-            or len(data["name"]) > 200 or not isinstance(data["stages"], list)):
-        raise RetouchingError("PIPELINE_INVALID", f"Invalid version-1 pipeline envelope: {path}")
-    if data["stages"]:
-        raise RetouchingError("PIPELINE_UNSUPPORTED", "Operations are not implemented in the runtime milestone; use an empty stages list. No stages were skipped")
-    return data
 
 
 class ApplicationService:
@@ -30,6 +19,9 @@ class ApplicationService:
     def startup(self, options: LaunchOptions, backend: str) -> StartupSnapshot:
         notices = []
         state = self.root / ".state"
+        editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
+                                 autosave=state / "last-pipeline.json")
+        self.pipeline_service = editor
         if options.sources:
             sources = options.sources
         else:
@@ -51,13 +43,13 @@ class ApplicationService:
                     sources = ()
         self._validate_sources(sources)
         if options.pipeline is not None:
-            pipeline = _foundation_pipeline(options.pipeline)
+            pipeline = editor.load(options.pipeline, persist=False).definition.to_json()
             origin = str(options.pipeline)
         else:
             previous = state / "last-pipeline.json"
             if previous.exists():
                 try:
-                    pipeline = _foundation_pipeline(previous)
+                    pipeline = editor.load(previous, persist=False).definition.to_json()
                     origin = str(previous)
                 except RetouchingError as exc:
                     self.diagnostics.emit("PIPELINE_RESTORE_FAILED", str(exc), level="WARNING", exc_info=True)
@@ -71,7 +63,7 @@ class ApplicationService:
             notices.append(self.diagnostics.failure)
         # Persist only a successfully selected pipeline, never replace a corrupt autosave on fallback.
         try:
-            if options.pipeline is not None:
+            if options.pipeline is not None or origin == str(state / "last-pipeline.json"):
                 atomic_json(state / "last-pipeline.json", pipeline)
             if options.sources:
                 atomic_json(state / "session.json", {"schema_version": 1, "sources": [str(p) for p in sources]})
@@ -80,7 +72,7 @@ class ApplicationService:
         self.diagnostics.emit("STARTUP_STATE_READY", "Startup settings loaded; no processing started", component="application",
                               source_count=len(sources), pipeline_origin=origin, backend=backend)
         return StartupSnapshot(sources, pipeline["name"], origin, backend, self.config.checkpoints,
-                               self.config.temporary, self.config.logs, tuple(notices))
+                               self.config.temporary, self.config.logs, tuple(notices), stages=editor.status.stages)
 
     @staticmethod
     def _validate_sources(sources):

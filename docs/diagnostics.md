@@ -6,6 +6,15 @@ implemented; worker transport, the full diagnostics panel, batch summaries, and
 report export remain planned. The user's requirement is detailed diagnostic
 feedback; unimplemented parts of the format and defaults below remain proposed.
 
+Milestone 3a emits pipeline command failures, asset-unavailable/recovered and
+context-blocked events. Stage sessions emit preparation, completion, release and
+failure events plus explicit skips, measurements and clipping warnings, correlated
+with job/image/stage instance, operation/version, backend and attempt. Technical
+exceptions retain tracebacks and chained causes at INFO settings; unreadable model
+issues include their captured technical cause. The initial Qt cards expose
+readiness and command errors and retain a diagnostics-storage warning after a
+command. Worker transport and full diagnostic search/export are still pending.
+
 Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
 `diagnostics/service.py`, with UTC millisecond times, session/process identity,
 codes, structured context, and exception chains at INFO settings. Setup child

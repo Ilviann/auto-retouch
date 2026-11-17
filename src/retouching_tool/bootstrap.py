@@ -18,7 +18,7 @@ def main(argv=None) -> int:
     root = Path(__file__).resolve().parents[2]
     log = Diagnostics(root / "logs")
     try:
-        log.emit("LAUNCH_STARTED", "Starting Auto Retouch", app_version=__version__, python=sys.version,
+        log.emit("LAUNCH_STARTED", "Starting Auto ReTouch", app_version=__version__, python=sys.version,
                  executable=sys.executable, platform=sys.platform)
         config = load_config(root, options.config)
         if config.logs != log.path.parent or config.logging != log.settings:
@@ -31,10 +31,11 @@ def main(argv=None) -> int:
             old.close()
         backend = validate_ready(root)
         log.emit("BACKEND_READY", "Recorded backend passed actual inference check", **asdict(backend))
-        snapshot = ApplicationService(root, config, log).startup(options, backend.backend)
+        service = ApplicationService(root, config, log)
+        snapshot = service.startup(options, backend.backend)
         from .ui.qt.startup import run_desktop
         log.emit("GUI_STARTED", "Opening runtime foundation window; no processing started")
-        result = run_desktop(snapshot)
+        result = run_desktop(snapshot, service.pipeline_service)
         log.emit("LAUNCH_EXITED", "Desktop application closed", exit_code=result)
         return result
     except Exception as exc:

@@ -32,9 +32,12 @@ validated destination. Sequential mode completes one photo at a time, while stag
 mode processes the batch one operation at a time using temporary artifacts and
 releasing model resources between stages.
 
-The runtime foundation (milestone 1a) is implemented. It opens a minimal Qt Widgets
-window showing effective startup settings; photo processing, pipeline operations,
-Natural/Beauty presets, and exports are not implemented yet. No portrait models
+The runtime foundation (milestone 1a) and pipeline contracts/reference stages (3a)
+are implemented. The Qt window shows startup settings and loaded stage cards with
+on/off controls, numeric parameters, asset errors, and dependency status. Headless
+services support add/remove/reorder, atomic JSON save/load, and last-used restore.
+CPU statistics and manual exposure are contract references; photo import/processing,
+Natural/Beauty presets, and exports remain pending. No portrait models
 have been selected or downloaded, and no retouching quality has been benchmarked.
 
 Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
@@ -51,8 +54,9 @@ options. Launch never installs packages or starts processing automatically.
 Copy `config.example.json` to `config.json` to customize local folders; without it,
 the window shows the documented defaults.
 
-For this milestone, pipeline files must have version 1, a name, and an empty
-`stages` array. Nonempty operation lists fail explicitly until milestone 3.
+Pipeline files use version 1 and registered operation versions. Try the reference
+cards with `run.cmd --pipeline examples\pipelines\reference.json`. This example is
+not a Natural or Beauty preset. Unknown operations/parameters fail explicitly.
 Valid explicit settings replace last-used selection; corrupt restored state
 produces a visible warning. No selected photo is decoded or modified.
 
@@ -72,6 +76,7 @@ Setup-specific checks are opt-in and reserved for setup work:
 The second setup command installs packages in a disposable Unicode-path copy and
 switches that copy between CPU and DirectML; it leaves the main environment alone.
 See [milestone evidence](docs/verification/runtime-foundation.md), the
+[pipeline evidence](docs/verification/pipeline-contracts.md), the
 [implementation backlog](docs/backlog.md), and the
 [dependency decision and terms](docs/decisions/0001-runtime-foundation.md).
 

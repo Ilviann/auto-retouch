@@ -49,7 +49,9 @@ class FoundationTests(unittest.TestCase):
                 atomic_json(path, {"new": True})
         self.assertEqual(read_json(path)["text"], "Русский путь")
         self.assertFalse(list(path.parent.glob(".state.json.*.tmp")))
-        for raw in ('{"x":1,"x":2}', '{"x": NaN}', '{broken'):
+        atomic_json(path, {"quoted brackets": "[" * 2000 + '\\"' + "]" * 2000})
+        self.assertIn("quoted brackets", read_json(path))
+        for raw in ('{"x":1,"x":2}', '{"x": NaN}', '{broken', '[' * 2000 + ']' * 2000):
             path.write_text(raw, encoding="utf-8")
             with self.assertRaises(RetouchingError):
                 read_json(path)
