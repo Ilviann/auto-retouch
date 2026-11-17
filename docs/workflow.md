@@ -88,12 +88,20 @@ explicitly requests delegation; no standing delegation authorization is implied.
 
 ## Per-task loop
 
+Test only behavior changed in the current task. Select focused checks for those
+changes; do not run unrelated tests or the full test suite as routine verification.
+Full smoke tests may run only at the user's explicit request. The validation
+levels and milestone evidence above describe overall coverage goals, not a
+requirement to rerun them for every task. For documentation-only changes, review
+the changed text and diff; application tests are unnecessary.
+
 1. Read repository instructions and relevant requirements; inspect current files
    and user changes before editing.
 2. State the task outcome, dependencies, acceptance criteria, and expected files.
 3. Implement the smallest complete change within the authorized stage.
-4. Run checks appropriate to the behavior. Pipeline/state changes need meaningful
-   automated checks; model or color changes also need visual comparisons. For new
+4. Run focused checks only for behavior changed in this task. Pipeline/state
+   changes need meaningful automated checks; model or color changes also need
+   visual comparisons. For new
    operations or error paths, verify useful warning/error codes, correlated context,
    and cause/traceback capture at normal verbosity.
    Application/service changes also need headless checks; Qt changes need focused
