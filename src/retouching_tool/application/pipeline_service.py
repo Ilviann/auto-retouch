@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 from ..errors import RetouchingError
 from ..json_io import atomic_json, read_json
@@ -98,6 +99,19 @@ class PipelineService:
 
     def set_parameters(self, stage_id, parameters):
         return self._edit(stage_id, lambda stage: {**stage, "parameters": parameters})
+
+    def set_parameter(self, stage_id, name, value):
+        return self._edit(stage_id, lambda stage: {**stage, "parameters": {**stage["parameters"], name: value}})
+
+    def add_operation(self, operation, version, *, model_ref=None):
+        return self.add({
+            "id": uuid4().hex,
+            "operation": operation,
+            "operation_version": version,
+            "enabled": True,
+            "parameters": {},
+            **({"model_ref": model_ref} if model_ref is not None else {}),
+        })
 
     def add(self, stage_data):
         def action():

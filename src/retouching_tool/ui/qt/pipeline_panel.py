@@ -1,0 +1,206 @@
+"""Qt controls for editing and exchanging portable pipelines."""
+
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import (
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
+)
+
+from ...errors import RetouchingError
+from .stage_card import StageCard
+
+
+class PipelinePanel(QWidget):
+    changed = Signal()
+
+    def __init__(self, snapshot, service):
+        super().__init__()
+        self.snapshot = snapshot
+        self.service = service
+        self.origin = snapshot.pipeline_origin
+        self.stage_cards = {}
+        self.reveal_stage = None
+        self.refresh_timer = QTimer(self, interval=0, singleShot=True)
+        self.refresh_timer.timeout.connect(self._refresh_cards)
+
+        layout = QVBoxLayout(self)
+        self.details = QPlainTextEdit()
+        self.details.setObjectName("startupDetails")
+        self.details.setReadOnly(True)
+        self.details.setMaximumHeight(150)
+        layout.addWidget(self.details)
+        self._show_details(snapshot.pipeline_name)
+        if service is None:
+            return
+
+        tools = QHBoxLayout()
+        self.operations = QComboBox()
+        self.operations.setObjectName("operationPicker")
+        self.operations.setAccessibleName("Operation to add")
+        for descriptor in service.registry.descriptors():
+            for model_ref in descriptor.model_refs or (None,):
+                label = f"{descriptor.title} · v{descriptor.version}"
+                if model_ref is not None:
+                    label += f" · {model_ref}"
+                self.operations.addItem(label, (descriptor.operation, descriptor.version, model_ref))
+        tools.addWidget(self.operations, 1)
+        add = QPushButton("Add operation", objectName="addOperation")
+        add.setEnabled(self.operations.count() > 0)
+        add.clicked.connect(self._add_stage)
+        tools.addWidget(add)
+        open_file = QPushButton("Open JSON…", objectName="openPipeline")
+        open_file.clicked.connect(self._open)
+        tools.addWidget(open_file)
+        save_file = QPushButton("Save JSON…", objectName="savePipeline")
+        save_file.clicked.connect(self._save)
+        tools.addWidget(save_file)
+        layout.addLayout(tools)
+
+        self.message = QLabel(objectName="pipelineCommandError", wordWrap=True)
+        self.message.setTextFormat(Qt.TextFormat.PlainText)
+        self.message.hide()
+        layout.addWidget(self.message)
+        self.scroll = QScrollArea(widgetResizable=True)
+        card_content = QWidget()
+        self.cards = QVBoxLayout(card_content)
+        self.empty = QLabel("No operations added.")
+        self.cards.addWidget(self.empty)
+        self.cards.addStretch()
+        self.scroll.setWidget(card_content)
+        layout.addWidget(self.scroll, 1)
+        self._refresh_cards()
+
+    def _show_details(self, name):
+        snapshot = self.snapshot
+        text = "\n".join([
+            f"Pipeline: {name}", f"Loaded from: {self.origin}", f"Backend: {snapshot.backend}", "",
+            "Selected sources:", *([str(p) for p in snapshot.sources] or ["No sources selected"]), "",
+            f"Checkpoints: {snapshot.checkpoints}", f"Temporary artifacts: {snapshot.temporary}",
+            f"Logs: {snapshot.logs}", "", *snapshot.notices,
+        ])
+        if text != self.details.toPlainText():
+            self.details.setPlainText(text)
+
+    def set_locked(self, locked):
+        self.setEnabled(not locked)
+        if not locked:
+            self._refresh_cards()
+            self.changed.emit()
+
+    def _refresh_cards(self):
+        pipeline = self.service.status
+        stages = pipeline.stages
+        self._show_details(pipeline.definition.name)
+        self.empty.setVisible(not stages)
+        current_ids = {status.stage.id for status in stages}
+        for stage_id in self.stage_cards.keys() - current_ids:
+            self._discard_card(stage_id)
+        for index, status in enumerate(stages):
+            stage = status.stage
+            descriptor = self.service.registry.descriptor(stage.operation, stage.operation_version)
+            card = self.stage_cards.get(stage.id)
+            if card is not None and card.descriptor != descriptor:
+                self._discard_card(stage.id)
+                card = None
+            if card is None:
+                card = StageCard(
+                    stage.id, descriptor,
+                    on_enable=lambda key, enabled: self._command(self.service.set_enabled, key, enabled),
+                    on_parameter=lambda key, name, value: self._command(self.service.set_parameter, key, name, value),
+                    on_recheck=lambda: self._command(self.service.recheck),
+                    on_move=self._move_stage,
+                    on_remove=lambda key: self._command(self.service.remove, key),
+                )
+                self.stage_cards[stage.id] = card
+                self.cards.insertWidget(index, card)
+            elif self.cards.indexOf(card) != index:
+                self.cards.removeWidget(card)
+                self.cards.insertWidget(index, card)
+            card.show_status(status, can_move_up=index > 0, can_move_down=index + 1 < len(stages))
+        if self.reveal_stage in self.stage_cards:
+            self.cards.activate()
+            self.scroll.ensureWidgetVisible(self.stage_cards[self.reveal_stage])
+        self.reveal_stage = None
+
+    def _discard_card(self, stage_id):
+        card = self.stage_cards.pop(stage_id)
+        self.cards.removeWidget(card)
+        card.hide()
+        card.setParent(None)
+        card.deleteLater()
+
+    def _command(self, action, *args, **kwargs):
+        previous = self.service.status
+        try:
+            result = action(*args, **kwargs)
+        except RetouchingError as exc:
+            self._show_message(f"{exc.code}: {exc}")
+            result = None
+        else:
+            self._show_message("")
+        if self.service.status is not previous:
+            self.changed.emit()
+        # Defer layout changes until the originating widget's signal has returned.
+        self.refresh_timer.start()
+        return result
+
+    def _show_message(self, text):
+        message = "\n".join(filter(None, (text, self.service.diagnostics.failure)))
+        self.message.setText(message)
+        self.message.setVisible(bool(message))
+
+    def _add_stage(self):
+        selection = self.operations.currentData()
+        if selection is None:
+            return
+        operation, version, model_ref = selection
+        status = self._command(self.service.add_operation, operation, version, model_ref=model_ref)
+        if status is not None:
+            self.reveal_stage = status.stages[-1].stage.id
+
+    def _move_stage(self, stage_id, step):
+        order = [stage.id for stage in self.service.status.definition.stages]
+        if stage_id in order:
+            index = order.index(stage_id)
+            target = index + step
+            if 0 <= target < len(order):
+                order[index], order[target] = order[target], order[index]
+                if self._command(self.service.reorder, order) is not None:
+                    self.reveal_stage = stage_id
+
+    def _choose_file(self, *, save=False):
+        dialog = QFileDialog(self, "Save pipeline" if save else "Open pipeline")
+        dialog.setNameFilter("Pipeline JSON (*.json)")
+        if save:
+            dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+            dialog.setDefaultSuffix("json")
+        else:
+            dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        try:
+            if dialog.exec():
+                return Path(dialog.selectedFiles()[0])
+            return None
+        finally:
+            dialog.deleteLater()
+
+    def _open(self):
+        path = self._choose_file()
+        if path is not None and self._command(self.service.load, path) is not None:
+            self.origin = str(path)
+            self.scroll.verticalScrollBar().setValue(0)
+
+    def _save(self):
+        path = self._choose_file(save=True)
+        if path is None:
+            return
+        if path.suffix.casefold() != ".json":
+            self._show_message("Choose a filename ending in .json to save the pipeline.")
+            return
+        try:
+            self.service.save(path)
+        except RetouchingError as exc:
+            self._show_message(f"{exc.code}: {exc}")
+        else:
+            self._show_message(f"Saved pipeline to {path}")

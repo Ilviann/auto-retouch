@@ -256,8 +256,8 @@ class BatchPanel(QTabWidget):
 
     def refresh_pipeline(self):
         status = self.application.pipeline_service.status
-        enabled = ", ".join(item.stage.id for item in status.stages if item.stage.enabled) or "none (JPEG export only)"
-        skipped = ", ".join(item.stage.id for item in status.stages if not item.stage.enabled) or "none"
+        enabled = ", ".join(item.title for item in status.stages if item.stage.enabled) or "none (JPEG export only)"
+        skipped = ", ".join(item.title for item in status.stages if not item.stage.enabled) or "none"
         problem = "\nResolve the blocked operations on the Pipeline tab before starting." if not status.executable else ""
         self.pipeline_summary.setText(f"{status.definition.name} · Enabled operations: {enabled} · Skipped: {skipped}{problem}")
         self._update_controls()

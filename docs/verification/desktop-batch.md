@@ -50,7 +50,8 @@ worker exit. Headless checks cover frozen status metadata, read-only saved-job
 discovery with a malformed entry, and the Qt import boundary. The setup and
 completed job layouts were inspected with Qt offscreen rendering.
 
-Configuration editing, thumbnails, previews, pipeline file dialogs and
-editing actions, searchable diagnostics and redacted reports remain pending.
+The desktop [pipeline editor](desktop-pipeline.md) was added in milestone 5b.
+Configuration editing, thumbnails, previews, searchable diagnostics and redacted
+reports remain pending.
 Portrait-model visual acceptance and representative resource acceptance still
 need separate validation, including CUDA hardware testing.

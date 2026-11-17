@@ -28,8 +28,11 @@ names and 100-character IDs.
 The headless service implements add/remove/reorder, enable, numeric parameter
 changes, explicit save/load and autosave. Structurally invalid imports and failed
 atomic autosaves leave the current editor snapshot and previous file intact.
-Qt currently renders loaded stages, parameters, toggles, rechecks and model-page
-links. Add/remove/reorder widgets and file dialogs belong to milestone 5.
+The Qt Pipeline tab exposes those commands in milestone 5b. It adds operations
+from the registry with independent stage IDs and descriptor defaults. Each card
+supports moving, removing, toggling and editing the stage. Open and Save exchange
+portable JSON files, and the batch setup summary follows the current editor.
+See [desktop pipeline evidence](verification/desktop-pipeline.md).
 
 Pipeline preflight checks operation, assets and context. Batch and preview
 execution still require destination, path and disk validation.
@@ -44,19 +47,20 @@ artifact manifests can carry optional checksummed XMP and IPTC blob references;
 earlier manifests still load. Include the decoder/color policy and relevant
 dependency versions in scheduler cache identity. Both headless schedules use
 the JPEG adapter and the same stage sessions as reference execution. The batch
-worker runs the saved snapshot using either schedule. Desktop job controls
-remain pending. See
+worker runs the saved snapshot using either schedule. The desktop job controls
+use that worker. See
 [artifact evidence](verification/lossless-artifacts.md),
 [JPEG evidence](verification/jpeg-boundary.md),
 [sequential job evidence](verification/sequential-jobs.md),
 [staged job evidence](verification/staged-jobs.md), and
-[worker evidence](verification/worker-transport.md).
+[worker evidence](verification/worker-transport.md) and
+[desktop batch evidence](verification/desktop-batch.md).
 
 ## Editor and JSON settings
 
 The editor provides add, remove, reorder, enable/disable, and a parameter panel
 for each operation instance. Multiple instances of the same operation are allowed.
-Natural and Beauty are bundled editable pipeline presets.
+The required editable Natural and Beauty presets await portrait engine evaluation.
 
 An illustrative portable JSON file is:
 

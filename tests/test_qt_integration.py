@@ -3,17 +3,24 @@
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from contextlib import ExitStack
 from pathlib import Path
 import hashlib
 import io
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication, QCheckBox, QDoubleSpinBox, QLabel, QPlainTextEdit, QPushButton
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QPlainTextEdit, QPushButton,
+)
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics
 from retouching_tool.application.contracts import StartupSnapshot
 from retouching_tool.application.pipeline_service import PipelineService
+from retouching_tool.application.service import ApplicationService
+from retouching_tool.cli import LaunchOptions
+from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
 from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter
@@ -54,6 +61,123 @@ class QtIntegrationTests(unittest.TestCase):
             self.assertTrue(QFontMetrics(window.font()).inFontUcs4(ord("A")))
         finally:
             window.close()
+
+    def test_pipeline_editor_actions_json_dialogs_and_restart(self):
+        artifacts = ROOT / ".test-work"
+        artifacts.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=artifacts, prefix="qt editor ") as temporary, ExitStack() as resources:
+            root = Path(temporary)
+            config = load_config(root)
+            log = Diagnostics(root / "logs", console=io.StringIO())
+            resources.callback(log.close)
+            application = ApplicationService(root, config, log)
+            options = LaunchOptions((), None, None)
+            snapshot = application.startup(options, "directml")
+            editor = application.pipeline_service
+            window = MainWindow(snapshot, editor, application=application)
+            panel = window.pipeline_page
+
+            def click(name, container=panel):
+                container.findChild(QPushButton, name).click()
+                self.app.processEvents()
+
+            def stages():
+                return editor.status.definition.stages
+
+            def card(stage):
+                return panel.findChild(StageCard, f"stage-{stage.id}")
+
+            def select_file(action, path):
+                # Use the real dialog wiring and simulate the OS returning a filename.
+                with patch.object(QFileDialog, "exec", return_value=1), patch.object(
+                        QFileDialog, "selectedFiles", return_value=[str(path)]):
+                    click(action)
+
+            try:
+                window.batch_panel.setCurrentWidget(panel)
+                window.show()
+                self.app.processEvents()
+                picker = panel.findChild(QComboBox, "operationPicker")
+                picker.setCurrentIndex(next(index for index in range(picker.count())
+                                            if picker.itemData(index) == ("core.exposure", 1, None)))
+                click("addOperation")
+                click("addOperation")
+                first, second = stages()
+                self.assertEqual(first.operation, "core.exposure")
+                self.assertNotEqual(first.id, second.id)
+                self.assertFalse(card(first).findChild(QPushButton, "moveStageUp").isEnabled())
+                self.assertFalse(card(second).findChild(QPushButton, "moveStageDown").isEnabled())
+                self.assertIn("Exposure (reference)", window.batch_panel.pipeline_summary.text())
+
+                exposure = card(second).findChild(QDoubleSpinBox, "parameter-stops")
+                exposure.setValue(1.25)
+                exposure.editingFinished.emit()
+                click("moveStageUp", card(second))
+                self.assertEqual([stage.id for stage in stages()], [second.id, first.id])
+                self.assertIs(panel.cards.itemAt(0).widget(), card(second))
+                self.assertEqual(stages()[0].parameter("stops"), 1.25)
+                click("moveStageDown", card(second))
+                self.assertEqual([stage.id for stage in stages()], [first.id, second.id])
+                card(second).findChild(QCheckBox, "stageEnabled").click()
+                self.app.processEvents()
+
+                output = root / "сохранённый профиль.json"
+                select_file("savePipeline", output)
+                output_bytes = output.read_bytes()
+                saved = json.loads(output_bytes)
+                self.assertEqual(saved, editor.status.definition.to_json())
+                self.assertFalse(saved["stages"][1]["enabled"])
+                click("removeStage", card(first))
+                self.assertEqual([stage.id for stage in stages()], [second.id])
+                self.assertIsNone(card(first))
+
+                message = panel.findChild(QLabel, "pipelineCommandError")
+                with patch("retouching_tool.json_io.os.replace", side_effect=PermissionError("simulated save denial")):
+                    select_file("savePipeline", output)
+                self.assertIn("PIPELINE_WRITE_FAILED", message.text())
+                self.assertIn("PermissionError: simulated save denial", log.records[-1]["exception"])
+                self.assertEqual(output.read_bytes(), output_bytes)
+                wrong_extension = root / "photo.jpg"
+                select_file("savePipeline", wrong_extension)
+                self.assertIn("ending in .json", message.text())
+                self.assertFalse(wrong_extension.exists())
+
+                imported = root / "загруженный профиль.json"
+                saved["name"] = "Imported profile"
+                imported.write_text(json.dumps(saved), encoding="utf-8")
+                original = imported.read_bytes()
+                select_file("openPipeline", imported)
+                self.assertEqual(editor.status.definition.to_json(), saved)
+                details = panel.findChild(QPlainTextEdit, "startupDetails")
+                self.assertIn(str(imported), details.toPlainText())
+                self.assertIn("Imported profile", window.batch_panel.pipeline_summary.text())
+
+                invalid = root / "invalid.json"
+                invalid.write_text("{", encoding="utf-8")
+                autosave = root / ".state" / "last-pipeline.json"
+                before = autosave.read_bytes()
+                select_file("openPipeline", invalid)
+                self.assertIn("JSON_INVALID", message.text())
+                self.assertIn(str(imported), details.toPlainText())
+                self.assertEqual(autosave.read_bytes(), before)
+                failure = log.records[-1]
+                self.assertEqual(failure["code"], "PIPELINE_COMMAND_FAILED")
+                self.assertIn("JSONDecodeError", failure["exception"])
+
+                with patch.object(QFileDialog, "exec", return_value=0):
+                    click("openPipeline")
+                self.assertEqual(autosave.read_bytes(), before)
+                card(first).findChild(QCheckBox, "stageEnabled").click()
+                self.app.processEvents()
+                self.assertEqual(imported.read_bytes(), original)
+                reopened = ApplicationService(root, config, log)
+                reopened.startup(options, "directml")
+                self.assertEqual(reopened.pipeline_service.status.definition, editor.status.definition)
+                self.assertTrue(window.grab().save(str(artifacts / "pipeline-editor.png")))
+            finally:
+                window.close()
+                window.deleteLater()
+                self.app.processEvents()
 
     def test_model_card_disable_parameters_dependency_and_recovery(self):
         artifacts = ROOT / ".test-work"
@@ -117,13 +241,19 @@ class QtIntegrationTests(unittest.TestCase):
                 toggle.click()
                 self.app.processEvents()
                 self.assertEqual(editor.status.stages[1].state, "ready")
+                card.findChild(QPushButton, "moveStageDown").click()
+                self.app.processEvents()
+                self.assertEqual(editor.status.stages[0].state, "blocked")
+                card.findChild(QPushButton, "moveStageUp").click()
+                self.app.processEvents()
+                self.assertEqual(editor.status.stages[1].state, "ready")
                 path.unlink()
                 window.findChild(StageCard, "stage-model").findChild(QPushButton, "recheckStage").click()
                 self.app.processEvents()
                 self.assertFalse(editor.status.definition.stages[0].enabled)
                 self.assertFalse(window.findChild(StageCard, "stage-model").findChild(QCheckBox, "stageEnabled").isEnabled())
                 log.failure = "LOG_WRITE_FAILED: simulated persistent diagnostics failure"
-                window._command(editor.recheck)
+                window.pipeline_page._command(editor.recheck)
                 self.app.processEvents()
                 self.assertIn("LOG_WRITE_FAILED", window.findChild(QLabel, "pipelineCommandError").text())
             finally:

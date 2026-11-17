@@ -28,6 +28,8 @@ sequential and staged execution, and a toolkit-free batch worker. See
 [worker evidence](verification/worker-transport.md).
 Milestone 5a connects the Qt Widgets batch setup and job monitor to those
 services. See [desktop batch evidence](verification/desktop-batch.md).
+Milestone 5b connects the Pipeline tab to the shared editor and operation
+registry. See [desktop pipeline evidence](verification/desktop-pipeline.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
 will add WebP, JPEG XL, and AVIF.

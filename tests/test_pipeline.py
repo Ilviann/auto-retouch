@@ -87,6 +87,23 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             snapshot.name = "changed"
 
+    def test_add_registered_operations_uses_defaults_and_model_readiness(self):
+        self.install_model_fixture()
+        first = self.editor.add_operation("core.exposure", 1).definition
+        second = self.editor.add_operation("core.exposure", 1).definition
+        self.assertEqual(first.stages[0], second.stages[0])
+        self.assertNotEqual(second.stages[0].id, second.stages[1].id)
+        self.assertEqual(second.stages[1].parameter("stops"), 0)
+
+        status = self.editor.add_operation("test.analysis", 1, model_ref="test-model")
+        self.assertEqual(status.stages[-1].state, "unavailable")
+        self.assertFalse(status.definition.stages[-1].enabled)
+        self.assertEqual(status.definition.stages[-1].model_ref, "test-model")
+        self.assertEqual(parse_pipeline(read_json(self.root / "last.json"), self.registry), status.definition)
+        with self.assertRaises(RetouchingError):
+            self.editor.add_operation("test.analysis", 1)
+        self.assertIs(self.editor.status, status)
+
     def test_invalid_import_and_edit_preserve_current_and_autosave(self):
         self.editor.load_data(pipeline(stage()))
         old, saved = self.editor.status, (self.root / "last.json").read_bytes()
