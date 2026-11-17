@@ -63,6 +63,7 @@ def _size(byte_count):
 
 class BatchPanel(QWidget):
     pipeline_locked = Signal(bool)
+    settings_available = Signal(bool)
     operation_preview_available = Signal(bool)
     ready_to_close = Signal()
 
@@ -320,6 +321,16 @@ class BatchPanel(QWidget):
         self.pipeline_summary.setText(f"{status.definition.name} · Enabled operations: {enabled} · Skipped: {skipped}{problem}")
         self._update_controls()
 
+    def configuration_changed(self, previous):
+        config = self.application.config
+        self.refresh_pipeline()
+        if previous.checkpoints != config.checkpoints and self._picture_window is not None:
+            self._picture_window.close()
+        if previous.temporary != config.temporary:
+            self._invalidate_plan()
+            if self.check_space.isEnabled():
+                self._check_space()
+
     def _current_image(self):
         row = self.images.currentRow()
         return self._index.images[row] if self._index is not None and 0 <= row < len(self._index.images) else None
@@ -555,6 +566,7 @@ class BatchPanel(QWidget):
     def _update_controls(self):
         running = self._run is not None and self._run.poll() is None
         idle = not self._closing and self._task is None and self._run is None
+        self.settings_available.emit(not self._closing and (self._task is None or self._task[0] == "poll"))
         selected = len(self._selected_ids())
         self.folders.setEnabled(idle)
         self.export.setEnabled(idle)

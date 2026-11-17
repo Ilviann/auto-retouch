@@ -1,11 +1,13 @@
 """Headless startup state and pipeline selection. Launch never starts processing."""
 
+from dataclasses import asdict
 from pathlib import Path
 
 from ..cli import LaunchOptions
-from ..config import AppConfig
+from ..config import AppConfig, FolderSettings, LoggingSettings, parse_config
 from ..errors import RetouchingError
 from ..json_io import atomic_json, read_json
+from ..storage.batch_paths import probe_writable, resolve_folder
 from .batch import BatchService
 from .contracts import StartupSnapshot
 from .job_service import JobService
@@ -66,7 +68,7 @@ class ApplicationService:
             else:
                 pipeline, origin = dict(DEFAULT_PIPELINE), "foundation default"
         if self.config.using_defaults:
-            notices.append(f"Using default folders; copy config.example.json to {self.config.file} to customize them.")
+            notices.append("Default folders were used at launch. Open Settings to customize them.")
         if self.diagnostics.failure:
             notices.append(self.diagnostics.failure)
         # Persist only a successfully selected pipeline, never replace a corrupt autosave on fallback.
@@ -81,6 +83,39 @@ class ApplicationService:
                               source_count=len(sources), pipeline_origin=origin, backend=backend)
         return StartupSnapshot(sources, pipeline["name"], origin, backend, self.config.checkpoints,
                                self.config.temporary, self.config.logs, tuple(notices), stages=editor.status.stages)
+
+    def save_settings(self, folders: FolderSettings, logging: LoggingSettings) -> AppConfig:
+        path = self.config.file
+        data = {"schema_version": 1, "paths": asdict(folders), "logging": asdict(logging)}
+        try:
+            config = parse_config(path, data)
+            for name in ("checkpoints", "temporary", "logs"):
+                folder = getattr(config, name)
+                try:
+                    _, parent = resolve_folder(folder, allow_missing=True)
+                    if name == "temporary":
+                        probe_writable(parent, needs_subdirectory=True)
+                except (OSError, ValueError) as exc:
+                    raise RetouchingError("CONFIG_FOLDER_INVALID", f"Choose an accessible {name} folder. "
+                                          f"Cannot use {folder}: {exc}") from exc
+            with self.pipeline_service.changing_checkpoints(config.checkpoints):
+                with self.diagnostics.changing_settings(config.logs, config.logging):
+                    atomic_json(path, data)
+        except (OSError, RetouchingError) as exc:
+            error = exc if isinstance(exc, RetouchingError) else RetouchingError(
+                "CONFIG_WRITE_FAILED", f"Cannot save settings. Check permissions and free space for {path} "
+                f"and the log folder: {exc}")
+            self.diagnostics.emit(error.code, str(error), component="configuration", level="ERROR", exc_info=True,
+                                  config_path=path)
+            if error is exc:
+                raise
+            raise error from exc
+        self.config = config
+        self.batch_service.scratch = config.temporary
+        self.diagnostics.emit("CONFIG_SAVED", "Updated application settings", component="configuration",
+                              config_path=path, checkpoints=config.checkpoints, temporary=config.temporary,
+                              logs=config.logs)
+        return config
 
     def index_sources(self, sources, *, recursive=False):
         """Index the desktop selection and remember the successfully scanned paths."""

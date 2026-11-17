@@ -353,9 +353,12 @@ and [desktop batch evidence](verification/desktop-batch.md).
 
 ## Previews and configuration persistence
 
-The desktop UI must provide application configuration editing. The proposed
-settings editor displays the active configuration file and effective folder/logging
-values, with validation and atomic persistence in shared application services.
+The Qt settings dialog displays the active configuration file and effective
+folder and logging values. It calls the headless application's settings command
+on a background thread so folder probes and asset checks leave the UI responsive.
+Startup and Save use the same configuration parser. The command validates paths,
+persists the configuration atomically, and updates the editor, preflight and
+session log writer. [Settings verification](verification/desktop-settings.md)
 Keep machine-local settings separate from portable pipeline parameters and retain
 setup-only backend selection. See the [Runtime contract](runtime.md#machine-local-configuration).
 

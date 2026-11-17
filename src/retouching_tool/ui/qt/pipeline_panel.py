@@ -19,6 +19,7 @@ class PipelinePanel(QWidget):
     def __init__(self, snapshot, service):
         super().__init__()
         self.snapshot = snapshot
+        self.config = snapshot
         self.service = service
         self.origin = snapshot.pipeline_origin
         self.stage_cards = {}
@@ -92,13 +93,17 @@ class PipelinePanel(QWidget):
         text = "\n".join([
             f"Pipeline: {name}", f"Loaded from: {self.origin}", f"Backend: {snapshot.backend}", "",
             "Sources at launch:", *([str(p) for p in snapshot.sources] or ["No sources selected"]), "",
-            f"Checkpoints: {snapshot.checkpoints}", f"Temporary artifacts: {snapshot.temporary}",
-            f"Logs: {snapshot.logs}",
+            f"Checkpoints: {self.config.checkpoints}", f"Temporary artifacts: {self.config.temporary}",
+            f"Logs: {self.config.logs}",
         ])
         if self.service is None and snapshot.notices:
             text += "\n\n" + "\n".join(snapshot.notices)
         if text != self.details.toPlainText():
             self.details.setPlainText(text)
+
+    def show_configuration(self, config):
+        self.config = config
+        self._refresh_cards()
 
     def set_locked(self, locked):
         self.setEnabled(not locked)

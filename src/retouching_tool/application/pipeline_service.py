@@ -1,5 +1,6 @@
 """Transactional pipeline editing and local readiness, without GUI dependencies."""
 
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -25,6 +26,10 @@ class PipelineService:
         checked = validate_pipeline(definition, self.registry, self.catalog, self.checkpoints, self.backend)
         if persist and self.autosave is not None:
             self._write(self.autosave, checked.definition)
+        self._apply_status(checked)
+        return checked
+
+    def _apply_status(self, checked):
         previous = {s.stage.id: s for s in self.status.stages}
         self.status = checked
         for stage in checked.stages:
@@ -39,7 +44,26 @@ class PipelineService:
                 self.diagnostics.emit("STAGE_ASSET_RECOVERED", "Stage assets validated; stage remains off until explicitly enabled", **context)
             if stage.dependency_errors and (old is None or old.dependency_errors != stage.dependency_errors):
                 self.diagnostics.emit("STAGE_CONTEXT_BLOCKED", "; ".join(stage.dependency_errors), level="ERROR", **context)
-        return checked
+
+    @contextmanager
+    def changing_checkpoints(self, checkpoints):
+        """Persist forced disables, then publish readiness when the folder change commits."""
+        if checkpoints == self.checkpoints:
+            yield
+            return
+        previous = self.status.definition
+        checked = validate_pipeline(previous, self.registry, self.catalog, checkpoints, self.backend)
+        save_disabled = self.autosave is not None and checked.definition != previous
+        if save_disabled:
+            self._write(self.autosave, checked.definition)
+        try:
+            yield
+        except Exception:
+            if save_disabled:
+                self._write(self.autosave, previous)
+            raise
+        self.checkpoints = checkpoints
+        self._apply_status(checked)
 
     def _command(self, action):
         try:

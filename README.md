@@ -11,7 +11,7 @@ The application targets Python 3.14, already installed system-wide, with all
 application packages in a project-local virtual environment. Root CMD scripts
 will prepare/check that environment and launch the app with source/pipeline
 options. Configuration specifies checkpoint and temporary-artifact folders.
-An in-app configuration editor is required and planned for the desktop workflow.
+**Settings…** edits local folders, logging severity, size limits, and retention.
 Setup asks for CUDA (default), DirectML, or CPU and installs only the selected
 backend support plus shared dependencies. Launch always uses the recorded backend.
 NVIDIA acceptance requires testing on actual NVIDIA hardware.
@@ -67,8 +67,10 @@ On this development machine, **use the existing DirectML environment**. Rerun
 setup or change backends only for setup improvements or bug fixes. Launch with
 `run.cmd`; `run.cmd --help` lists repeatable `--source`, `--pipeline`, and `--config`
 options. Launch never installs packages or starts processing automatically.
-Copy `config.example.json` to `config.json` to customize local folders; without it,
-the window shows the documented defaults.
+Open **Settings…** to see the active configuration file and effective paths.
+Saving creates the default `config.json` or updates the file passed to `--config`.
+Relative paths resolve from that file's directory. Folder changes apply to future
+previews and batches. Existing jobs retain their recorded paths.
 
 When a model is required, download the specified files from the publisher and
 place them at the paths shown on the stage card. The default model folder is

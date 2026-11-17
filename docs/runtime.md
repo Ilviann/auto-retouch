@@ -212,21 +212,22 @@ collision resolution before processing. Do not silently flatten or overwrite.
 
 ## Machine-local configuration
 
-An in-app UI for editing application configuration is required (U48). It is
-pending desktop-workflow implementation; the foundation window currently only
-displays effective startup settings. Proposed editor behavior:
+The desktop **Settings…** dialog shows the active configuration file, installed
+backend, configured folder values and effective paths. Edit the checkpoint,
+temporary-artifact and log folders, minimum log severity, size limits and
+retention period. Cancel discards the draft. Save validates folders and logging
+options, then atomically replaces the active file, including an explicit
+`--config` selection. Validation and write errors appear in the dialog.
 
-- Edit checkpoint, temporary-artifact, and log folders and logging options; show
-  the active configuration file, including an explicit `--config` selection.
-- Use shared application services for validation and atomic save. Show actionable
-  validation/write errors and preserve the last valid settings on failure.
-- Cancel discards unsaved edits. Save to the active configuration file, creating
-  the default file when absent; retain configuration-relative path semantics.
-- Revalidate model availability and processing paths after relevant changes;
-  existing jobs retain their snapshots and artifact locations.
-- Keep inference backend selection exclusively in setup.
+Changing the checkpoint folder rechecks stage availability and dependencies.
+Changing the temporary folder invalidates the disk check. An idle workspace with
+included photos and a destination repeats preflight. Existing jobs retain their
+frozen folders on resume. The session log writer applies the new directory and
+limits on Save, retaining its session ID. A running worker keeps its launch-time
+verbosity, and its events follow the session writer to the new directory. Backend
+selection remains setup-only. [Settings verification](verification/desktop-settings.md)
 
-Proposed default file: `<app-root>\config.json`, with a versioned
+The default file is `<app-root>\config.json`, with a versioned
 `config.example.json` template supplied alongside the application:
 
 ```json

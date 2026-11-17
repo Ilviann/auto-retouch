@@ -1,6 +1,7 @@
 """Format bounded diagnostic records and persist them through one session writer."""
 
 from collections import deque
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import logging
@@ -36,9 +37,13 @@ class EventLogger:
 
     def __init__(self, session_id, level):
         self.session_id = session_id
-        self.logger = logging.Logger("retouching_tool", level=level)
         self._handler = _EventHandler(self)
-        self.logger.addHandler(self._handler)
+        self._set_level(level)
+
+    def _set_level(self, level):
+        logger = logging.Logger("retouching_tool", level=level)
+        logger.addHandler(self._handler)
+        self.logger = logger
 
     def _write(self, record):
         event = {"schema_version": 1, "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -139,6 +144,31 @@ class Diagnostics(EventLogger):
         """Persist a validated worker event with its original timestamp and process ID."""
         with self._handler.lock:
             self._store(event, encoded)
+
+    @contextmanager
+    def changing_settings(self, directory, settings):
+        """Prepare the new writer and switch only after configuration persistence succeeds."""
+        path = directory / self.path.name
+        stream = None
+        try:
+            if path != self.path or self.stream is None:
+                directory.mkdir(parents=True, exist_ok=True)
+                stream = path.open("a", encoding="utf-8")
+                size = os.fstat(stream.fileno()).st_size
+            yield
+            with self._handler.lock:
+                if stream is not None:
+                    self.failure = None
+                    self.close()
+                    self.path, self.stream, self._size = path, stream, size
+                    stream = None
+                if settings.level != self.settings.level:
+                    self._set_level(settings.level)
+                self.settings = settings
+                self._apply_retention()
+        finally:
+            if stream is not None:
+                stream.close()
 
     def _store(self, event, encoded):
         self.records.append(event)

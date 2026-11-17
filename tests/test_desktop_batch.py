@@ -15,14 +15,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, JpegImagePlugin
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QPushButton
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QFileDialog, QInputDialog, QLabel, QPushButton
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.ui.qt.main_window import MainWindow
+from retouching_tool.ui.qt.settings_dialog import SettingsDialog
 
+from test_settings import add_fixture_stages
 from test_worker import CHECKPOINT_WORKER
 
 
@@ -107,6 +109,103 @@ class DesktopBatchTests(unittest.TestCase):
             button.click()
             self.until(lambda: marker.exists() and panel.pause.isEnabled(), "worker did not reach a checkpoint")
         marker.unlink()
+
+    def test_settings_save_cancel_card_recovery_and_disk_recheck(self):
+        window, panel = self.open_window((self.source,))
+        app = panel.application
+        self.wait_for_scan(panel, 1)
+        panel.destination.setText(str(self.destination))
+        self.check_space(panel)
+        plan = panel._plan
+        config = app.config
+        add_fixture_stages(app.pipeline_service)
+        stage_id = app.pipeline_service.status.stages[0].stage.id
+
+        def open_settings():
+            window.findChild(QPushButton, "openSettings").click()
+            dialog = self.qt.activeModalWidget()
+            self.assertIsInstance(dialog, SettingsDialog)
+            return dialog
+
+        dialog = open_settings()
+        labels = [label.text() for label in dialog.findChildren(QLabel)]
+        self.assertIn(str(config.file), labels)
+        self.assertIn("directml", labels)
+        self.assertIn(f"In use: {config.temporary}", labels)
+        dialog.fields["temporary"].setText("discard")
+        dialog.buttons.button(QDialogButtonBox.StandardButton.Cancel).click()
+        self.assertFalse(config.file.exists())
+        self.assertIs(panel._plan, plan)
+
+        dialog = open_settings()
+        self.assertEqual(dialog.fields["temporary"].text(), config.folders.temporary)
+        dialog.fields["temporary"].setText("logs")
+        save = dialog.buttons.button(QDialogButtonBox.StandardButton.Save)
+        save.click()
+        self.until(lambda: "CONFIG_INVALID" in dialog.message.text(), "invalid folders were accepted")
+        self.assertFalse(config.file.exists())
+        dialog.fields["temporary"].setText(str(self.source))
+        dialog.fields["checkpoints"].setText("empty models")
+        release = Event()
+        save_settings = app.save_settings
+
+        def delayed_save(*args):
+            if not release.wait(5):
+                raise TimeoutError("Settings test did not release the save")
+            return save_settings(*args)
+
+        with patch.object(app, "save_settings", delayed_save):
+            save.click()
+            try:
+                dialog.reject()
+                window.close()
+                self.assertTrue(dialog.isVisible() and window.isVisible())
+            finally:
+                release.set()
+        self.until(lambda: "SCRATCH_INSIDE_SOURCE" in panel.setup_message.text(),
+                   "edited scratch path was not rechecked")
+        self.assertFalse(panel.start.isEnabled())
+        self.assertEqual(load_config(self.root), app.config)
+        card = window.pipeline_page.stage_cards[stage_id]
+        self.assertIn("MODEL_MISSING", card.findChild(QLabel, "stageStatus").text())
+        self.assertIn("empty models", window.pipeline_page.details.toPlainText())
+        self.assertIn("blocked", panel.pipeline_summary.text())
+
+        dialog = open_settings()
+        dialog.fields["temporary"].setText("new scratch")
+        dialog.fields["checkpoints"].setText(config.folders.checkpoints)
+        dialog.buttons.button(QDialogButtonBox.StandardButton.Save).click()
+        self.until(lambda: panel._plan is not None and panel._plan.scratch == self.root / "new scratch",
+                   "new scratch volume was not checked")
+        recovered, consumer = app.pipeline_service.status.stages
+        self.assertEqual((recovered.state, consumer.state), ("skipped", "blocked"))
+        self.assertFalse(recovered.stage.enabled)
+        self.assertFalse(panel.start.isEnabled())
+        self.assertTrue(card.toggle.isEnabled())
+        card.toggle.click()
+        self.until(panel.start.isEnabled, "explicit enable did not restore the batch")
+
+    def test_settings_while_staged_worker_active_and_resume(self):
+        window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 2)
+        panel.destination.setText(str(self.destination))
+        panel.mode.setCurrentIndex(panel.mode.findData("staged"))
+        self.check_space(panel)
+        self.start_at_checkpoint(panel, "pause", panel.start)
+        window.findChild(QPushButton, "openSettings").click()
+        dialog = self.qt.activeModalWidget()
+        self.assertIsInstance(dialog, SettingsDialog)
+        dialog.fields["temporary"].setText("future scratch")
+        dialog.fields["logs"].setText("future logs")
+        dialog.buttons.button(QDialogButtonBox.StandardButton.Save).click()
+        self.until(lambda: self.qt.activeModalWidget() is None, "settings did not save during the batch")
+        panel.pause.click()
+        self.until(panel.resume.isEnabled, "worker did not pause")
+        panel.resume.click()
+        self.until(lambda: "2 exported" in panel.job_counts.text(), "could not resume with the frozen paths")
+        self.assertFalse((self.root / "future scratch").exists())
+        records = [json.loads(line) for line in self.log.path.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(event.get("worker_run_id") and event.get("job_id") == panel._job_id for event in records))
 
     def test_sequential_folder_preflight_and_jpeg_export(self):
         corrupt = self.source / "broken.jpg"
