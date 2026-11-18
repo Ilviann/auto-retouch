@@ -5,6 +5,20 @@ implementer/reviewer responsibilities sequentially. Confirmed product requiremen
 remain in `requirements.md`; defaults and unvalidated engine assumptions remain
 identified in their design documents.
 
+## Implementation priorities
+
+1. **Batch photo retouching (U49).** Continue with portrait evaluation and
+   engine feasibility. Validate automatic color correction and exposed-skin
+   retouching for multiple people, then refine Natural and Beauty using local
+   previews and visual review. Validate the resulting pipeline in both batch
+   schedules, including recovery, verified JPEG export, and target resource use.
+2. **Logging and maintenance.** Queue standalone diagnostics and maintenance
+   improvements behind batch retouching work. Grouped diagnostic summaries and
+   further diagnostic tooling belong here. Keep job progress, actionable
+   processing errors, and recovery in the primary workflow.
+
+## Task status and evidence
+
 | Task | Requirements | Status and completion evidence |
 | --- | --- | --- |
 | 1a. Python environment and setup-only backend selection | U21–U24, U27–U29 | Complete for available hardware: exact/hash-pinned locks, isolated Python 3.14 environment, default-CUDA menu, safe repeated setup/switches, ready metadata, read-only check. [Evidence](verification/runtime-foundation.md). CUDA hardware acceptance pending. |
@@ -23,10 +37,11 @@ identified in their design documents.
 | 5. Desktop settings editor | U26, U29–U32, U48 | Implemented. Save validates and applies local folders and logging options, rechecks affected stages and disk preflight, and preserves frozen jobs. [Settings evidence](verification/desktop-settings.md). |
 | 5. Desktop diagnostic search | U30–U32 | Implemented. Search retained and recent in-memory events, filter by severity and job/photo/stage ID, get copyable technical details, and reveal matching workspace items. [Evidence](verification/desktop-diagnostics.md). |
 | 5. Local diagnostics reports | U30–U32 | Implemented. Export a redacted ZIP of available session or saved-job events, runtime and settings evidence, and coverage notes. [Evidence](verification/desktop-diagnostics.md). |
-| 5. Remaining desktop workflow | U17, U30–U32 | Grouped batch warning summaries, full-resolution detail inspection, and queued GPU previews remain pending. |
+| 5. Remaining photo preview workflow | U17, U31, U32 | Full-resolution detail inspection and queued GPU previews remain pending. |
 | 5. Desktop workspace redesign | U03, U06, U09–U20, U30–U41, U44–U45, U48 | Deferred proposal. Use the [workspace design and review walkthroughs](desktop-redesign.md) when planning the later desktop pass. |
 | Product identity alignment | U35, U47 | Auto ReTouch and Neyrome appear in runtime/UI/CLI and source package metadata. Verified JPEG provenance records Auto ReTouch and the application version while retaining source photographer credits. |
 | 6. Distribution and target-hardware acceptance | U01, U07, U21–U29, U42 | Pending: release dependency/license audit, asset provisioning instructions, offline full workflow, minimum 6 GB NVIDIA/16 GB RAM approximately 500-photo acceptance. |
+| 5. Remaining diagnostics and maintenance | U30, U49 | Lower priority. Grouped batch warning summaries remain pending. |
 
 Ordinary app verification uses the existing DirectML environment. Setup tests and
 backend changes are allowed only for setup-script improvements or bug fixes.

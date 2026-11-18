@@ -104,6 +104,9 @@ explicitly requests delegation; no standing delegation authorization is implied.
 
 ## Per-task loop
 
+Use the [implementation priorities](backlog.md#implementation-priorities) when
+choosing the next task.
+
 Test only behavior changed in the current task. Select focused checks for those
 changes; do not run unrelated tests or the full test suite as routine verification.
 Full smoke tests may run only at the user's explicit request. The validation

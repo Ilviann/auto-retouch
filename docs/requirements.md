@@ -58,6 +58,20 @@ presets rather than fixed processing paths.
 | U46 | Development hardware is an AMD Ryzen 7 7840HS APU with Radeon 780M Graphics and reported DirectX 12 Ultimate support; NVIDIA CUDA hardware is unavailable here. |
 | U47 | App author: Neyrome. |
 | U48 | Provide an in-app UI for editing application configuration. |
+| U49 | Give batch photo retouching higher implementation priority than logging and application maintenance. |
+
+### Feature priorities
+
+1. **Primary workflow.** Import and preview photos, apply automatic color
+   correction and retouch all exposed skin across multiple people, tune the
+   Natural and Beauty presets, and run recoverable batches with verified JPEG
+   export. Validate the appearance and resource use on representative batches.
+2. **Lower priority.** Detailed logging, diagnostics tools, and application
+   maintenance features. Keep actionable processing errors and basic job status
+   available as part of the batch workflow.
+
+The [implementation backlog](backlog.md#implementation-priorities) applies this
+order to the remaining work.
 
 The following sections are the proposed MVP baseline, rather than additional
 user-confirmed requirements. Typical image dimensions, retouching examples, CPU
