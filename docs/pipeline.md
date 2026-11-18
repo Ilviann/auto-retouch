@@ -36,6 +36,11 @@ See [desktop pipeline evidence](verification/desktop-pipeline.md).
 
 Pipeline preflight checks operations, assets, and context. Batch execution also
 requires destination, path, and disk validation.
+The application catalog includes `core.auto_exposure` version 1. It is an
+independently editable CPU stage with strength and a maximum correction in stops.
+Place it before pixel-sensitive analysis stages. See the
+[stage catalog](stages.md#initial-stage-catalog-and-image-state) for its tonal
+behavior and provisional defaults.
 The catalog includes the PP-HumanSeg person foreground evaluation operation and
 its local checkpoint manifest. Model-state
 acceptance currently uses synthetic local bytes and injected test operations.

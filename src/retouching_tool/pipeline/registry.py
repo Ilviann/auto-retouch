@@ -36,8 +36,10 @@ def reference_registry():
 
 
 def application_registry():
+    from ..operations.auto_exposure import DESCRIPTOR as AUTO_EXPOSURE, AutoExposure
     from ..operations.person_foreground import DESCRIPTOR, PersonForeground
 
     registry = reference_registry()
+    registry.register(AUTO_EXPOSURE, AutoExposure)
     registry.register(DESCRIPTOR, PersonForeground)
     return registry

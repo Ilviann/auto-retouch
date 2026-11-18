@@ -171,6 +171,40 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(left.tobytes(), right.tobytes())
                 self.assertEqual(left.getexif()[271], "Worker Test Camera")
 
+    def test_auto_exposure_preview_and_worker_schedules(self):
+        editor = self.app.pipeline_service
+        editor.load_data({"schema_version": 1, "name": "Auto exposure test", "stages": []})
+        stage = editor.add_operation("core.auto_exposure", 1).stages[0].stage
+        index = self.app.batch_service.index((self.source,), recursive=False)
+        image_id = index.images[0].image_id
+        preview = self.app.preview_service
+        comparison = preview.stage_comparison(index, image_id, stage.id, through_stage=False)
+        unchanged = comparison.render("zero-strength", {"strength": 0})
+        corrected = comparison.render("default-strength", {})
+        self.assertEqual(unchanged.original, unchanged.result)
+        self.assertGreater(corrected.result.rgb[0], corrected.original.rgb[0])
+        self.assertEqual(preview.picture(index, image_id, "whole", process=True).result, corrected.result)
+
+        for mode in ("sequential", "staged"):
+            job_id = self.create(mode)
+            result = self.worker.start(job_id).wait(20)
+            self.assertEqual((result.exit_code, result.error_code, result.diagnostics_incomplete), (0, None, False))
+            status = self.jobs.status(job_id)
+            self.assertEqual(status.status, "completed")
+            self.assertTrue(all(image.status == "completed" for image in status.images))
+            events = [event for event in self.persisted_records()
+                      if event["code"] == "AUTO_EXPOSURE_APPLIED" and event.get("job_id") == job_id]
+            self.assertEqual({(event["image_id"], event["stage_instance_id"]) for event in events},
+                             {(image.image_id, stage.id) for image in status.images})
+
+        for path, checksum in self.originals.items():
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), checksum)
+            with (Image.open(self.root / "sequential" / path.name) as left,
+                  Image.open(self.root / "staged" / path.name) as right):
+                self.assertEqual(left.tobytes(), right.tobytes())
+                self.assertGreater(left.getpixel((0, 0))[0], 96)
+                self.assertEqual(left.getexif()[271], "Worker Test Camera")
+
     def test_pause_cancel_and_one_active_worker(self):
         job_id = self.create()
         run = self.scripted_worker(job_id, CHECKPOINT_WORKER, "pause")

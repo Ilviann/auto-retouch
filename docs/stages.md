@@ -6,8 +6,8 @@ are proposals; models, algorithms, and numeric preset defaults require evaluatio
 Analysis outputs must be visible and reusable rather than hidden in a retouching
 operation's private state.
 
-Milestone 3a implements CPU image-statistics and manual-exposure references only;
-see [verification](verification/pipeline-contracts.md). Their in-memory working
+Milestone 3a introduced CPU image-statistics and manual-exposure references.
+See [verification](verification/pipeline-contracts.md). The in-memory working
 representation is normalized H×W×3 linear-sRGB float32 (12 pixel bytes per pixel),
 with bytes-backed read-only arrays and immutable source EXIF/profile bytes.
 Statistics carries source identity, producer/settings hash, operation/context
@@ -34,13 +34,29 @@ It represents pooled person foreground. Exposed-skin classification and person
 instances require further operations. See the
 [checkpoint decision](decisions/0004-first-ai-checkpoint.md).
 
+**Auto exposure and tone** (`core.auto_exposure` version 1) is a CPU operation
+that measures the median of usable linear-sRGB luminance samples. It considers
+samples in the range 0.025–0.85 and leaves the pixels as they were if fewer than
+5% fall in that range or the measured median is already within 0.14–0.30. For
+medians outside that band it estimates a shift toward the nearest end of the
+band, limits it by **Maximum correction (stops)** (0–2, default 1), and scales
+it by **Strength** (0–1, default 0.5). Both settings support live preview.
+
+The stage applies a monotone curve in linear light, using a common multiplier
+for the three channels to preserve channel ratios. The curve fixes black and
+pixels with a maximum channel of 1 and rolls into highlights without hard
+clipping. It keeps the original metadata, dimensions, and geometry revision.
+Place it before image statistics or AI analysis so those stages measure the
+corrected pixels. The target band and defaults are provisional and may need
+adjustment for intentional lighting or grading. See [verification](verification/auto-exposure.md).
+
 ## Proposed first catalog
 
 | Operation | Outputs | Main controls and dependencies |
 | --- | --- | --- |
 | Image statistics | Context: histogram/luminance statistics and clipping warnings; pixels unchanged | Analysis scope and thresholds. Measurements identify the pixel revision they describe. Useful as an initial CPU reference stage and diagnostic overlay. |
 | White balance and color-cast correction | Corrected pixels; optional correction measurements | Temperature/tint correction limits and strength. Conservative CPU baseline first; preserve intentional studio lighting when disabled. Uses applicable statistics/context when available. |
-| Exposure and auto contrast | Corrected pixels; clipping/tonal diagnostics | Exposure limit, black/white point limits, highlight protection, and strength. Recompute cheap current-image measurements when prior statistics are stale. |
+| Auto exposure and tone | Corrected pixels and correction diagnostics | Implemented baseline with strength, stop limit, and highlight protection. It measures the current pixels directly. |
 | Person and exposed-skin analysis | Context: person regions/instances and exposed-skin masks across the whole photo; pixels unchanged | Validated body/skin segmentation, confidence and overlap handling, association of visible skin with each person. Required for the confirmed all-skin/multiple-person scope; face parsing alone is insufficient. |
 | Portrait detection | Context: face boxes, landmarks, eye/mouth locations and per-face IDs; pixels unchanged | Confidence threshold and minimum face size. Associate faces with person regions when available. Backend/model chosen after evaluation. |
 | Face-region parsing | Context: precise skin, lips, eyes, and teeth masks where supported; pixels unchanged | Per-region confidence, edge treatment, and analysis resolution. Requires faces or a declared self-contained detection implementation. Teeth must have a validated teeth mask; a mouth box is insufficient. |
