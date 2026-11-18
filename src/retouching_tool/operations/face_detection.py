@@ -6,7 +6,7 @@ from ..config import ScalingSettings
 from ..errors import RetouchingError
 from ..imaging.scaling import resize_rgb
 from ..pipeline.assets import ModelFile, ModelManifest
-from ..pipeline.definition import OperationDescriptor, Parameter, SCALING_PARAMETERS
+from ..pipeline.definition import IntegerParameter, OperationDescriptor, Parameter, SCALING_PARAMETERS
 from ..pipeline.image_state import FACE_REGIONS, ContextEntry, FaceRegion, FaceRegions
 from .onnx_session import open_session
 
@@ -21,7 +21,8 @@ MODEL = ModelManifest(
 )
 DESCRIPTOR = OperationDescriptor(
     "analysis.face_detection", 1, "Face detection (YuNet)",
-    parameters=(Parameter("threshold", "Minimum confidence", .80, .1, 1), *SCALING_PARAMETERS),
+    parameters=(Parameter("threshold", "Minimum confidence", .80, .1, 1),
+                IntegerParameter("expand_pixels", "Expand each side (px)", 0, 0, 65535), *SCALING_PARAMETERS),
     provides=(FACE_REGIONS,), model_refs=(MODEL.ref,), backends=MODEL.backends,
 )
 SIZE = 640
@@ -40,7 +41,7 @@ def _input(state, methods):
     return tensor, size
 
 
-def _decode(outputs, size, original, threshold):
+def _decode(outputs, size, original, threshold, expand_pixels):
     import numpy as np
 
     candidates, confidences = [], []
@@ -71,8 +72,8 @@ def _decode(outputs, size, original, threshold):
     while order.size:
         index, rest = order[0], order[1:]
         box = boxes[index]
-        lower = np.floor(box[:2] * scale).astype(int)
-        upper = np.minimum(np.ceil(box[2:] * scale), original).astype(int)
+        lower = np.maximum(0, np.floor(box[:2] * scale).astype(int) - expand_pixels)
+        upper = np.minimum(original, np.ceil(box[2:] * scale).astype(int) + expand_pixels)
         faces.append(FaceRegion(*(int(n) for n in (*lower, *upper))))
         if len(faces) > 256:
             raise RetouchingError("FACE_REGION_LIMIT", "Detected over 256 faces. Increase minimum confidence.")
@@ -107,12 +108,13 @@ class FaceDetection:
         except Exception as exc:
             raise RetouchingError("AI_INFERENCE_FAILED", "YuNet inference failed. Inspect the device error details.") from exc
         stage = self.stage
-        faces = _decode(outputs, size, (state.width, state.height), stage.parameter("threshold"))
+        expansion = stage.parameter("expand_pixels")
+        faces = _decode(outputs, size, (state.width, state.height), stage.parameter("threshold"), expansion)
         entry = ContextEntry(FACE_REGIONS, stage.id, stage.operation, stage.operation_version, state.pixel_revision,
                              state.geometry_revision, state.width, state.height, faces, source_id=state.metadata.source_id,
                              producer_settings_hash=stage.identity, model_ref=stage.model_ref)
         if faces.regions:
-            self.runtime.emit("FACES_DETECTED", "Detected face regions.", count=len(faces.regions))
+            self.runtime.emit("FACES_DETECTED", "Detected face regions.", count=len(faces.regions), expand_pixels=expansion)
         else:
             self.runtime.emit("FACE_DETECTION_EMPTY", "No faces detected. Inspect the preview and minimum confidence.",
                               level="WARNING")

@@ -4,12 +4,24 @@ from PySide6.QtCore import QSignalBlocker, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
-    QMenu, QPushButton, QSizePolicy, QSlider, QStyle, QToolButton, QVBoxLayout, QWidget,
+    QMenu, QPushButton, QSizePolicy, QSlider, QSpinBox, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ...config import SCALING_METHODS
-from ...pipeline.definition import BLEND, ChoiceParameter, ScalingParameter
+from ...pipeline.definition import BLEND, BooleanParameter, ChoiceParameter, IntegerParameter, ScalingParameter
 from ...pipeline.image_state import FACE_REGIONS, PERSON_FOREGROUND
+
+
+class BooleanControl(QCheckBox):
+    def value(self):
+        return self.isChecked()
+
+    def setValue(self, value):
+        self.setChecked(value)
+
+    @property
+    def valueChanged(self):
+        return self.toggled
 
 
 class ChoiceControl(QComboBox):
@@ -69,6 +81,12 @@ class BlendControl(QWidget):
 def parameter_control(parameter):
     if parameter == BLEND:
         return BlendControl()
+    if isinstance(parameter, BooleanParameter):
+        return BooleanControl(parameter.label, objectName=f"parameter-{parameter.name}")
+    if isinstance(parameter, IntegerParameter):
+        control = QSpinBox(objectName=f"parameter-{parameter.name}")
+        control.setRange(parameter.minimum, parameter.maximum)
+        return control
     if isinstance(parameter, ScalingParameter):
         return ScalingControl(inherit=True, objectName=f"parameter-{parameter.name}")
     if isinstance(parameter, ChoiceParameter):
@@ -81,6 +99,13 @@ def parameter_control(parameter):
     control.setRange(parameter.minimum, parameter.maximum)
     control.setSingleStep(.1)
     return control
+
+
+def add_parameter_row(form, parameter, control):
+    if isinstance(control, BooleanControl):
+        form.addRow(control)
+    else:
+        form.addRow(parameter.label, control)
 
 
 def tag_row(label, entries, hint):
@@ -202,9 +227,9 @@ class StageCard(QFrame):
                 name = parameter.name
                 control = parameter_control(parameter)
                 self.parameters[name] = control
-                form.addRow(parameter.label, control)
-                if isinstance(control, BlendControl):
-                    control.valueChanged.connect(lambda value: on_parameter(stage_id, BLEND.name, value))
+                add_parameter_row(form, parameter, control)
+                if isinstance(control, (BooleanControl, BlendControl)):
+                    control.valueChanged.connect(lambda value, n=name: on_parameter(stage_id, n, value))
                 elif isinstance(control, ChoiceControl):
                     control.activated.connect(lambda _, n=name, c=control: on_parameter(stage_id, n, c.value()))
                 else:
@@ -243,6 +268,9 @@ class StageCard(QFrame):
         self.preview_pipeline.setEnabled(available and self._preview_ready)
 
     def show_status(self, status, *, can_move_up, can_move_down):
+        active_inputs = self.descriptor.active_optional_inputs(status.stage)
+        for spec in self.descriptor.optional:
+            self.findChild(QLabel, f"tag-In-{spec.key}").setVisible(spec in active_inputs)
         with QSignalBlocker(self.toggle):
             self.toggle.setChecked(status.stage.enabled)
         self.toggle.setEnabled(not status.issues)

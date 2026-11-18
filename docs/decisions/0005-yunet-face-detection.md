@@ -34,6 +34,13 @@ an explicit enable. [Publisher's file and checksum](https://huggingface.co/openc
   settings, missing and incorrect model files, explicit re-enable, confidence
   filtering, overlap suppression, exclusion of padding, empty detections,
   region serialization, and preserved inference failures.
+- A 24-pixel margin on a local study portrait matched the full-resolution box
+  coordinates in preview. With face targeting enabled, Alibaba changed pixels
+  only inside the expanded box. Clearing the checkbox also produced edits
+  outside that box. Sequential and staged workers produced identical decoded
+  exports for each checkbox setting. Regression checks cover edge clipping,
+  overlapping expanded boxes, zero detections, oversized whole-image consent,
+  and the saved settings and checkpoint identities of earlier pipelines.
 
 Real group scenes with occlusion, visual acceptance of retouched faces,
 exposed-skin coverage, and NVIDIA hardware acceptance remain open.

@@ -6,7 +6,7 @@ from ..errors import ResizeApprovalRequired, RetouchingError
 from ..config import ScalingSettings
 from ..imaging.scaling import fit_longest_side, resize_rgb
 from ..pipeline.assets import ModelFile, ModelManifest
-from ..pipeline.definition import OperationDescriptor, Parameter, ResizeLimit, SCALING_PARAMETERS
+from ..pipeline.definition import BooleanParameter, OperationDescriptor, Parameter, ResizeLimit, SCALING_PARAMETERS
 from ..pipeline.image_state import FACE_REGIONS, FaceRegion, ImageState
 
 MAX_INPUT_SIDE = 5000
@@ -20,7 +20,9 @@ MODEL = ModelManifest(
     "Publisher model repository license: Apache License 2.0. "
     "https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/README.md")
 DESCRIPTOR = OperationDescriptor("retouch.alibaba_skin", 1, "Alibaba skin retouching",
-    parameters=(Parameter("strength", "Strength", 1, 0, 1), *SCALING_PARAMETERS),
+    parameters=(Parameter("strength", "Strength", 1, 0, 1),
+                BooleanParameter("use_face_rects", "Use face rects from context", True, FACE_REGIONS.key),
+                *SCALING_PARAMETERS),
     optional=(FACE_REGIONS,), preserves=(FACE_REGIONS.key,), changes_pixels=True,
     model_refs=(MODEL.ref,), backends=MODEL.backends, inference_runtime="pytorch",
     resize_limit=ResizeLimit(MAX_INPUT_SIDE, bypass_if_zero="strength"))
@@ -140,6 +142,7 @@ def retouch_regions(pixels, face_crops, *, methods, resize_approved, infer, emit
 class AlibabaSkin:
     def __init__(self, stage):
         self.strength = stage.parameter("strength")
+        self.use_face_rects = stage.parameter("use_face_rects")
         params = stage.portable_parameters()
         self.methods = ScalingSettings(**{key: params[key] for key in ("downscale", "upscale") if key in params})
         self.networks = None
@@ -159,9 +162,12 @@ class AlibabaSkin:
     def process(self, state):
         if not self.strength:
             return state
-        entry = state.entry(FACE_REGIONS.key)
+        entry = state.entry(FACE_REGIONS.key) if self.use_face_rects else None
         crops = None if entry is None else tuple(
             FaceCrop(r.left, r.top, r.right, r.bottom, r if r.mask else None) for r in entry.value.regions)
+        self.runtime.emit("RETOUCH_TARGET_SELECTED", "Selected the input for skin retouching.",
+                          target="whole_image" if crops is None else "face_regions",
+                          use_face_rects=self.use_face_rects, region_count=1 if crops is None else len(crops))
         try:
             pixels = retouch_regions(state.pixels, crops, methods=self.methods,
                                      resize_approved=self.runtime.resize_approved,

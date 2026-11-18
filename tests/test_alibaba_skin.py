@@ -79,6 +79,21 @@ class AlibabaTests(unittest.TestCase):
                 with self.assertRaisesRegex(RetouchingError, "Regenerate"):
                     session.process(replace(state, geometry_revision=1), image_id="source")
 
+            self.editor.set_parameter(self.stage.id, "use_face_rects", False)
+            unchecked, = self.editor.resolve_scaling(self.editor.status.definition).stages
+            with StageSession(self.editor.registry, self.editor.catalog, replace(runtime, stage=unchecked)) as session:
+                for image in (state, empty, replace(state, geometry_revision=1)):
+                    with self.assertRaises(ResizeApprovalRequired):
+                        session.process(image, image_id="source")
+            with StageSession(self.editor.registry, self.editor.catalog,
+                              replace(runtime, stage=unchecked, resize_approved=True)) as session:
+                for image in (state, empty):
+                    networks.return_value.apply.reset_mock()
+                    edited = session.process(image, image_id="source")
+                    networks.return_value.apply.assert_called_once()
+                    np.testing.assert_array_equal(edited.pixels, np.ones_like(image.pixels))
+                    self.assertEqual(edited.entry(FACE_REGIONS.key), image.entry(FACE_REGIONS.key))
+
     def test_resize_approval_preview_and_saved_jobs(self):
         self.install_fixture()
         src = self.root / "input.jpg"

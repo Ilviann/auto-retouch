@@ -25,6 +25,36 @@ class Parameter:
 
 
 @dataclass(frozen=True)
+class IntegerParameter:
+    name: str
+    label: str
+    default: int
+    minimum: int
+    maximum: int
+    preview_on_change: bool = False
+
+    def validate(self, value):
+        if type(value) is not int or not self.minimum <= value <= self.maximum:
+            raise RetouchingError("PARAMETER_INVALID",
+                                  f"{self.label} must be a whole number from {self.minimum} to {self.maximum}.")
+        return value
+
+
+@dataclass(frozen=True)
+class BooleanParameter:
+    name: str
+    label: str
+    default: bool
+    optional_context_key: str | None = None
+    preview_on_change: bool = False
+
+    def validate(self, value):
+        if type(value) is not bool:
+            raise RetouchingError("PARAMETER_INVALID", f"{self.label} must be true or false.")
+        return value
+
+
+@dataclass(frozen=True)
 class ChoiceParameter:
     name: str
     label: str
@@ -76,7 +106,7 @@ class OperationDescriptor:
     operation: str
     version: int
     title: str
-    parameters: tuple[Parameter | ChoiceParameter | ScalingParameter, ...] = ()
+    parameters: tuple[Parameter | IntegerParameter | BooleanParameter | ChoiceParameter | ScalingParameter, ...] = ()
     requires: tuple[ContextSpec, ...] = ()
     optional: tuple[ContextSpec, ...] = ()
     provides: tuple[ContextSpec, ...] = ()
@@ -95,6 +125,11 @@ class OperationDescriptor:
     def editable_parameters(self):
         return (*self.parameters, BLEND) if self.changes_pixels else self.parameters
 
+    def active_optional_inputs(self, stage):
+        ignored = {p.optional_context_key for p in self.parameters
+                   if isinstance(p, BooleanParameter) and p.optional_context_key and not stage.parameter(p.name)}
+        return tuple(spec for spec in self.optional if spec.key not in ignored)
+
     def execution_backend(self, onnx_backend, pytorch_backend):
         if self.inference_runtime == "onnxruntime":
             return onnx_backend
@@ -103,22 +138,32 @@ class OperationDescriptor:
         raise ValueError(f"Unknown inference runtime {self.inference_runtime}")
 
 
+# These settings extend existing v1 stages. Their defaults reproduce the
+# original behavior, including the settings and contract hashes in saved jobs.
+LEGACY_STAGE_DEFAULTS = {
+    ("analysis.face_detection", 1): {"expand_pixels": 0},
+    ("retouch.alibaba_skin", 1): {"use_face_rects": True},
+}
+
+
 @dataclass(frozen=True)
 class StageDefinition:
     id: str
     operation: str
     operation_version: int
     enabled: bool
-    parameters: tuple[tuple[str, float | str], ...] = ()
+    parameters: tuple[tuple[str, float | int | bool | str], ...] = ()
     model_ref: str | None = None
 
-    def parameter(self, name: str) -> float | str:
+    def parameter(self, name: str) -> float | int | bool | str:
         return dict(self.parameters)[name]
 
     def portable_parameters(self):
         # Implicit defaults keep older job and checkpoint identities stable.
+        defaults = LEGACY_STAGE_DEFAULTS.get((self.operation, self.operation_version), {})
         return {key: value for key, value in self.parameters
                 if not (key in ("downscale", "upscale") and value == "inherit"
+                        or key in defaults and type(value) is type(defaults[key]) and value == defaults[key]
                         or key == BLEND.name and value == BLEND.default)}
 
     @property

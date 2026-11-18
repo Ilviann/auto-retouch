@@ -79,11 +79,20 @@ detections. Preview shows boxes and a count at the original image coordinates.
 **Minimum confidence** defaults to 0.80. A higher value rejects more candidate
 faces. Inspect the boxes before using this stage on a new lighting setup or group.
 
+**Expand each side (px)** adds a margin to every retained rectangle in
+full-resolution, oriented photo pixels. A value of 20 adds 20 pixels on each
+side, up to the photo edges. The default is 0. Expansion happens after duplicate
+detections are suppressed. The preview and downstream stages receive the same boxes.
+**Downscaling** and **Upscaling** choose how the detector samples its input when
+the longest side is respectively above or below 640 pixels. The photo keeps its
+original resolution.
+
 Place the stage immediately before **Alibaba skin retouching**. The detector
 leaves pixels unchanged and publishes `face.regions` v1, including an empty
-set when detection succeeds with zero faces. Alibaba skips that image in this
-case. If the detector is disabled and no other stage supplies face regions,
-Alibaba uses the whole image. [Checkpoint, rights and verification](decisions/0005-yunet-face-detection.md).
+set when detection succeeds with zero faces. With **Use face rects from context**
+checked, Alibaba passes through an image with zero detected faces. If no upstream
+stage supplied face regions, Alibaba uses the whole image.
+[Checkpoint, rights and verification](decisions/0005-yunet-face-detection.md).
 
 ## Proposed first catalog
 
@@ -166,7 +175,12 @@ RetinaFace and TensorFlow whitening models are outside this implementation.
 | [pytorch_model.pt](https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/pytorch_model.pt) | 53,646,276 | `760d0c0b95c4e0a692165677fe2b82dbdf8fbbd4a3780ca966599c627b082993` |
 | [joint_20210926.pth](https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/joint_20210926.pth) | 227,618,450 | `c9e1388b19d9334c90db08308c86de208f535920ee381ae8a9cb63484a78351a` |
 
-Apply the 5000-pixel limit to each actual stage input. With upstream face
+**Use face rects from context** is checked by default, including in older saved
+pipelines. Clear it to retouch the whole incoming image, even when the detector
+supplies rectangles or reports zero faces. The 5000-pixel resize rule then
+applies to the whole image.
+
+Apply the 5000-pixel limit to each actual stage input. With the option checked and upstream face
 rectangles, crop the current oriented image at those rectangles. With per-face
 masks, use their bounds and retain the masks for compositing. Validate the
 regions against the image and geometry revision. Process the crops individually

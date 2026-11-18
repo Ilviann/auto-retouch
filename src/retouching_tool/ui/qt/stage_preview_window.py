@@ -2,11 +2,11 @@
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
-                               QProgressBar, QPushButton, QVBoxLayout)
+                               QProgressBar, QPushButton, QSpinBox, QVBoxLayout)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
 from .picture_window import PictureComparison, RenderProgressDialog, statistics_text
-from .stage_card import ChoiceControl, parameter_control
+from .stage_card import ChoiceControl, add_parameter_row, parameter_control
 
 
 def confirm_resize(parent, message):
@@ -52,7 +52,7 @@ class StagePreviewWindow(QDialog):
             for parameter in descriptor.editable_parameters:
                 control = parameter_control(parameter)
                 self._controls[parameter.name] = control
-                if isinstance(control, QDoubleSpinBox):
+                if isinstance(control, (QDoubleSpinBox, QSpinBox)):
                     control.installEventFilter(self)
                     control.lineEdit().installEventFilter(self)
                 control.setValue(self._original[parameter.name])
@@ -63,7 +63,7 @@ class StagePreviewWindow(QDialog):
                 signal = control.currentIndexChanged if isinstance(control, ChoiceControl) else control.valueChanged
                 signal.connect(lambda _, p=parameter, widget=control, initial=control.value():
                                self._change(p, widget.value(), initial))
-                form.addRow(parameter.label, control)
+                add_parameter_row(form, parameter, control)
             if descriptor.neutral_picker:
                 self.pick_neutral = QPushButton("Pick neutral from input", checkable=True, autoDefault=False)
                 self.pick_neutral.setToolTip("Click a gray card or neutral midtone to reuse this correction across photos.")

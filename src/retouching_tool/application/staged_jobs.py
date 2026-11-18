@@ -8,6 +8,7 @@ from ..imaging.jpeg import JpegRuntime
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import MAX_ATTEMPTS, TERMINAL, JournalError
 from ..jobs.publication import checked_output
+from ..pipeline.definition import LEGACY_STAGE_DEFAULTS
 from ..pipeline.executor import StageRuntime, StageSession
 from ..storage.artifact_codec import require
 from ..storage.artifacts import ArtifactIdentity, ArtifactRef, ArtifactStore, fingerprint
@@ -156,6 +157,9 @@ class StagedRunner:
             prefix.append(definition)
             if stage.enabled:
                 descriptor = asdict(self.registry.descriptor(stage.operation, stage.operation_version))
+                extensions = LEGACY_STAGE_DEFAULTS.get((stage.operation, stage.operation_version), {})
+                descriptor["parameters"] = tuple(p for p in descriptor["parameters"]
+                                                 if p["name"] not in extensions or p["name"] in definition["parameters"])
                 if descriptor["resize_limit"] is None:
                     del descriptor["resize_limit"]
                 if self.job.pytorch_backend is None and descriptor["inference_runtime"] == "onnxruntime":

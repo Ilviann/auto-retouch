@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QPlainTextEdit, QSlider,
+    QSpinBox,
 )
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QFontMetrics
 from retouching_tool.application.contracts import StartupSnapshot
@@ -23,10 +24,12 @@ from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.operations.alibaba_skin import DESCRIPTOR as ALIBABA_SKIN, MODEL as ALIBABA_MODEL
+from retouching_tool.operations.face_detection import DESCRIPTOR as DETECTOR, MODEL as DETECTOR_MODEL
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
 from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS
 from retouching_tool.ui.qt.main_window import MainWindow
 from retouching_tool.ui.qt.stage_card import StageCard
+from retouching_tool.ui.qt.stage_preview_window import StagePreviewWindow
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -310,6 +313,35 @@ class QtIntegrationTests(unittest.TestCase):
             self.assertIn("solid", required.styleSheet())
             self.assertIn("dashed", optional.styleSheet())
             self.assertEqual(optional.text(), "areas:face · optional")
+            checkbox = card.findChild(QCheckBox, "parameter-use_face_rects")
+            self.assertTrue(checkbox.isChecked())
+            checkbox.click()
+            self.app.processEvents()
+            self.assertIs(editor.status.stages[0].stage.parameter("use_face_rects"), False)
+            self.assertTrue(optional.isHidden())
+            checkbox.click()
+            self.app.processEvents()
+            self.assertFalse(optional.isHidden())
+            face_stage = window.pipeline_page._command(editor.add_operation, DETECTOR.operation, 1,
+                                                       model_ref=DETECTOR_MODEL.ref).stages[-1].stage
+            self.app.processEvents()
+            expansion = window.pipeline_page.stage_cards[face_stage.id].findChild(QSpinBox, "parameter-expand_pixels")
+            self.assertEqual(expansion.value(), 0)
+            expansion.setValue(20)
+            expansion.editingFinished.emit()
+            self.assertEqual(editor.status.stages[-1].stage.parameter("expand_pixels"), 20)
+            for item, desc, widget, key, value in (
+                    (stage, ALIBABA_SKIN, QCheckBox, "use_face_rects", False),
+                    (editor.status.stages[-1].stage, DETECTOR, QSpinBox, "expand_pixels", 40)):
+                dialog = StagePreviewWindow(window, item, desc, "fixture", through_stage=True, submit=None, save=None)
+                control = dialog.findChild(widget, f"parameter-{key}")
+                if isinstance(control, QCheckBox):
+                    control.click()
+                else:
+                    control.setValue(value)
+                self.assertEqual(dialog._draft[key], value)
+                self.assertTrue(dialog.apply_preview.isEnabled())
+                dialog.deleteLater()
             self.assertEqual(card.findChild(QLabel, "tag-Out-pixels").text(), "pixels")
             for item in ALIBABA_MODEL.files:
                 self.assertIn(str(editor.checkpoints / item.relative_path), card.status_label.text())

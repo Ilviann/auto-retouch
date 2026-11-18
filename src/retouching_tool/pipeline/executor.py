@@ -102,7 +102,7 @@ class StageSession:
             keys = [entry.spec.key for entry in state.context]
             if len(keys) != len(set(keys)):
                 raise RetouchingError("CONTEXT_INVALID", "Duplicate image context keys")
-            for spec in desc.optional:
+            for spec in desc.active_optional_inputs(runtime.stage):
                 entry = state.entry(spec.key)
                 if desc.changes_pixels and not spec.pixel_sensitive and entry is not None and (
                         entry.spec != spec or not entry.compatible(state)):

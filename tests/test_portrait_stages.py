@@ -11,13 +11,14 @@ import numpy as np
 
 from retouching_tool.application.pipeline_service import PipelineService
 from retouching_tool.application.preview import DisplayImage, _face_overlay
+from retouching_tool.application.staged_jobs import StagedRunner
 from retouching_tool.errors import RetouchingError
-from retouching_tool.operations import face_detection as detector, white_balance as balance
+from retouching_tool.operations import alibaba_skin, face_detection as detector, white_balance as balance
 from retouching_tool.pipeline.assets import ModelCatalog
-from retouching_tool.pipeline.definition import StageDefinition
+from retouching_tool.pipeline.definition import PipelineDefinition, StageDefinition, parse_pipeline
 from retouching_tool.pipeline.executor import StageRuntime, StageSession
 from retouching_tool.pipeline.image_state import FACE_REGIONS, FaceRegion, ImageState, SourceMetadata
-from retouching_tool.pipeline.registry import application_registry
+from retouching_tool.pipeline.registry import OperationRegistry, application_registry
 from retouching_tool.storage.artifact_codec import decode_context, encode_context
 
 
@@ -75,7 +76,8 @@ class PortraitStageTests(unittest.TestCase):
                 balance.sample_neutral(self.state(sample), 0, 0)
 
     def test_detection_maps_suppresses_duplicates_ignores_padding_and_round_trips(self):
-        stage = StageDefinition("det", detector.DESCRIPTOR.operation, 1, True, (("threshold", .8),), detector.MODEL.ref)
+        stage = StageDefinition("det", detector.DESCRIPTOR.operation, 1, True,
+                                (("threshold", .8), ("expand_pixels", 0)), detector.MODEL.ref)
         operation = detector.FaceDetection(stage)
         state = self.state(np.zeros((100, 200, 3)))
         arrays = []
@@ -102,6 +104,14 @@ class PortraitStageTests(unittest.TestCase):
         samples = np.frombuffer(overlay.rgb, np.uint8).reshape(100, 200, 3)
         np.testing.assert_array_equal(samples[23, 23], (0, 224, 160))
         self.assertEqual(samples[0, 0].sum(), 0)
+        operation.stage = replace(stage, parameters=(("threshold", .8), ("expand_pixels", 60)))
+        expanded = operation.process(state).entry(FACE_REGIONS.key)
+        self.assertEqual(expanded.value.regions, (FaceRegion(0, 0, 87, 87), FaceRegion(63, 0, 187, 100)))
+        self.assertEqual(decode_context(encode_context(expanded)), expanded)
+        self.assertNotEqual(entry.producer_settings_hash, expanded.producer_settings_hash)
+        operation.stage = replace(stage, parameters=(("threshold", .8), ("expand_pixels", 200)))
+        self.assertEqual(operation.process(state).entry(FACE_REGIONS.key).value.regions,
+                         (FaceRegion(0, 0, 200, 100),) * 2)
         arrays[0].fill(0)
         empty = operation.process(state)
         self.assertFalse(empty.entry(FACE_REGIONS.key).value.regions)
@@ -127,6 +137,39 @@ class PortraitStageTests(unittest.TestCase):
             self.assertEqual(result.entry(FACE_REGIONS.key).value.regions, ())
         warning = next(call for call in self.log.emit.call_args_list if call.args[0] == "FACE_DETECTION_EMPTY")
         self.assertEqual((warning.kwargs["image_id"], warning.kwargs["job_id"]), ("photo", "job"))
+
+    def test_face_settings_validate_and_preserve_legacy_checkpoint_identity(self):
+        legacy_registry = OperationRegistry()
+        for module, added in ((detector, "expand_pixels"), (alibaba_skin, "use_face_rects")):
+            desc = module.DESCRIPTOR
+            legacy_registry.register(replace(desc, parameters=tuple(p for p in desc.parameters if p.name != added)), None)
+
+        raw = PipelineDefinition("Studio", tuple(StageDefinition(m.MODEL.ref, m.DESCRIPTOR.operation, 1, True,
+            model_ref=m.MODEL.ref) for m in (detector, alibaba_skin))).to_json()
+        legacy = parse_pipeline(raw, legacy_registry)
+        current = parse_pipeline(legacy.to_json(), self.registry)
+        self.assertEqual(current.to_json(), legacy.to_json())
+        self.assertEqual([s.identity for s in current.stages], [s.identity for s in legacy.stages])
+
+        def digests(pipeline, registry):
+            runner = StagedRunner(Mock(), None, Mock(pipeline=pipeline, pytorch_backend="cpu"), None)
+            runner.registry = registry
+            return runner._prefix_digests()
+
+        self.assertEqual(digests(current, self.registry), digests(legacy, legacy_registry))
+        for index, key, bad in ((0, "expand_pixels", (-1, 1.5, True, "2")),
+                                (1, "use_face_rects", (0, 1, "false", None))):
+            for value in bad:
+                data = current.to_json()
+                data["stages"][index]["parameters"][key] = value
+                with self.subTest(key=key, value=value), self.assertRaises(RetouchingError):
+                    parse_pipeline(data, self.registry)
+        updated = current.to_json()
+        updated["stages"][0]["parameters"]["expand_pixels"] = 30
+        updated["stages"][1]["parameters"]["use_face_rects"] = False
+        parsed = parse_pipeline(updated, self.registry)
+        self.assertEqual(parsed.to_json(), updated)
+        self.assertNotEqual(digests(current, self.registry), digests(parsed, self.registry))
 
     def test_detector_missing_wrong_and_recovered_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
