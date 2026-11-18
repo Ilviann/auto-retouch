@@ -22,6 +22,7 @@ class FolderSettings:
     checkpoints: str = "models"
     temporary: str = ".work"
     logs: str = "logs"
+    pipelines: str = "pipelines"
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class AppConfig:
     checkpoints: Path
     temporary: Path
     logs: Path
+    pipelines: Path
     logging: LoggingSettings
     using_defaults: bool
     folders: FolderSettings
@@ -53,18 +55,21 @@ def load_config(root: Path, explicit: Path | None = None) -> AppConfig:
     path = (explicit if explicit is not None else root / "config.json").resolve()
     defaults = not path.exists() and explicit is None
     data = {"schema_version": 1} if defaults else read_json(path)
-    return parse_config(path, data, defaults=defaults)
+    return parse_config(path, data, defaults=defaults, app_root=root.resolve())
 
 
-def parse_config(path: Path, data, *, defaults=False) -> AppConfig:
+def parse_config(path: Path, data, *, defaults=False, app_root=None) -> AppConfig:
     _keys(data, ["schema_version", "paths", "logging", "scaling"], "configuration")
     if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
         raise RetouchingError("CONFIG_INVALID", "Configuration schema_version must be 1")
     paths = data.get("paths", {})
-    _keys(paths, ["checkpoints", "temporary", "logs"], "paths")
+    names = ("checkpoints", "temporary", "logs", "pipelines")
+    _keys(paths, names, "paths")
     resolved = {}
+    if "pipelines" not in paths and app_root is not None and app_root != path.parent:
+        paths = {**paths, "pipelines": str(app_root / "pipelines")}
     folders = FolderSettings(**paths)
-    for name in ("checkpoints", "temporary", "logs"):
+    for name in names:
         value = getattr(folders, name)
         if not isinstance(value, str) or not value.strip() or "\x00" in value:
             raise RetouchingError("CONFIG_INVALID", f"paths.{name} must be a nonempty path")

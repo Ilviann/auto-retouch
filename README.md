@@ -104,6 +104,11 @@ not a Natural or Beauty preset. Unknown operations/parameters fail explicitly.
 Valid explicit settings replace last-used selection; corrupt restored state
 produces a visible warning.
 
+Save a pipeline with **Save JSON…** in the application's `pipelines` folder.
+Use **Preset** above the stages to load it again. To use another folder, change
+**Settings… → Folders → Pipeline presets**. If you switch presets with unsaved
+changes, choose **Cancel** to keep editing or **Discard** to load the selection.
+
 Choosing sources starts a scan and shows thumbnails and disk estimates. Use the
 thumbnail checkboxes to include photos in a batch. Double-click a thumbnail or
 press Enter on the selected photo to open the source. Choose **Run pipeline** in

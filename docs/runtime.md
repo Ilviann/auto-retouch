@@ -213,7 +213,7 @@ collision resolution before processing. Do not silently flatten or overwrite.
 
 The desktop **Settings…** dialog shows the active configuration file, both
 runtime devices, configured folder values and effective paths. Edit the checkpoint,
-temporary-artifact and log folders, minimum log severity, size limits and
+pipeline preset, temporary-artifact and log folders, minimum log severity, size limits and
 retention period. Cancel discards the draft. Save validates folders and logging
 options, then atomically replaces the active file, including an explicit
 `--config` selection. Validation and write errors appear in the dialog.
@@ -235,7 +235,8 @@ The default file is `<app-root>\config.json`, with a versioned
   "paths": {
     "checkpoints": "./models",
     "temporary": "./.work",
-    "logs": "./logs"
+    "logs": "./logs",
+    "pipelines": "./pipelines"
   },
   "logging": {
     "level": "INFO",
@@ -249,6 +250,9 @@ The default file is `<app-root>\config.json`, with a versioned
 - `paths.checkpoints` locates the model files. Its default is `./models`, and
   existing explicit paths continue to take precedence.
 - `paths.temporary` is the root for app-owned per-job scratch/cache directories.
+- `paths.pipelines` is the folder shown by the preset picker. If omitted, it
+  defaults to the application's `pipelines` subfolder, including with an explicit
+  configuration file. Saving a new folder in Settings refreshes the picker.
 - `paths.logs` holds persistent diagnostic logs, outside disposable processing
   artifacts. Logging level/size/age limits use the proposed defaults above.
 - Absolute paths are allowed. Relative folder paths are resolved against the

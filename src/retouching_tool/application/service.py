@@ -35,6 +35,7 @@ class ApplicationService:
         notices = []
         state = self.root / ".state"
         editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
+                                 preset_folder=self.config.pipelines,
                                  autosave=state / "last-pipeline.json", scaling=self.config.scaling, pytorch_backend=pytorch_backend)
         self.pipeline_service = editor
         self.preview_service = PreviewService(self.root, editor, self.diagnostics)
@@ -61,13 +62,13 @@ class ApplicationService:
                     sources = ()
         self._validate_sources(sources)
         if options.pipeline is not None:
-            pipeline = editor.load(options.pipeline, persist=False).definition.to_json()
+            pipeline = editor.load(options.pipeline).definition.to_json()
             origin = str(options.pipeline)
         else:
             previous = state / "last-pipeline.json"
             if previous.exists():
                 try:
-                    pipeline = editor.load(previous, persist=False).definition.to_json()
+                    pipeline = editor.restore().definition.to_json()
                     origin = str(previous)
                 except RetouchingError as exc:
                     self.diagnostics.emit("PIPELINE_RESTORE_FAILED", str(exc), level="WARNING", exc_info=True)
@@ -81,12 +82,14 @@ class ApplicationService:
             notices.append(self.diagnostics.failure)
         # Persist only a successfully selected pipeline, never replace a corrupt autosave on fallback.
         try:
-            if options.pipeline is not None or origin == str(state / "last-pipeline.json"):
+            if options.pipeline is None and origin == str(state / "last-pipeline.json"):
                 atomic_json(state / "last-pipeline.json", pipeline)
             if options.sources:
                 self._save_sources(sources)
         except OSError as exc:
             raise RetouchingError("STATE_WRITE_FAILED", f"Cannot save last-used settings in {state}; check permissions/free space: {exc}") from exc
+        if editor.preset_notice:
+            notices.append(editor.preset_notice)
         self.diagnostics.emit("STARTUP_STATE_READY", "Startup settings loaded; no processing started", component="application",
                               source_count=len(sources), pipeline_origin=origin, backend=backend, pytorch_backend=pytorch_backend)
         return StartupSnapshot(sources, pipeline["name"], origin, backend, self.config.checkpoints,
@@ -100,7 +103,7 @@ class ApplicationService:
                 "scaling": asdict(scaling or self.config.scaling)}
         try:
             config = parse_config(path, data)
-            for name in ("checkpoints", "temporary", "logs"):
+            for name in ("checkpoints", "temporary", "logs", "pipelines"):
                 folder = getattr(config, name)
                 try:
                     _, parent = resolve_folder(folder, allow_missing=True)
@@ -123,10 +126,11 @@ class ApplicationService:
             raise error from exc
         self.config = config
         self.pipeline_service.scaling = config.scaling
+        self.pipeline_service.preset_folder = config.pipelines
         self.batch_service.scratch = config.temporary
         self.diagnostics.emit("CONFIG_SAVED", "Updated application settings", component="configuration",
                               config_path=path, checkpoints=config.checkpoints, temporary=config.temporary,
-                              logs=config.logs)
+                              logs=config.logs, pipelines=config.pipelines)
         return config
 
     def index_sources(self, sources, *, recursive=False):

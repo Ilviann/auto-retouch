@@ -72,6 +72,7 @@ presets rather than fixed processing paths.
 | U60 | Defer existing-output checks until **Start processing**. If planned filenames already exist, ask whether to stop, skip the affected photos, or overwrite those files. |
 | U61 | When first browsing for an output folder, open the picker in the selected source folder if one is available. |
 | U62 | Face detection provides a pixel margin for expanding detected rectangles. Alibaba skin retouching has a **Use face rects from context** checkbox to choose whether it uses those regions. |
+| U63 | Settings specifies the pipeline preset folder, defaulting to the application's `pipelines` subfolder. A picker above the stages lists its JSON presets. Ask for confirmation before loading a preset when the current pipeline has unsaved changes. |
 
 ### Feature priorities
 

@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QPlainTextEdit, QSlider,
-    QSpinBox,
+    QMessageBox, QSpinBox,
 )
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QFontMetrics
 from retouching_tool.application.contracts import StartupSnapshot
@@ -137,8 +137,11 @@ class QtIntegrationTests(unittest.TestCase):
                 card(second).findChild(QCheckBox, "stageEnabled").click()
                 self.app.processEvents()
 
-                output = root / "сохранённый профиль.json"
+                presets = panel.findChild(QComboBox, "presetPicker")
+                self.assertEqual(presets.count(), 0)
+                output = config.pipelines / "сохранённый профиль.json"
                 select_file("savePipeline", output)
+                self.assertEqual(presets.currentData(), str(output))
                 output_bytes = output.read_bytes()
                 saved = json.loads(output_bytes)
                 self.assertEqual(saved, editor.status.definition.to_json())
@@ -158,11 +161,26 @@ class QtIntegrationTests(unittest.TestCase):
                 self.assertIn("ending in .json", message.text())
                 self.assertFalse(wrong_extension.exists())
 
-                imported = root / "загруженный профиль.json"
+                imported = config.pipelines / "загруженный профиль.JSON"
                 saved["name"] = "Imported profile"
                 imported.write_text(json.dumps(saved), encoding="utf-8")
                 original = imported.read_bytes()
-                select_file("openPipeline", imported)
+                presets.showPopup()
+                presets.hidePopup()
+                index = presets.findData(str(imported))
+                self.assertGreaterEqual(index, 0)
+                working = editor.autosave.read_bytes()
+                with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Cancel) as confirm:
+                    presets.setCurrentIndex(index)
+                    presets.activated.emit(index)
+                    confirm.assert_called_once()
+                self.assertEqual(editor.autosave.read_bytes(), working)
+                self.assertEqual(presets.currentData(), str(output))
+                with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
+                    presets.setCurrentIndex(index)
+                    presets.activated.emit(index)
+                self.app.processEvents()
+                self.assertEqual(presets.currentData(), str(imported))
                 self.assertEqual(editor.status.definition.to_json(), saved)
                 details = panel.findChild(QPlainTextEdit, "startupDetails")
                 self.assertIn(str(imported), details.toPlainText())
@@ -172,10 +190,13 @@ class QtIntegrationTests(unittest.TestCase):
                 invalid.write_text("{", encoding="utf-8")
                 autosave = root / ".state" / "last-pipeline.json"
                 before = autosave.read_bytes()
-                select_file("openPipeline", invalid)
+                with patch.object(QMessageBox, "question") as confirm:
+                    select_file("openPipeline", invalid)
+                    confirm.assert_not_called()
                 self.assertIn("JSON_INVALID", message.text())
                 self.assertIn(str(imported), details.toPlainText())
                 self.assertEqual(autosave.read_bytes(), before)
+                self.assertEqual(presets.currentData(), str(imported))
                 failure = log.records[-1]
                 self.assertEqual(failure["code"], "PIPELINE_COMMAND_FAILED")
                 self.assertIn("JSONDecodeError", failure["exception"])

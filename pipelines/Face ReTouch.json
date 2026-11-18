@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "Empty foundation pipeline",
+  "stages": [
+    {
+      "id": "a91499660512417cb1eeeb9fe5ddce05",
+      "operation": "analysis.face_detection",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "threshold": 0.8,
+        "expand_pixels": 32
+      },
+      "model_ref": "opencv-yunet-2023mar"
+    },
+    {
+      "id": "9f951a430a464ee5afe119eea9a06207",
+      "operation": "retouch.alibaba_skin",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 1.0
+      },
+      "model_ref": "alibaba-skin-retouching"
+    }
+  ]
+}

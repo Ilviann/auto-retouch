@@ -4,12 +4,20 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ...errors import RetouchingError
 from .stage_card import StageCard
+
+
+class PresetPicker(QComboBox):
+    opening = Signal()
+
+    def showPopup(self):
+        self.opening.emit()
+        super().showPopup()
 
 
 class PipelinePanel(QWidget):
@@ -25,6 +33,8 @@ class PipelinePanel(QWidget):
         self.stage_cards = {}
         self.reveal_stage = None
         self.preview_available = False
+        self.preset_folder_error = ""
+        self.command_message = ""
         self.refresh_timer = QTimer(self, interval=0, singleShot=True)
         self.refresh_timer.timeout.connect(self._refresh_cards)
 
@@ -57,6 +67,16 @@ class PipelinePanel(QWidget):
             notices.setTextFormat(Qt.TextFormat.PlainText)
             layout.addWidget(notices)
 
+        preset_row = QHBoxLayout()
+        self.preset_label = QLabel("Preset")
+        self.presets = PresetPicker(objectName="presetPicker", accessibleName="Pipeline preset")
+        self.preset_label.setBuddy(self.presets)
+        self.presets.opening.connect(self._refresh_presets)
+        self.presets.activated.connect(self._select_preset)
+        preset_row.addWidget(self.preset_label)
+        preset_row.addWidget(self.presets, 1)
+        layout.addLayout(preset_row)
+
         tools = QHBoxLayout()
         self.operations = QComboBox()
         self.operations.setObjectName("operationPicker")
@@ -86,6 +106,7 @@ class PipelinePanel(QWidget):
         self.cards.addStretch()
         self.scroll.setWidget(card_content)
         layout.addWidget(self.scroll, 1)
+        self._refresh_presets()
         self._refresh_cards()
 
     def _show_details(self, name):
@@ -104,7 +125,33 @@ class PipelinePanel(QWidget):
 
     def show_configuration(self, config):
         self.config = config
+        self._refresh_presets()
         self._refresh_cards()
+
+    def _refresh_presets(self):
+        self.presets.clear()
+        try:
+            paths = self.service.list_presets()
+        except RetouchingError as exc:
+            self.presets.setPlaceholderText("Preset folder unavailable")
+            self.preset_folder_error = f"{exc.code}: {exc}"
+        else:
+            self.preset_folder_error = ""
+            for path in paths:
+                self.presets.addItem(path.stem, str(path))
+            self.presets.setPlaceholderText("Choose a preset…" if paths else "No presets found")
+        self._show_message(self.command_message)
+        self._sync_preset()
+
+    def _sync_preset(self):
+        index = self.presets.findData(str(self.service.preset_path), flags=Qt.MatchFlag.MatchFixedString)
+        self.presets.setCurrentIndex(index)
+        self.preset_label.setText("Preset (unsaved)" if self.service.has_unsaved_changes else "Preset")
+
+    def _select_preset(self, index):
+        path = self.presets.itemData(index)
+        if path is not None:
+            self._load(Path(path))
 
     def set_locked(self, locked):
         self.setEnabled(not locked)
@@ -129,6 +176,7 @@ class PipelinePanel(QWidget):
     def _refresh_cards(self):
         pipeline = self.service.status
         stages = pipeline.stages
+        self._sync_preset()
         self._show_details(pipeline.definition.name)
         self.empty.setVisible(not stages)
         current_ids = {status.stage.id for status in stages}
@@ -180,13 +228,15 @@ class PipelinePanel(QWidget):
         else:
             self._show_message("")
         if self.service.status is not previous:
+            self._sync_preset()
             self.changed.emit()
         # Defer layout changes until the originating widget's signal has returned.
         self.refresh_timer.start()
         return result
 
     def _show_message(self, text):
-        message = "\n".join(filter(None, (text, self.service.diagnostics.failure)))
+        self.command_message = text
+        message = "\n".join(filter(None, (text, self.preset_folder_error, self.service.diagnostics.failure)))
         self.message.setText(message)
         self.message.setVisible(bool(message))
 
@@ -223,7 +273,7 @@ class PipelinePanel(QWidget):
                     self.reveal_stage = stage_id
 
     def _choose_file(self, *, save=False):
-        dialog = QFileDialog(self, "Save pipeline" if save else "Open pipeline")
+        dialog = QFileDialog(self, "Save pipeline" if save else "Open pipeline", str(self.service.preset_folder))
         dialog.setNameFilter("Pipeline JSON (*.json)")
         if save:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
@@ -239,9 +289,23 @@ class PipelinePanel(QWidget):
 
     def _open(self):
         path = self._choose_file()
-        if path is not None and self._command(self.service.load, path) is not None:
+        if path is not None:
+            self._load(path)
+
+    def _load(self, path):
+        self._sync_preset()
+        if self.service.has_unsaved_changes:
+            answer = QMessageBox.question(
+                self, "Unsaved pipeline changes", f"Discard the current pipeline changes and load {path.name}?",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel)
+            if answer != QMessageBox.StandardButton.Discard:
+                return
+        if self._command(self.service.load, path) is not None:
             self.origin = str(path)
             self.scroll.verticalScrollBar().setValue(0)
+            if self.service.preset_notice:
+                self._show_message(self.service.preset_notice)
 
     def _save(self):
         path = self._choose_file(save=True)
@@ -255,4 +319,7 @@ class PipelinePanel(QWidget):
         except RetouchingError as exc:
             self._show_message(f"{exc.code}: {exc}")
         else:
-            self._show_message(f"Saved pipeline to {path}")
+            self.origin = str(path)
+            self._show_details(self.service.status.definition.name)
+            self._show_message(self.service.preset_notice or f"Saved pipeline to {path}")
+            self._refresh_presets()

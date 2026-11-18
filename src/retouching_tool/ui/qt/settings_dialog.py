@@ -38,7 +38,8 @@ class SettingsDialog(QDialog):
         self.folder_group = QGroupBox("Folders")
         folders = QFormLayout(self.folder_group)
         self.fields = {}
-        for name, title in (("checkpoints", "Checkpoints"), ("temporary", "Temporary artifacts"), ("logs", "Logs")):
+        for name, title in (("checkpoints", "Checkpoints"), ("pipelines", "Pipeline presets"),
+                            ("temporary", "Temporary artifacts"), ("logs", "Logs")):
             field = QLineEdit(getattr(config.folders, name), accessibleName=title)
             self.fields[name] = field
             browse = QPushButton("Browse…", accessibleName=f"Browse for {title.lower()}")

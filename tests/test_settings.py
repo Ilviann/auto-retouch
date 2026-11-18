@@ -92,6 +92,53 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(app.job_service.run(before).status, "completed")
         self.assertTrue((destination / "photo.jpg").is_file())
 
+    def test_preset_folder_discovery_and_unsaved_changes_across_restart(self):
+        app = self.application
+        editor = app.pipeline_service
+        self.assertEqual(self.config.pipelines, self.root / "pipelines")
+        self.assertEqual(editor.list_presets(), [])
+        empty = self.config.pipelines / "Empty.json"
+        editor.save(empty)
+        reopened = ApplicationService(self.root, self.config, self.log)
+        reopened.startup(LaunchOptions((), None, self.path), "directml")
+        self.assertEqual(reopened.pipeline_service.preset_path, empty)
+        self.assertFalse(reopened.pipeline_service.has_unsaved_changes)
+        app.save_settings(replace(self.config.folders, pipelines="профили"), self.config.logging)
+        config = load_config(self.root, self.path)
+        self.assertEqual(config.pipelines, self.path.parent / "профили")
+        self.assertEqual(editor.preset_folder, config.pipelines)
+        first, second = (config.pipelines / name for name in ("a.JSON", "B.json"))
+        editor.add_operation("core.exposure", 1)
+        self.assertTrue(editor.has_unsaved_changes)
+        editor.save(second)
+        editor.save(first)
+        (config.pipelines / "notes.txt").touch()
+        (config.pipelines / "directory.json").mkdir()
+        self.assertEqual(editor.list_presets(), [first, second])
+        self.assertFalse(editor.has_unsaved_changes)
+        stage = editor.status.definition.stages[0]
+        editor.set_enabled(stage.id, False)
+        self.assertTrue(editor.has_unsaved_changes)
+        reopened = ApplicationService(self.root, config, self.log)
+        reopened.startup(LaunchOptions((), None, self.path), "directml")
+        restored = reopened.pipeline_service
+        self.assertEqual(restored.preset_path, first)
+        self.assertTrue(restored.has_unsaved_changes)
+        restored.set_enabled(stage.id, True)
+        self.assertFalse(restored.has_unsaved_changes)
+        restored.load(second)
+        self.assertEqual(restored.preset_path, second)
+        second.unlink()
+        snapshot = reopened.startup(LaunchOptions((), None, self.path), "directml")
+        self.assertTrue(reopened.pipeline_service.has_unsaved_changes)
+        self.assertTrue(any("saved preset could not be read" in note for note in snapshot.notices))
+        self.assertEqual(restored.status.definition, reopened.pipeline_service.status.definition)
+        restored.preset_folder = first
+        with self.assertRaisesRegex(RetouchingError, "Cannot list pipeline presets"):
+            restored.list_presets()
+        self.assertEqual(self.log.records[-1]["code"], "PRESET_FOLDER_UNAVAILABLE")
+        self.assertIn("exception", self.log.records[-1])
+
     def test_validation_and_io_errors_keep_previous_settings(self):
         app = self.application
         editor = app.pipeline_service

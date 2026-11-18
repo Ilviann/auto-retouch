@@ -185,6 +185,7 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIn("directml", labels)
         self.assertIn(f"In use: {config.temporary}", labels)
         dialog.fields["temporary"].setText("discard")
+        dialog.fields["pipelines"].setText("discard presets")
         dialog.scaling["downscale"].setValue("nearest")
         dialog.buttons.button(QDialogButtonBox.StandardButton.Cancel).click()
         self.assertFalse(config.file.exists())
@@ -192,6 +193,11 @@ class DesktopBatchTests(unittest.TestCase):
 
         dialog = open_settings()
         self.assertEqual(dialog.fields["temporary"].text(), config.folders.temporary)
+        self.assertEqual(dialog.fields["pipelines"].text(), "pipelines")
+        preset_folder = self.root / "studio presets"
+        preset_folder.mkdir()
+        (preset_folder / "Studio.json").write_text(json.dumps(app.pipeline_service.status.definition.to_json()))
+        dialog.fields["pipelines"].setText(preset_folder.name)
         self.assertEqual(dialog.scaling["downscale"].value(), "bilinear")
         dialog.scaling["upscale"].setValue("nearest")
         dialog.fields["temporary"].setText("logs")
@@ -221,6 +227,9 @@ class DesktopBatchTests(unittest.TestCase):
                    "edited scratch path was not rechecked")
         self.assertFalse(panel.start.isEnabled())
         self.assertEqual(load_config(self.root), app.config)
+        presets = window.pipeline_page.presets
+        self.assertEqual([presets.itemText(i) for i in range(presets.count())], ["Studio"])
+        self.assertEqual(presets.currentIndex(), -1)
         self.assertEqual(app.config.scaling.upscale, "nearest")
         card = window.pipeline_page.stage_cards[stage_id]
         self.assertIn("MODEL_MISSING", card.findChild(QLabel, "stageStatus").text())

@@ -66,6 +66,11 @@ use that worker. See
 
 The editor provides add, remove, reorder, enable/disable, and a parameter panel
 for each operation instance. Multiple instances of the same operation are allowed.
+The **Preset** picker lists JSON files directly in the configured preset folder.
+Choosing a preset or opening a JSON file asks for confirmation when the working
+pipeline differs from its last explicit load or save. Cancel keeps the current
+pipeline. Recovery saves preserve edits across launches. The editor remembers
+the selected preset path separately so those edits still count as unsaved.
 The required editable Natural and Beauty presets await portrait engine evaluation.
 
 An illustrative portable JSON file is:

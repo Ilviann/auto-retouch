@@ -13,6 +13,13 @@ restores it on startup. Malformed imports and failed writes display an error and
 retain the preceding valid state. Explicitly opened files receive changes only
 through a subsequent save to that path.
 
+The preset picker lists JSON filenames in the configured folder. The headless
+preset test covers discovery, custom paths, restart with saved and edited
+presets, and recovery when the preset file disappears. The Qt editor test
+checks picker refresh, saving a preset, canceling and confirming a switch,
+and keeping the selection after a failed import. The desktop settings test
+checks that a folder change updates the picker immediately.
+
 ## Focused verification
 
 On 2026-11-18, verification used Python 3.14.7, PySide6 Essentials 6.12.0 and the

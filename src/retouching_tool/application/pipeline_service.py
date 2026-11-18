@@ -19,15 +19,35 @@ from ..pipeline.validation import validate_pipeline
 
 class PipelineService:
     def __init__(self, checkpoints, backend, diagnostics, *, autosave=None, registry=None, catalog=None,
-                 scaling=ScalingSettings(), pytorch_backend=None):
+                 scaling=ScalingSettings(), pytorch_backend=None, preset_folder=None):
         self.checkpoints, self.backend, self.diagnostics = checkpoints, backend, diagnostics
         self.autosave = autosave
+        self.preset_folder = preset_folder if preset_folder is not None else checkpoints.parent / "pipelines"
+        self.preset_path = None
+        self.preset_notice = ""
         self.scaling = scaling
         self.pytorch_backend = pytorch_backend
         self.registry = registry if registry is not None else application_registry()
         self.catalog = catalog if catalog is not None else ModelCatalog((PERSON_FOREGROUND_MODEL, ALIBABA_MODEL, YUNET_MODEL))
         self.status = validate_pipeline(PipelineDefinition("Empty foundation pipeline"), self.registry,
                                         self.catalog, checkpoints, backend, pytorch_backend)
+        self._saved_definition = self.status.definition
+
+    @property
+    def has_unsaved_changes(self):
+        return self.status.definition != self._saved_definition
+
+    def list_presets(self):
+        folder = self.preset_folder
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            return sorted((path for path in folder.iterdir() if path.suffix.casefold() == ".json" and path.is_file()),
+                          key=lambda path: path.name.casefold())
+        except OSError as exc:
+            message = f"Cannot list pipeline presets in {folder}. Check the folder in Settings: {exc}"
+            self.diagnostics.emit("PRESET_FOLDER_UNAVAILABLE", message, component="pipeline", level="ERROR",
+                                  exc_info=True, preset_folder=folder)
+            raise RetouchingError("PRESET_FOLDER_UNAVAILABLE", message) from exc
 
     def stage_backend(self, stage):
         return self.registry.descriptor(stage.operation, stage.operation_version).execution_backend(
@@ -85,13 +105,56 @@ class PipelineService:
             raise
 
     def load(self, path: Path, *, persist=True):
-        return self._command(lambda: self._commit(parse_pipeline(read_json(path), self.registry), persist=persist))
+        def action():
+            definition = parse_pipeline(read_json(path), self.registry)
+            status = self._commit(definition, persist=persist)
+            self.preset_path, self._saved_definition = path, definition
+            if persist:
+                self._remember_preset()
+            return status
+        return self._command(action, preset_path=path)
+
+    def _remember_preset(self):
+        self.preset_notice = ""
+        if self.autosave is None:
+            return
+        try:
+            # A fresh, empty pipeline can be saved before the first editor autosave.
+            if not self.autosave.exists():
+                atomic_json(self.autosave, self.status.definition.to_json())
+            atomic_json(self.autosave.with_name("last-preset.json"), str(self.preset_path.absolute()))
+        except OSError as exc:
+            self.preset_notice = f"Cannot remember the selected preset for the next launch: {exc}"
+            self.diagnostics.emit("PRESET_SELECTION_WRITE_FAILED", self.preset_notice, level="WARNING",
+                                  component="pipeline", exc_info=True, preset_path=self.preset_path)
+
+    def restore(self):
+        """Restore working edits independently of the portable preset they came from."""
+        status = self.load_data(read_json(self.autosave), persist=False)
+        selection = self.autosave.with_name("last-preset.json")
+        try:
+            if selection.exists():
+                saved = read_json(selection)
+                if not isinstance(saved, str) or not Path(saved).is_absolute():
+                    raise ValueError(f"Expected an absolute preset path in {selection}")
+                path = Path(saved)
+                self._saved_definition = parse_pipeline(read_json(path), self.registry)
+                self.preset_path = path
+        except (OSError, ValueError, RetouchingError) as exc:
+            self._saved_definition = None
+            self.preset_notice = f"Restored the working pipeline. Its saved preset could not be read: {exc}"
+            self.diagnostics.emit("PRESET_SELECTION_RESTORE_FAILED", self.preset_notice, level="WARNING",
+                                  component="pipeline", exc_info=True, selection_path=selection)
+        return status
 
     def load_data(self, data, *, persist=True):
         return self._command(lambda: self._commit(parse_pipeline(data, self.registry), persist=persist))
 
     def save(self, path: Path):
-        return self._command(lambda: self._write(path, self.status.definition))
+        definition = self.status.definition
+        self._command(lambda: self._write(path, definition), preset_path=path)
+        self.preset_path, self._saved_definition = path, definition
+        self._remember_preset()
 
     @staticmethod
     def _write(path, definition):
