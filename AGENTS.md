@@ -53,8 +53,9 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
   that stage off with an error on its card. Preserve settings, revalidate context
   dependencies, and leave it off after recovery until the user enables it. Offer
   model-page links and exact required file paths for manual installation.
-- Source folder with optional recursion; destination required for processing,
+- Source folder with optional recursion; batch processing requires a destination
   distinct from source and outside source when recursive search is enabled.
+  Previews run in memory and discard their images when the preview window closes.
 - Thumbnail grid and selected-image previews of the whole pipeline or one operation.
 - Sequential and staged batch modes share operation semantics. Staged execution
   persists lossless intermediates and releases models between stage passes.

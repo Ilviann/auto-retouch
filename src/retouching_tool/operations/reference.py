@@ -9,7 +9,7 @@ LUMINANCE = ContextSpec("image.luminance", 1)
 STATISTICS = OperationDescriptor("analysis.image_statistics", 1, "Image statistics (reference)",
                                  provides=(LUMINANCE,))
 EXPOSURE = OperationDescriptor("core.exposure", 1, "Exposure (reference)",
-    parameters=(Parameter("stops", "Exposure stops", 0, -3, 3),), changes_pixels=True,
+    parameters=(Parameter("stops", "Exposure stops", 0, -3, 3, preview_on_change=True),), changes_pixels=True,
     invalidates=(LUMINANCE.key,))
 
 

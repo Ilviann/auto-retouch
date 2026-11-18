@@ -11,8 +11,8 @@ The confirmed product constraints include PySide6 Qt Widgets on Windows 11,
 local processing, Natural and Beauty presets, all exposed skin across multiple
 people, whole-pipeline and individual-operation previews, and both batch
 schedules. JPEG is the initial export format. WebP, JPEG XL and AVIF come later.
-The layout, shortcuts and rollout below are proposals. Per-photo overrides,
-cumulative preview and queued GPU preview are proposed capabilities. Preset
+The layout, shortcuts and rollout below are proposals. Per-photo overrides
+and queued GPU preview are proposed capabilities. Preset
 strengths, production models and acceptable portrait results still need
 evaluation. [Product requirements](requirements.md)
 
@@ -36,10 +36,10 @@ are reachable from both areas.
   Keep Fit and 100% beside the image. Choose preview scope independently of the
   comparison and overlays. Whole pipeline uses enabled stages in order.
   Operation only runs the selected available stage on the original, including a
-  manually skipped stage. A proposed **Through this stage** view would run the
-  enabled prefix when an adjustment depends on earlier analysis. Explain missing
-  dependencies on the affected operation. Original viewing is available after
-  indexing. Processing previews require a validated destination.
+  manually skipped stage. The stage card's **Preview pipeline** comparison runs
+  earlier enabled stages to supply that stage's input and context. Explain missing
+  dependencies on the affected operation. Original viewing and memory-only
+  processing previews are available after indexing.
   [Preview semantics](pipeline.md#preview-meaning)
 - **Analysis and detail.** Present measurements, masks and landmarks according
   to the selected stage's outputs. For a group portrait, show skin coverage on

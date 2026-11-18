@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QColorSpace, QIcon, QImage, QPainter, QPixmap
-from PySide6.QtWidgets import QListView, QListWidget, QListWidgetItem, QStyle
+from PySide6.QtWidgets import QAbstractItemView, QListView, QListWidget, QListWidgetItem, QStyle
 
 from ...errors import RetouchingError
 
@@ -23,6 +23,7 @@ class PhotoGrid(QListWidget):
         super().__init__(objectName="batchImages")
         self.preview_service = preview_service
         self.setViewMode(QListView.ViewMode.IconMode)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setMovement(QListView.Movement.Static)
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setWrapping(True)
@@ -31,7 +32,7 @@ class PhotoGrid(QListWidget):
         self.setGridSize(QSize(150, 130))
         self.setIconSize(QSize(108, 88))
         self.setMinimumHeight(150)
-        self.setAccessibleName("Source photos. Check photos to include them in the batch.")
+        self.setAccessibleName("Source photos. Select one photo to preview. Check photos to include them in the batch.")
         self._placeholder = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
         self._warning = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)
         self._index = None

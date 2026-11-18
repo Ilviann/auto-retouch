@@ -1,10 +1,12 @@
 """Local, toolkit-independent display reads and processing previews."""
 
 from dataclasses import dataclass, replace
+from functools import partial
 
 from ..errors import RetouchingError
 from ..imaging.jpeg import JpegRuntime, decode_jpeg, encode_rgb_samples, read_srgb_jpeg
 from ..jobs.execution import ImageDiagnostics
+from ..pipeline.definition import parse_pipeline
 from ..pipeline.executor import StageRuntime, StageSession
 from ..pipeline.image_state import ContextEntry
 from ..pipeline.validation import validate_pipeline
@@ -31,6 +33,20 @@ class PicturePreview:
     context: tuple[ContextEntry, ...] = ()
 
 
+class StageComparison:
+    """Render one comparison serially and retain its most recent stage input."""
+
+    def __init__(self, render):
+        self._render = render
+        self._baseline = None
+
+    def render(self, request_id, parameters):
+        return self._render(request_id=request_id, parameters=parameters, _comparison=self)
+
+    def clear(self):
+        self._baseline = None
+
+
 def _display(rgb, limit):
     from PIL.Image import Resampling
 
@@ -50,8 +66,8 @@ def _check_source(image):
 
 
 class PreviewService:
-    def __init__(self, batch, editor, diagnostics):
-        self.batch, self.editor, self.diagnostics = batch, editor, diagnostics
+    def __init__(self, editor, diagnostics):
+        self.editor, self.diagnostics = editor, diagnostics
 
     def _source_display(self, image, runtime, limit):
         _check_source(image)
@@ -71,8 +87,13 @@ class PreviewService:
                          level="WARNING", exc_info=not log.traced_error, source_path=image.path)
             raise RetouchingError("THUMBNAIL_FAILED", "Cannot display this JPEG.") from exc
 
-    def picture(self, index: SourceIndex, image_id, request_id, *, destination=None, stage_id=None) -> PicturePreview:
-        """A destination requests processing. A stage ID requests isolation on the original."""
+    def stage_comparison(self, index, image_id, stage_id, *, through_stage):
+        return StageComparison(partial(self.picture, index, image_id, stage_id=stage_id,
+                                       through_stage=through_stage))
+
+    def picture(self, index: SourceIndex, image_id, request_id, *, process=False, stage_id=None,
+                through_stage=False, parameters=None, _comparison=None) -> PicturePreview:
+        """Display the original, run the enabled pipeline, or compare a selected stage in memory."""
         from PIL import Image
 
         log = ImageDiagnostics(self.diagnostics)
@@ -81,29 +102,30 @@ class PreviewService:
         try:
             if image is None:
                 raise RetouchingError("PREVIEW_SELECTION_INVALID", "Select a photo from the current index.")
-            if destination is None:
-                if stage_id is not None:
-                    raise RetouchingError("DESTINATION_INVALID", "Choose a destination before previewing an operation.")
+            if stage_id is None and (through_stage or parameters is not None):
+                raise RetouchingError("PREVIEW_STAGE_REQUIRED", "Select a stage to preview with these settings.")
+            if not process and stage_id is None:
                 original = self._source_display(image, runtime, PICTURE_SIZE)
                 return PicturePreview(request_id, f"Original · {image.path.name}", original)
-            try:
-                plan = self.batch.preflight(index, destination, mode="sequential", selected_ids=(image_id,),
-                                            preview_request_id=request_id)
-            except RetouchingError:
-                log.traced_error = True
-                raise
-            if not plan.ready:
-                raise RetouchingError("PREVIEW_SPACE_INSUFFICIENT", "Free disk space or choose a different destination.")
-            title, stages = self._stages(stage_id)
-            state = decode_jpeg(image.path, source_id=image_id, runtime=runtime)
+            title, stages = self._stages(stage_id, through_stage, parameters)
+            prefix, remaining = (stages[:-1], stages[-1:]) if through_stage else ((), stages)
+            baseline_key = (self.editor.backend, self.editor.checkpoints, prefix)
             _check_source(image)
-            original = _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE)
+            baseline = _comparison._baseline if _comparison is not None else None
+            if baseline is not None and baseline[0] == baseline_key:
+                _, state, original = baseline
+            else:
+                state = decode_jpeg(image.path, source_id=image_id, runtime=runtime)
+                _check_source(image)
+                for stage in prefix:
+                    state = self._process_stage(state, stage, log, image_id, request_id)
+                original = _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE)
+                if _comparison is not None:
+                    _comparison._baseline = (baseline_key, state, original)
             initial_revision = state.pixel_revision
-            for stage in stages:
-                stage_runtime = StageRuntime(log, self.editor.backend, self.editor.checkpoints, None,
-                                             stage, image_id, preview_request_id=request_id)
-                with StageSession(self.editor.registry, self.editor.catalog, stage_runtime) as session:
-                    state = session.process(state, image_id=image_id)
+            for stage in remaining:
+                state = self._process_stage(state, stage, log, image_id, request_id)
+            _check_source(image)
             result = (original if state.pixel_revision == initial_revision else
                       _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE))
             return PicturePreview(request_id, f"{title} · {image.path.name}", original, result, state.context)
@@ -116,27 +138,46 @@ class PreviewService:
                 raise
             raise RetouchingError(code, message) from exc
 
-    def _stages(self, stage_id):
+    def _process_stage(self, state, stage, log, image_id, request_id):
+        runtime = StageRuntime(log, self.editor.backend, self.editor.checkpoints, None, stage, image_id,
+                               preview_request_id=request_id)
+        with StageSession(self.editor.registry, self.editor.catalog, runtime) as session:
+            return session.process(state, image_id=image_id)
+
+    def _stages(self, stage_id, through_stage, parameters):
         editor = self.editor
         if stage_id is None:
             reviewed = editor.status.definition
-            pipeline = editor.preflight()
+            pipeline = editor.preflight(write_unchanged=False)
             if pipeline != reviewed:
                 raise RetouchingError("PREVIEW_PIPELINE_CHANGED",
                                       "Operation availability changed. Review the pipeline cards and preview again.")
             return pipeline.name, tuple(stage for stage in pipeline.stages if stage.enabled)
 
-        status = editor.recheck()
-        selected = next((item for item in status.stages if item.stage.id == stage_id), None)
-        if selected is None:
+        reviewed = editor.status.definition
+        status = editor.recheck(write_unchanged=False)
+        position = next((i for i, item in enumerate(status.stages) if item.stage.id == stage_id), None)
+        if position is None:
             raise RetouchingError("STAGE_UNKNOWN", "Select an operation in the current pipeline.")
+        selected = status.stages[position]
         if selected.issues:
             raise RetouchingError("STAGE_UNAVAILABLE", "Resolve the model or backend error on the operation card.")
-        standalone = replace(status.definition, stages=(replace(selected.stage, enabled=True),))
-        checked = validate_pipeline(standalone, editor.registry, editor.catalog, editor.checkpoints, editor.backend)
-        if checked.stages[0].issues:
-            raise RetouchingError("STAGE_UNAVAILABLE", "Resolve the model or backend error on the operation card.")
+        prefix = status.definition.stages[:position] if through_stage else ()
+        if through_stage and prefix != reviewed.stages[:position]:
+            raise RetouchingError("PREVIEW_PIPELINE_CHANGED",
+                                  "Upstream operation availability changed. Review the pipeline cards and preview again.")
+        preview = replace(status.definition, stages=tuple(s for s in prefix if s.enabled)
+                          + (replace(selected.stage, enabled=True),))
+        if parameters is not None:
+            data = preview.to_json()
+            data["stages"][-1]["parameters"] = {**dict(selected.stage.parameters), **parameters}
+            preview = parse_pipeline(data, editor.registry)
+        checked = validate_pipeline(preview, editor.registry, editor.catalog, editor.checkpoints, editor.backend)
+        unavailable = next((item for item in checked.stages if item.issues), None)
+        if unavailable:
+            raise RetouchingError("STAGE_UNAVAILABLE", f"Resolve the model or backend error for {unavailable.stage.id}.")
         if not checked.executable:
-            dependency = checked.stages[0].dependency_errors[0]
-            raise RetouchingError("PREVIEW_CONTEXT_REQUIRED", f"{dependency}. Use Preview pipeline with the required producer.")
-        return selected.title, standalone.stages
+            dependency = next(item.dependency_errors[0] for item in checked.stages if item.dependency_errors)
+            hint = "Enable or reorder the required producer." if through_stage else "Use Preview pipeline with the required producer."
+            raise RetouchingError("PREVIEW_CONTEXT_REQUIRED", f"{dependency}. {hint}")
+        return selected.title, checked.definition.stages

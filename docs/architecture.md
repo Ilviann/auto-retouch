@@ -234,7 +234,7 @@ demonstrate the abstraction.
 5. **Artifact store:** persists lossless image states and necessary auxiliary
    artifacts with metadata and validated manifests for recovery and cache reuse.
 6. **Local storage:** job database, last-used pipeline, JSON presets, model
-   manifests, thumbnail/preview caches, output files, and diagnostic logs. Use
+   manifests, thumbnail caches, output files, and diagnostic logs. Use
    bounded cache retention.
 7. **Diagnostics:** shared structured events, centralized multi-process log
    writing/rotation, readable console/UI output, warning/error summaries, and local
@@ -378,9 +378,12 @@ lifecycle on a background thread. Full-resolution processing produces
 fit-to-window display data for an original/result comparison. Full-resolution
 detail inspection and worker-process scheduling remain pending.
 
-Support whole-pipeline and standalone-operation previews; cumulative preview
-through a stage is an additional proposed convenience. Run previews using the
-same operation registry and worker infrastructure. Serialize GPU preview work
+Whole-pipeline and stage comparisons use the shared operation registry. The Qt
+stage dialog manages draft parameters and saves them with the headless editor
+command. The preview service reuses one validated stage input per open dialog,
+including upstream context for a stage comparison with preceding operations.
+The preview window releases its display images and cached input when it closes.
+Serialize future queued GPU preview work
 with batch inference instead of loading another neural stack alongside it.
 By default, defer GPU preview requests until an image boundary in sequential mode
 or a stage-pass boundary in staged mode. Indicate that the request is queued;
@@ -417,7 +420,7 @@ input manifest and skips directory links by default.
 
 Preserve relative input paths under destination. Validate each planned export
 against original inputs and output collisions. A writable destination is required
-for processing previews as well as batch runs; original viewing only needs source.
+for batch runs. Preview rendering uses the selected source and works in memory.
 Batch preflight requires an existing destination root. It validates nested export
 parents and blocks descendant reparse points, case-insensitive planned collisions
 and existing output names. Temporary write probes use the existing parent of each

@@ -22,9 +22,9 @@ class PipelineService:
         self.status = validate_pipeline(PipelineDefinition("Empty foundation pipeline"), self.registry,
                                         self.catalog, checkpoints, backend)
 
-    def _commit(self, definition, *, persist=True):
+    def _commit(self, definition, *, persist=True, write_unchanged=True):
         checked = validate_pipeline(definition, self.registry, self.catalog, self.checkpoints, self.backend)
-        if persist and self.autosave is not None:
+        if persist and self.autosave is not None and (write_unchanged or checked.definition != self.status.definition):
             self._write(self.autosave, checked.definition)
         self._apply_status(checked)
         return checked
@@ -65,11 +65,12 @@ class PipelineService:
         self.checkpoints = checkpoints
         self._apply_status(checked)
 
-    def _command(self, action):
+    def _command(self, action, **context):
         try:
             return action()
         except Exception as exc:
-            self.diagnostics.emit("PIPELINE_COMMAND_FAILED", str(exc), component="pipeline", level="ERROR", exc_info=True)
+            self.diagnostics.emit("PIPELINE_COMMAND_FAILED", str(exc), component="pipeline", level="ERROR",
+                                  exc_info=True, **context)
             raise
 
     def load(self, path: Path, *, persist=True):
@@ -88,11 +89,11 @@ class PipelineService:
         except OSError as exc:
             raise RetouchingError("PIPELINE_WRITE_FAILED", f"Cannot save pipeline to {path}; check permissions/free space: {exc}") from exc
 
-    def recheck(self):
-        return self._command(lambda: self._commit(self.status.definition))
+    def recheck(self, *, write_unchanged=True):
+        return self._command(lambda: self._commit(self.status.definition, write_unchanged=write_unchanged))
 
-    def preflight(self):
-        status = self.recheck()
+    def preflight(self, *, write_unchanged=True):
+        status = self.recheck(write_unchanged=write_unchanged)
         if not status.executable:
             error = RetouchingError("PIPELINE_CONTEXT_BLOCKED", "Enabled operations have unresolved context; fix their analysis dependencies or turn them off")
             self.diagnostics.emit(error.code, str(error), component="pipeline", level="ERROR")
@@ -100,14 +101,14 @@ class PipelineService:
         # Frozen tuple definitions can be held by jobs independently of later edits.
         return status.definition
 
-    def _edit(self, stage_id, transform):
+    def _edit(self, stage_id, transform, *, image_id=None):
         def action():
             if not any(s.id == stage_id for s in self.status.definition.stages):
                 raise RetouchingError("STAGE_UNKNOWN", f"No stage instance {stage_id}")
             data = self.status.definition.to_json()
             data["stages"] = [transform(s) if s["id"] == stage_id else s for s in data["stages"]]
             return self._commit(parse_pipeline(data, self.registry))
-        return self._command(action)
+        return self._command(action, stage_instance_id=stage_id, image_id=image_id)
 
     def set_enabled(self, stage_id, enabled):
         def change(stage):
@@ -121,8 +122,8 @@ class PipelineService:
             return {**stage, "enabled": enabled}
         return self._edit(stage_id, change)
 
-    def set_parameters(self, stage_id, parameters):
-        return self._edit(stage_id, lambda stage: {**stage, "parameters": parameters})
+    def set_parameters(self, stage_id, parameters, *, image_id=None):
+        return self._edit(stage_id, lambda stage: {**stage, "parameters": parameters}, image_id=image_id)
 
     def set_parameter(self, stage_id, name, value):
         return self._edit(stage_id, lambda stage: {**stage, "parameters": {**stage["parameters"], name: value}})

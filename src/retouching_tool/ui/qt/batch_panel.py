@@ -15,6 +15,7 @@ from ...errors import RetouchingError
 from ...imaging.jpeg import JpegSettings
 from .photo_grid import PhotoGrid
 from .picture_window import PictureWindow
+from .stage_preview_window import StagePreviewWindow
 
 
 def _label(name):
@@ -81,6 +82,7 @@ class BatchPanel(QWidget):
         self._poll_failed = False
         self._closing = False
         self._picture_window = None
+        self._stage_preview = None
         self._preview_target = None
         self._preview_available = False
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desktop-batch")
@@ -146,7 +148,7 @@ class BatchPanel(QWidget):
         layout.addLayout(preview_row)
         self.images = PhotoGrid(self.application.preview_service)
         self.images.itemChanged.connect(self._invalidate_plan)
-        self.images.currentItemChanged.connect(self._update_controls)
+        self.images.itemSelectionChanged.connect(self._update_controls)
         self.images.itemDoubleClicked.connect(self._view_original)
         layout.addWidget(self.images, 1)
 
@@ -338,8 +340,10 @@ class BatchPanel(QWidget):
                 self._check_space()
 
     def _current_image(self):
-        row = self.images.currentRow()
-        return self._index.images[row] if self._index is not None and 0 <= row < len(self._index.images) else None
+        selected = self.images.selectedItems()
+        if self._index is not None and selected:
+            return self._index.images[self.images.row(selected[0])]
+        return None
 
     def show_diagnostic_photo(self, event):
         if self._index is not None:
@@ -367,37 +371,67 @@ class BatchPanel(QWidget):
         if self.preview.isEnabled():
             self._request_picture(process=True)
 
-    def preview_stage(self, stage_id):
-        if self._preview_available:
-            self._request_picture(process=True, stage_id=stage_id)
+    def preview_stage(self, stage_id, through_stage):
+        if not self._preview_available:
+            return
+        editor = self.application.pipeline_service
+        selected = next((item for item in editor.status.stages if item.stage.id == stage_id), None)
+        if selected is None or selected.issues:
+            return
+        stage, image = selected.stage, self._current_image()
+        descriptor = editor.registry.descriptor(stage.operation, stage.operation_version)
+        comparison = self.application.preview_service.stage_comparison(self._index, image.image_id, stage_id,
+                                                                       through_stage=through_stage)
 
-    def _request_picture(self, *, process, stage_id=None):
+        def submit(parameters):
+            return self._executor.submit(comparison.render, uuid4().hex, parameters)
+
+        if self._picture_window is not None:
+            self._picture_window.close()
+        self._stage_preview = dialog = StagePreviewWindow(
+            self.window(), stage, descriptor, image.path.name, through_stage=through_stage, submit=submit,
+            save=partial(editor.set_parameters, stage_id, image_id=image.image_id))
+        dialog.finished.connect(comparison.clear)
+        dialog.finished.connect(self._finish_stage_preview)
+        dialog.finished.connect(dialog.deleteLater)
+        self.pipeline_locked.emit(True)
+        self._update_controls()
+        dialog.open()
+        dialog.start_preview()
+
+    def _finish_stage_preview(self):
+        self._stage_preview = None
+        self.pipeline_locked.emit(False)
+        self._update_controls()
+
+    def _request_picture(self, *, process):
         image = self._current_image()
-        destination = self.destination.text().strip() if process else None
         request_id = uuid4().hex
-        self._preview_target = self._index, image.image_id, destination, request_id
+        self._preview_target = self._index, image.image_id, request_id
         if process:
             self.pipeline_locked.emit(True)
         self.setup_message.setText("Processing preview…" if process else "Opening original…")
         self._submit("preview" if process else "original", partial(
-            self.application.preview_service.picture, self._index, image.image_id, request_id,
-            destination=Path(destination) if process else None, stage_id=stage_id))
+            self.application.preview_service.picture, self._index, image.image_id, request_id, process=process))
 
     def _preview_still_current(self):
-        index, image_id, destination, _ = self._preview_target
+        index, image_id, _ = self._preview_target
         image = self._current_image()
-        return (not self._closing and self._index is index and image is not None and image.image_id == image_id
-                and (destination is None or destination == self.destination.text().strip()))
+        return not self._closing and self._index is index and image is not None and image.image_id == image_id
 
     def _show_picture(self, preview):
-        if preview.request_id != self._preview_target[3]:
+        if preview.request_id != self._preview_target[2]:
             return
         if self._picture_window is not None:
             self._picture_window.close()
-            self._picture_window.deleteLater()
-        self._picture_window = PictureWindow(self.window(), preview)
-        self._picture_window.show()
-        self._picture_window.raise_()
+        self._picture_window = window = PictureWindow(self.window(), preview)
+        window.finished.connect(self._finish_picture)
+        window.finished.connect(window.deleteLater)
+        window.show()
+        window.raise_()
+
+    def _finish_picture(self):
+        self._picture_window = None
 
     def _create(self):
         args, options = self._plan_args()
@@ -589,8 +623,9 @@ class BatchPanel(QWidget):
 
     def _update_controls(self):
         running = self._run is not None and self._run.poll() is None
-        idle = not self._closing and self._task is None and self._run is None
-        self.settings_available.emit(not self._closing and (self._task is None or self._task[0] == "poll"))
+        idle = not self._closing and self._stage_preview is None and self._task is None and self._run is None
+        self.settings_available.emit(not self._closing and self._stage_preview is None
+                                     and (self._task is None or self._task[0] == "poll"))
         selected = len(self._selected_ids())
         self.folders.setEnabled(idle)
         self.export.setEnabled(idle)
@@ -602,18 +637,17 @@ class BatchPanel(QWidget):
         self.start.setEnabled(idle and self._plan is not None and self._plan.ready and executable)
         image = self._current_image()
         can_view = idle and image is not None and image.header is not None
-        can_preview = can_view and bool(self.destination.text().strip())
         self.original.setEnabled(can_view)
-        self.preview.setEnabled(can_preview and executable)
-        if can_preview != self._preview_available:
-            self._preview_available = can_preview
-            self.operation_preview_available.emit(can_preview)
+        self.preview.setEnabled(can_view and executable)
+        if can_view != self._preview_available:
+            self._preview_available = can_view
+            self.operation_preview_available.emit(can_view)
         if self._index is None:
             self.source_summary.setText("Choose a folder or JPEG files." if not self._sources else "No photos indexed.")
         else:
             total = len(self._index.images)
             unreadable = sum(image.issue is not None for image in self._index.images)
-            self.source_summary.setText(f"{total} JPEGs found · {selected} selected · {total - selected} excluded · {unreadable} unreadable")
+            self.source_summary.setText(f"{total} JPEGs found · {selected} included · {total - selected} excluded · {unreadable} unreadable")
 
         self.history.setEnabled(idle)
         self.job_diagnostics.setEnabled(not self._closing and bool(self._job_id))
@@ -636,6 +670,8 @@ class BatchPanel(QWidget):
 
     def request_close(self):
         """Finish pending desktop commands and pause the worker before exit."""
+        if self._stage_preview is not None and not self._stage_preview.close():
+            return False
         self._closing = True
         thumbnails_stopped = self.images.shutdown()
         if self._run is not None:

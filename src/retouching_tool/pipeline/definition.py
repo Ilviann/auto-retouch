@@ -15,6 +15,7 @@ class Parameter:
     default: float
     minimum: float
     maximum: float
+    preview_on_change: bool = False
 
     def validate(self, value):
         if type(value) not in (int, float) or not self.minimum <= value <= self.maximum or not math.isfinite(value):

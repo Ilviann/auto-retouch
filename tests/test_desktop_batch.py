@@ -1,5 +1,6 @@
 """Drive the desktop batch commands against generated JPEGs and real workers."""
 
+from dataclasses import replace
 from io import StringIO
 import json
 import os
@@ -16,12 +17,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, JpegImagePlugin
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase
-from PySide6.QtWidgets import QApplication, QDialogButtonBox, QFileDialog, QInputDialog, QLabel, QPushButton
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import (QApplication, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QInputDialog, QLabel,
+                               QMessageBox, QPushButton)
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
+from retouching_tool.operations.reference import EXPOSURE, Exposure
+from retouching_tool.pipeline.definition import Parameter
 from retouching_tool.ui.qt.diagnostics_dialog import DiagnosticsDialog
 from retouching_tool.ui.qt.main_window import MainWindow
 from retouching_tool.ui.qt.settings_dialog import SettingsDialog
@@ -77,6 +82,11 @@ class DesktopBatchTests(unittest.TestCase):
         self.until(lambda: not window.isVisible(), "window did not close")
 
     def dispose_window(self, window):
+        panel = window.batch_panel
+        if panel._stage_preview is not None:
+            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
+                panel._stage_preview.close()
+                self.until(lambda: panel._stage_preview is None, "stage preview did not close")
         self.close_window(window)
         window.deleteLater()
         self.qt.sendPostedEvents(window, QEvent.Type.DeferredDelete)
@@ -470,7 +480,8 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertTrue(panel.images.isVisible())
         self.assertTrue(panel.destination.isVisible())
         self.assertTrue(panel.export.isVisible())
-        self.assertFalse(panel.preview.isEnabled())
+        self.assertFalse(panel.destination.text())
+        self.assertTrue(panel.preview.isEnabled())
         self.assertIn("Estimated temporary space", panel.space.text())
         self.assertIn("MiB", panel.space.text())
         initial = panel.space.text()
@@ -508,27 +519,170 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIsNotNone(original.picture.pixmap())
         self.assertFalse(original.original_toggle.isVisible())
         panel.destination.setText(str(self.source))
-        panel.preview.click()
-        self.until(panel.preview.isEnabled, "invalid preview destination did not return")
-        self.assertIn("DESTINATION_IS_SOURCE", panel.setup_message.text())
-
-        panel.destination.setText(str(self.destination))
-        panel.preview.click()
-        self.until(lambda: panel._picture_window is not original, "whole pipeline window did not open")
+        with patch.object(QFileDialog, "getExistingDirectory") as choose:
+            panel.preview.click()
+            choose.assert_not_called()
+        self.until(lambda: panel._picture_window is not None and panel._picture_window is not original,
+                   "whole pipeline window did not open")
         whole = panel._picture_window
         self.assertTrue(whole.original_toggle.isVisible())
-        self.assertIsNotNone(whole.findChild(type(whole.picture), "previewStatistics"))
-        exposure = window.pipeline_page.stage_cards["exposure-reference"]
-        editor = panel.application.pipeline_service
-        window.pipeline_page._command(editor.set_parameter, "exposure-reference", "stops", 1)
-        self.qt.processEvents()
-        self.assertFalse(exposure.toggle.isChecked())
-        exposure.preview.click()
-        self.until(lambda: panel._picture_window is not whole, "operation window did not open")
-        operation = panel._picture_window
-        self.assertTrue(operation.windowTitle().startswith("Exposure"))
-        sample = operation.result.toImage().pixelColor(0, 0)
-        operation.original_toggle.click()
-        self.assertGreater(sample.red(), operation.picture.pixmap().toImage().pixelColor(0, 0).red())
+        self.assertIsNotNone(whole.findChild(QLabel, "previewStatistics"))
+        self.assertFalse(whole.picture.pixmap().isNull())
+        whole.close()
+        self.assertIsNone(panel._picture_window)
+        self.assertIsNone(whole.original)
+        self.assertIsNone(whole.result)
+        self.assertTrue(whole.picture.pixmap().isNull())
         self.assertEqual(list(self.destination.iterdir()), [])
         self.assertFalse(panel.application.job_service.saved_jobs())
+
+    def test_modal_stage_comparison_uses_selection_and_saves_or_discards_draft(self):
+        window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 2)
+        exposure = window.pipeline_page.stage_cards["exposure-reference"]
+        editor = panel.application.pipeline_service
+        data = editor.status.definition.to_json()
+        data["stages"].insert(0, dict(data["stages"][1], id="upstream", enabled=True, parameters={"stops": 1}))
+        window.pipeline_page._command(editor.load_data, data)
+        self.qt.processEvents()
+        self.assertFalse(exposure.toggle.isChecked())
+        panel.images.clearSelection()
+        self.assertFalse(exposure.preview.isEnabled())
+        self.assertFalse(exposure.preview_pipeline.isEnabled())
+        thumbnail = panel.images.item(1)
+        thumbnail.setCheckState(Qt.CheckState.Unchecked)
+        panel.images.scrollToItem(thumbnail)
+        QTest.mouseClick(panel.images.viewport(), Qt.MouseButton.LeftButton,
+                         pos=panel.images.visualItemRect(thumbnail).center())
+        self.assertEqual(panel.images.selectedItems(), [thumbnail])
+        self.assertFalse(panel.destination.text())
+        self.assertTrue(exposure.preview.isEnabled())
+        self.assertTrue(exposure.preview_pipeline.isEnabled())
+        persisted = editor.autosave.read_bytes()
+
+        def red(picture):
+            rendered = picture.pixmap()
+            return rendered.toImage().pixelColor(0, 0).red() if not rendered.isNull() else 0
+
+        preview_service = panel.application.preview_service
+        start_comparison = preview_service.stage_comparison
+
+        def capture_comparison(*args, **kwargs):
+            comparisons.append(start_comparison(*args, **kwargs))
+            return comparisons[-1]
+
+        comparisons = []
+        with (patch.object(QFileDialog, "getExistingDirectory") as choose,
+              patch.object(preview_service, "stage_comparison", side_effect=capture_comparison)):
+            exposure.preview.click()
+            choose.assert_not_called()
+        self.assertFalse(panel.destination.text())
+        operation = panel._stage_preview
+        self.assertIs(self.qt.activeModalWidget(), operation)
+        self.assertEqual(operation.windowModality(), Qt.WindowModality.WindowModal)
+        self.assertIn("фото.jpg", operation.windowTitle())
+        self.until(lambda: red(operation.after) > 0, "stage preview did not render")
+        self.assertIsNotNone(comparisons[0]._baseline)
+        source = red(operation.before)
+        self.assertEqual(source, red(operation.after))
+        operation.findChild(QDoubleSpinBox, "parameter-stops").setValue(1)
+        self.until(lambda: red(operation.after) > source, "exposure did not refresh automatically")
+        self.assertEqual(editor.status.definition.stages[2].parameter("stops"), 0)
+        self.assertEqual(editor.autosave.read_bytes(), persisted)
+
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Cancel) as prompt:
+            self.assertFalse(operation.close())
+            prompt.assert_called_once()
+            self.assertTrue(operation.isVisible())
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
+            operation.close_button.click()
+        self.assertIsNone(panel._stage_preview)
+        self.assertIsNone(comparisons[0]._baseline)
+        self.assertTrue(operation.before.pixmap().isNull())
+        self.assertTrue(operation.after.pixmap().isNull())
+        self.assertEqual(editor.autosave.read_bytes(), persisted)
+
+        with patch.object(QFileDialog, "getExistingDirectory") as choose:
+            exposure.preview_pipeline.click()
+            choose.assert_not_called()
+        cumulative = panel._stage_preview
+        self.until(lambda: red(cumulative.after) > 0, "stage prefix did not render")
+        baseline = red(cumulative.before)
+        self.assertGreater(baseline, source)
+        self.assertEqual(baseline, red(cumulative.after))
+        cumulative.findChild(QDoubleSpinBox, "parameter-stops").setValue(1)
+        self.until(lambda: red(cumulative.after) > baseline, "stage prefix did not refresh")
+        self.assertEqual(red(cumulative.before), baseline)
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Save):
+            with patch("retouching_tool.application.pipeline_service.atomic_json", side_effect=OSError("fixture write failure")):
+                cumulative.close_button.click()
+            self.assertTrue(cumulative.isVisible())
+            self.assertIn("PIPELINE_WRITE_FAILED", cumulative.feedback.text())
+            self.assertEqual(editor.autosave.read_bytes(), persisted)
+            failure = next(event for event in self.log.records if event["code"] == "PIPELINE_COMMAND_FAILED")
+            self.assertEqual(failure["stage_instance_id"], "exposure-reference")
+            self.assertEqual(failure["image_id"], panel._index.images[1].image_id)
+            self.assertIn("fixture write failure", failure["exception"])
+            cumulative.close_button.click()
+        self.assertIsNone(panel._stage_preview)
+        self.assertFalse(exposure.toggle.isChecked())
+        self.assertEqual(exposure.parameters["stops"].value(), 1)
+        payload = json.loads(editor.autosave.read_bytes())
+        self.assertEqual(payload["stages"][2]["parameters"], {"stops": 1})
+        self.assertEqual(payload["stages"][0]["parameters"], {"stops": 1})
+        self.assertEqual(list(self.destination.iterdir()), [])
+        self.assertFalse(panel.application.job_service.saved_jobs())
+
+    def test_stage_preview_applies_manual_settings_explicitly_and_drops_stale_results(self):
+        window, panel = self.open_window((self.source,))
+        self.wait_for_scan(panel, 1)
+        panel.destination.setText(str(self.destination))
+        editor = panel.application.pipeline_service
+        descriptor = replace(EXPOSURE, operation="test.preview_settings",
+                             parameters=EXPOSURE.parameters + (Parameter("manual", "Manual value", 0, 0, 3),))
+
+        def combined_exposure(stage):
+            stops = stage.parameter("stops") + stage.parameter("manual")
+            return Exposure(replace(stage, parameters=(("stops", stops),)))
+
+        editor.registry.register(descriptor, combined_exposure)
+        stage = window.pipeline_page._command(editor.add_operation, descriptor.operation, 1).stages[0].stage
+        self.qt.processEvents()
+        service = panel.application.preview_service
+        picture = service.picture
+        started, release = Event(), Event()
+        requests = []
+
+        def render(*args, **kwargs):
+            parameters = kwargs["parameters"]
+            requests.append(parameters)
+            if parameters["stops"] == 1:
+                started.set()
+                release.wait(10)
+            return picture(*args, **kwargs)
+
+        with patch.object(service, "picture", side_effect=render):
+            window.pipeline_page.stage_cards[stage.id].preview.click()
+            dialog = panel._stage_preview
+            self.until(lambda: not dialog.after.pixmap().isNull(), "initial preview did not render")
+            with patch.object(dialog.after, "show_pixels", wraps=dialog.after.show_pixels) as paint:
+                dialog.findChild(QDoubleSpinBox, "parameter-manual").setValue(2)
+                self.assertTrue(dialog.apply_preview.isEnabled())
+                live = dialog.findChild(QDoubleSpinBox, "parameter-stops")
+                live.setValue(1)
+                try:
+                    self.until(started.is_set, "first live preview did not start")
+                    self.assertEqual(requests, [{"stops": 0, "manual": 0}, {"stops": 1, "manual": 0}])
+                    live.setValue(2)
+                finally:
+                    release.set()
+                self.until(lambda: len(requests) == 3 and not dialog.feedback.text(), "latest live preview did not render")
+                self.assertEqual(requests[-1], {"stops": 2, "manual": 0})
+                paint.assert_called_once()
+            live_red = dialog.after.pixmap().toImage().pixelColor(0, 0).red()
+            dialog.apply_preview.click()
+            self.until(lambda: len(requests) == 4 and not dialog.feedback.text(), "manual preview did not render")
+            self.assertEqual(requests[-1], {"stops": 2, "manual": 2})
+            self.assertGreater(dialog.after.pixmap().toImage().pixelColor(0, 0).red(), live_red)
+            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
+                dialog.close()

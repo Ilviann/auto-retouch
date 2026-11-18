@@ -7,6 +7,14 @@ from PySide6.QtWidgets import (
 )
 
 
+def parameter_control(parameter):
+    control = QDoubleSpinBox(objectName=f"parameter-{parameter.name}")
+    control.setDecimals(4)
+    control.setRange(parameter.minimum, parameter.maximum)
+    control.setSingleStep(.1)
+    return control
+
+
 class StageCard(QGroupBox):
     def __init__(self, stage_id, descriptor, *, on_enable, on_parameter, on_recheck, on_move, on_remove, on_preview):
         super().__init__(descriptor.title)
@@ -35,22 +43,25 @@ class StageCard(QGroupBox):
         data = QLabel(self._data_contract(), objectName="stageDataContract", wordWrap=True)
         data.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(data)
-        self.preview = QPushButton("Preview operation", objectName="previewStage")
+        self.preview = QPushButton("Preview", objectName="previewStage")
         self.preview.setToolTip("Run this operation on the original selected photo.")
         self.preview.setEnabled(False)
         self._preview_ready = False
-        self.preview.clicked.connect(lambda: on_preview(stage_id))
-        layout.addWidget(self.preview)
+        self.preview.clicked.connect(lambda: on_preview(stage_id, False))
+        self.preview_pipeline = QPushButton("Preview pipeline", objectName="previewStagePipeline")
+        self.preview_pipeline.setToolTip("Compare the photo before and after this operation with earlier enabled operations applied.")
+        self.preview_pipeline.setEnabled(False)
+        self.preview_pipeline.clicked.connect(lambda: on_preview(stage_id, True))
+        previews = QHBoxLayout()
+        previews.addWidget(self.preview)
+        previews.addWidget(self.preview_pipeline)
+        layout.addLayout(previews)
 
         form = QFormLayout()
         self.parameters = {}
         self.displayed_values = {}
         for parameter in descriptor.parameters:
-            control = QDoubleSpinBox()
-            control.setObjectName(f"parameter-{parameter.name}")
-            control.setRange(parameter.minimum, parameter.maximum)
-            control.setDecimals(4)
-            control.setSingleStep(.1)
+            control = parameter_control(parameter)
             self.parameters[parameter.name] = control
             form.addRow(parameter.label, control)
 
@@ -95,6 +106,7 @@ class StageCard(QGroupBox):
 
     def set_preview_available(self, available):
         self.preview.setEnabled(available and self._preview_ready)
+        self.preview_pipeline.setEnabled(available and self._preview_ready)
 
     def show_status(self, status, *, can_move_up, can_move_down):
         with QSignalBlocker(self.toggle):

@@ -23,10 +23,10 @@ presets rather than fixed processing paths.
 | U11 | Save and load pipeline settings as JSON files. |
 | U12 | Automatically restore the last-used pipeline at application startup. |
 | U13 | Select a source folder and optionally search for photos recursively. |
-| U14 | Require a destination folder before processing; reject a destination equal to the source folder. |
+| U14 | Require a destination folder before batch processing and reject a destination equal to the source folder. |
 | U15 | When recursive search is enabled, also reject a destination inside the source folder. |
 | U16 | Display discovered source files in a thumbnail grid and allow preview of any image. |
-| U17 | For a selected image, preview either the entire pipeline or an individual operation. |
+| U17 | Select one thumbnail for preview. Preview the entire pipeline, or use a stage card's **Preview** or **Preview pipeline** action to compare the selected stage's input and output side by side in a modal window. The input is the source for **Preview** and the result of preceding enabled stages for **Preview pipeline**. Edit that stage's parameters in the window, with automatic refresh or **Preview changes** as appropriate. Ask whether to save changed parameters when the window closes. |
 | U18 | Support a temporary folder for processing artifacts. |
 | U19 | Sequential mode processes one image through every stage, exports it, then moves to the next image. |
 | U20 | Staged mode processes every image through one stage, persists intermediate results, releases that stage's model resources, then advances to the next stage. |
@@ -59,6 +59,7 @@ presets rather than fixed processing paths.
 | U47 | App author: Neyrome. |
 | U48 | Provide an in-app UI for editing application configuration. |
 | U49 | Give batch photo retouching higher implementation priority than logging and application maintenance. |
+| U50 | Previews run without a destination folder. Keep preview images in memory and discard them when the preview window closes. |
 
 ### Feature priorities
 
@@ -87,7 +88,7 @@ Representative coverage and visual acceptance remain unreviewed.
 | F02 | Supply editable Natural and Beauty pipeline presets. Stage parameters, including color and skin intensity where applicable, belong to the individual operations. |
 | F03 | Correct exposure, white balance, tonal balance, and unwanted color casts conservatively. Allow color correction to be disabled for intentional lighting or grading. |
 | F04 | Reduce temporary blemishes and uneven skin tone, with adjustable smoothing and protection of skin detail. Exact operations depend on the engine evaluation. |
-| F05 | Provide before/after and 100 percent detail previews for the whole pipeline, one operation on the original, and a proposed additional cumulative preview through a selected stage. Require a valid destination for all processing previews, although they do not create final exports. |
+| F05 | Provide before/after previews for the whole pipeline and the stage comparisons in U17. Full-resolution detail inspection is proposed. |
 | F06 | Allow per-image settings and selected-image reprocessing. |
 | F07 | Reuse a common preset for a studio setup while estimating corrections per image. Avoid normalizing distinct natural skin tones to one target tone. |
 | F08 | Show queued, running, completed, failed, and canceled work, with progress, estimated remaining time, and actionable errors. Review flags are separate from execution status. |
@@ -185,10 +186,10 @@ the initial specification. Pipeline settings and preview behavior are detailed i
 [Pipeline contract](pipeline.md).
 
 Validate the source, recursion setting, destination, temporary directory, and
-planned output paths before any processing, including processing previews.
-Selecting another source folder or enabling recursion immediately revalidates the
-destination. Source indexing and original-image viewing do not require a
-destination.
+planned output paths before batch processing. Selecting another source folder or
+enabling recursion immediately revalidates the batch destination. Preview validates
+the indexed source and the stages it runs. It uses neither the batch destination
+nor the temporary directory.
 
 Compare resolved filesystem locations rather than raw path strings. On Windows,
 account for equivalent case, separators, trailing separators, and junction or
@@ -293,9 +294,9 @@ only faces cannot by themselves satisfy this scope.
    recursive descendant rejection, non-recursive descendant allowance, sibling
    directories with matching name prefixes, source/recursion changes, and duplicate
    input filenames in different subfolders.
-9. **Previews:** verify standalone and whole-pipeline previews use the configured
-   operation implementations. Check cumulative preview if implemented and prevent
-   an outdated result from replacing the preview after selection/settings change.
+9. **Previews:** verify whole-pipeline and stage previews use the configured
+   operation implementations. Check each stage comparison's baseline, modal
+   settings edits, refresh behavior, save/discard, and rejection of outdated results.
 10. **Staged artifacts:** verify intermediate round-trip precision and metadata,
     mode equivalence, model release, per-stage recovery, low-disk handling, and
     cleanup limited to the job's own files.

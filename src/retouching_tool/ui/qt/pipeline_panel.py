@@ -14,7 +14,7 @@ from .stage_card import StageCard
 
 class PipelinePanel(QWidget):
     changed = Signal()
-    preview_requested = Signal(str)
+    preview_requested = Signal(str, bool)
 
     def __init__(self, snapshot, service):
         super().__init__()

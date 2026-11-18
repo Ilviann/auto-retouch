@@ -34,8 +34,8 @@ supports moving, removing, toggling and editing the stage. Open and Save exchang
 portable JSON files, and the batch setup summary follows the current editor.
 See [desktop pipeline evidence](verification/desktop-pipeline.md).
 
-Pipeline preflight checks operation, assets and context. Batch and preview
-execution still require destination, path and disk validation.
+Pipeline preflight checks operations, assets, and context. Batch execution also
+requires destination, path, and disk validation.
 No neural operation/model is registered in the production catalog. Model-state
 acceptance currently uses synthetic local bytes and injected test operations.
 
@@ -191,34 +191,39 @@ and place them at the paths shown on the card under the configured model folder
 | --- | --- | --- |
 | Original | Decode/orient/color-manage the selected source; no retouching | Inspect source without a destination. |
 | Whole pipeline | Run all enabled stages on the selected source | Inspect the final configured result. |
-| Operation only | Run the selected operation on the normalized original image | Isolate one operation and tune its parameters. |
-| Through selected stage, proposed | Run the enabled prefix through the selected stage | Inspect that operation in its actual upstream context. |
+| Stage card **Preview** | Compare the normalized source against the selected stage's result on that source | Isolate one operation and tune its parameters. |
+| Stage card **Preview pipeline** | Compare the result of the preceding enabled stages against the result after applying the selected stage | Inspect the operation with its upstream changes and analysis context. |
 | Context analysis | Run selected analysis and display region/mask overlays or measurements | Inspect output even when pixels are unchanged. |
 
-The desktop picture window implements original, whole-pipeline, and standalone
-operation views. The latter two can switch between the original and the result
-and display available reference luminance measurements. Originals and thumbnails
-use local orientation and color conversion. Processing previews use full working
-resolution and convert the result to display RGB with a longest edge of at most
-1,600 pixels. Requests run on the desktop command thread while the batch worker
-is idle. Display data stays in memory. See
+Stage comparisons display the input and result side by side in a modal window.
+The stage parameters are a local draft. Parameters marked `preview_on_change`
+refresh after a short debounce. Other parameters enter the preview when the
+user selects **Preview changes**. Only the latest requested settings can update
+the panes. **Save** on close commits the draft through the editor and last-used
+pipeline persistence. **Discard** closes the comparison and **Cancel** keeps it open.
+
+Originals and thumbnails use local orientation and color conversion. Processing
+previews run at full working resolution on the desktop command thread while the
+batch worker is idle. The stage comparison retains one validated input in memory
+for the duration of the dialog. Display RGB has a longest edge of at most 1,600
+pixels and available luminance measurements accompany the result. See
 [desktop workspace evidence](verification/desktop-workspace.md).
 
-An operation-only preview explicitly requests a ready operation, even if manually
-disabled in the batch pipeline. An unavailable operation cannot be previewed;
-display its recovery actions. Whole/prefix previews honor enable flags. If an operation
-needs an artifact normally produced upstream, explain the dependency and offer a
-prefix preview; do not imply that an isolated result represents the full pipeline.
+Both stage actions explicitly run the selected available operation, including
+a manually disabled operation. Earlier stages in **Preview pipeline** and all
+stages in the whole-pipeline preview honor their enable flags. If an isolated
+stage requires upstream analysis, the dialog directs the user to **Preview
+pipeline** and identifies the dependency. Unavailable stages show recovery actions
+on their cards.
 Use optional cached context only when its coordinate and pixel dependencies are
 compatible with the preview input. Do not apply a later-stage mask to an original
 image merely because their dimensions match.
 
-All processing previews require valid destination settings, as requested for any
-processing. Only an explicit export creates a final destination image. Any future
-on-disk preview cache belongs in the application's temporary area. A future
-full-resolution detail view will distinguish zoomed inspection from the fitted
-preview. GPU preview queuing remains planned and must serialize model work with
-active sequential images or staged passes.
+Previews run without a destination. Preview images and cached stage inputs live
+in memory and are discarded when their window closes. Saving stage settings
+persists parameters. A future full-resolution detail view will distinguish zoomed
+inspection from the fitted preview. GPU preview queuing remains planned and must
+serialize model work with active sequential images or staged passes.
 
 ## Equivalent schedules
 

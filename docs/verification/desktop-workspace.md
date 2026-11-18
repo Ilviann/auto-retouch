@@ -14,16 +14,16 @@ volume. The workspace uses binary units for both estimates and free space.
 
 Operation cards describe image and context inputs and effects from the operation
 descriptor. **View original** can open an indexed image without a destination.
-**Preview pipeline** runs enabled stages in order. **Preview operation** runs
-the selected available stage in isolation, including a manually disabled stage.
-A required upstream analysis dependency produces an actionable preview error.
-Each processing preview validates the destination and uses the shared JPEG
-decoder and stage executor at full working resolution. The picture window
+The thumbnail toolbar's **Preview pipeline** runs enabled stages in order.
+Stage cards offer the two modal comparisons described below.
+Processing previews run without a destination and use the shared JPEG decoder
+and stage executor at full working resolution. The picture window
 displays a fitted original/result comparison and available luminance measures.
-Previews produce no exported files or saved jobs.
+Preview images are held in memory and discarded on close. Previews produce no
+exported files, scratch artifacts, or saved jobs.
 
 Processing previews are available while the batch worker is idle. Full-resolution
-detail inspection, cumulative previews, queued GPU previews, and neural-stage
+detail inspection, queued GPU previews, and neural-stage
 visual acceptance are pending.
 
 ## Focused verification
@@ -46,3 +46,28 @@ Checks covered automatic scans, thumbnail loading, estimate refresh, before/afte
 display, discarded stale results, stage card data, JPEG orientation and metadata,
 destination and dependency errors, preview diagnostics, and saved-job
 pause/resume/cancel. Offscreen renders were reviewed with generated photos.
+
+## Modal stage comparisons
+
+Select one thumbnail to preview, independently of its batch inclusion checkbox.
+**Preview** compares the source with the selected stage applied. The stage card's
+**Preview pipeline** uses the output of preceding enabled stages as the input to
+the comparison. A manually disabled stage can be inspected with both actions.
+The modal window keeps draft settings, automatically refreshes exposure, and
+uses **Preview changes** for parameters that request manual refresh. Save updates
+the selected stage and last-used settings. Discard leaves the existing values in
+place, and Cancel keeps the draft and comparison open.
+
+Focused checks in the prepared DirectML environment used generated JPEGs and CPU
+reference operations. They covered both baselines and upstream context, skipped
+and downstream stages, cached baseline reuse and source revalidation, modality,
+thumbnail selection, rendering without a destination, and release of image data
+and the cached stage input on close,
+automatic and manual refresh, stale result rejection, save/discard/cancel, and
+recovery from a failed save. A test operation supplies the manual parameter.
+An offscreen comparison render was inspected with a generated JPEG.
+
+```bat
+.venv\Scripts\python.exe -m unittest discover -s tests -p test_preview.py -v
+.venv\Scripts\python.exe -m unittest discover -s tests -p test_desktop_batch.py -v -k preview -k modal_stage_comparison
+```
