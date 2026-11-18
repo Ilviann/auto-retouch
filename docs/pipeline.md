@@ -36,7 +36,8 @@ See [desktop pipeline evidence](verification/desktop-pipeline.md).
 
 Pipeline preflight checks operations, assets, and context. Batch execution also
 requires destination, path, and disk validation.
-No neural operation/model is registered in the production catalog. Model-state
+The catalog includes the PP-HumanSeg person foreground evaluation operation and
+its local checkpoint manifest. Model-state
 acceptance currently uses synthetic local bytes and injected test operations.
 
 The 3b storage slice persists reference states with lossless float32 TIFF,
@@ -205,9 +206,11 @@ pipeline persistence. **Discard** closes the comparison and **Cancel** keeps it 
 
 Originals and thumbnails use local orientation and color conversion. Processing
 previews run at full working resolution on the desktop command thread while the
-batch worker is idle. The stage comparison retains one validated input in memory
+batch worker is idle. Neural previews also take the batch runner lock across
+processes. The stage comparison retains one validated input in memory
 for the duration of the dialog. Display RGB has a longest edge of at most 1,600
-pixels and available luminance measurements accompany the result. See
+pixels and available luminance measurements accompany the result. The person
+foreground stage comparison tints the detected region in its result pane. See
 [desktop workspace evidence](verification/desktop-workspace.md).
 
 Both stage actions explicitly run the selected available operation, including

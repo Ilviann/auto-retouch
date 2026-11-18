@@ -7,6 +7,8 @@ from ..errors import RetouchingError
 from .definition import ContextSpec
 
 RGB_FLOAT32_BYTES_PER_PIXEL = 3 * 4
+PERSON_FOREGROUND = ContextSpec("person.foreground", 1)
+MAX_FOREGROUND_GRID = 512
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,21 @@ class ImageStatistics:
 
 
 @dataclass(frozen=True)
+class PersonForegroundMask:
+    """Binary row-major grid covering the entire oriented image rectangle."""
+
+    width: int
+    height: int
+    labels: bytes
+
+    def __post_init__(self):
+        if (not all(type(n) is int and 1 <= n <= MAX_FOREGROUND_GRID for n in (self.width, self.height))
+                or type(self.labels) is not bytes or len(self.labels) != self.width * self.height
+                or self.labels.count(0) + self.labels.count(1) != len(self.labels)):
+            raise ValueError("Person foreground requires a bounded binary grid")
+
+
+@dataclass(frozen=True)
 class ContextEntry:
     spec: ContextSpec
     producer_id: str
@@ -44,7 +61,7 @@ class ContextEntry:
     geometry_revision: int
     width: int
     height: int
-    value: ImageStatistics | tuple[float, ...]
+    value: ImageStatistics | PersonForegroundMask | tuple[float, ...]
     source_id: str = ""
     producer_settings_hash: str = ""
     confidence: float | None = None
@@ -55,9 +72,12 @@ class ContextEntry:
         if (self.confidence is not None and (not math.isfinite(self.confidence) or not 0 <= self.confidence <= 1)
                 or self.coordinates != "full-resolution-oriented-pixels"):
             raise ValueError("Context confidence/coordinate convention is invalid")
-        if not isinstance(self.value, ImageStatistics) and not (
+        is_foreground = isinstance(self.value, PersonForegroundMask)
+        if is_foreground != (self.spec == PERSON_FOREGROUND):
+            raise ValueError("Person foreground context requires the versioned foreground mask payload")
+        if not isinstance(self.value, (ImageStatistics, PersonForegroundMask)) and not (
                 isinstance(self.value, tuple) and all(type(v) in (int, float) and math.isfinite(v) for v in self.value)):
-            raise ValueError("Context payload must be immutable typed measurements")
+            raise ValueError("Context payload must be immutable typed data")
 
     def compatible(self, state):
         return (self.source_id == state.metadata.source_id and self.geometry_revision == state.geometry_revision and self.width == state.width

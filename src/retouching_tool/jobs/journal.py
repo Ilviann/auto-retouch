@@ -81,7 +81,7 @@ def runner_lock(root):
         try:
             msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError as exc:
-            raise RetouchingError("JOB_RUNNER_BUSY", "Another batch runner holds the workspace lock. Retry after it stops.") from exc
+            raise RetouchingError("JOB_RUNNER_BUSY", "Another batch or AI preview is processing. Retry after it stops.") from exc
         # Closing the handle also releases the region on worker termination.
         yield
 

@@ -148,7 +148,9 @@ Implemented 3a files use `pipeline/definition.py`, `registry.py`, `assets.py`,
 shell renders `stage_card.py`. NumPy is imported only when processing arrays,
 and no inference runtime is imported by these services. The initial parameter
 schema supports finite numeric ranges; extend it when an operation needs other
-types. No neural operation or production model manifest is bundled.
+types. The operation catalog includes an evaluation-stage PP-HumanSeg adapter
+and a pinned model manifest. Model weights are provisioned locally. See the
+[first AI checkpoint decision](decisions/0004-first-ai-checkpoint.md).
 
 Adding an operation consists of implementing its descriptor, parameter schema,
 and processing lifecycle in a dedicated module, registering it, and providing
@@ -437,7 +439,8 @@ precision, range, color metadata, and auxiliary artifacts. Repeated JPEG encodin
 is excluded. The reference-state store now uses uncompressed float32 RGB TIFF plus
 strict JSON manifests and opaque source EXIF/profile blobs; see the
 [storage decision](decisions/0002-lossless-tiff-artifacts.md). It supports current
-statistics/measurement context, not dense masks yet. Benchmark disk space and I/O as well as GPU work: even one raw float32
+statistics, measurements, and a bounded person foreground mask grid. Benchmark
+disk space and I/O as well as GPU work. One raw float32
 RGB state for a hypothetical 24-megapixel image is about 288 MB, or 144 GB for
 500 images before auxiliary artifacts and compression. This is a size calculation,
 not an estimate of the user's actual inputs or a measured storage requirement.
@@ -469,6 +472,12 @@ their own encoding options, Python 3.14 packages, metadata capabilities, and out
 validation; do not claim those codecs are implemented by a shared interface alone.
 
 ## Resource management and recovery
+
+An ONNX session belongs to one prepared stage. Sequential jobs release it after
+each image-stage call. Staged jobs reuse it for the current pass and release it
+before the next pass, export, or return from pause or cancel. The workspace runner
+lock also covers neural previews. See the
+[first AI checkpoint decision](decisions/0004-first-ai-checkpoint.md).
 
 - Begin with one GPU worker and bounded CPU decode/prefetch. Increase concurrency
   only when measurements justify it.

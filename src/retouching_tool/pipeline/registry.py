@@ -33,3 +33,11 @@ def reference_registry():
     registry.register(STATISTICS, Statistics)
     registry.register(EXPOSURE, Exposure)
     return registry
+
+
+def application_registry():
+    from ..operations.person_foreground import DESCRIPTOR, PersonForeground
+
+    registry = reference_registry()
+    registry.register(DESCRIPTOR, PersonForeground)
+    return registry

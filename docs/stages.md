@@ -21,9 +21,18 @@ The 3b artifact slice now persists this reference representation and current typ
 statistics/measurement context in float32 TIFF plus strict JSON manifests, retaining
 EXIF, ICC, XMP and IPTC-IIM bytes exactly and verifying source/revision/coordinate
 provenance. The JPEG adapter applies input orientation and converts to working
-linear sRGB. Dense masks and transforms remain pending.
+linear sRGB. A bounded person foreground grid now has its own artifact codec.
+Exposed-skin masks and per-person association remain pending.
 See [artifact evidence](verification/lossless-artifacts.md) and
 [JPEG evidence](verification/jpeg-boundary.md).
+
+The first AI analysis operation, `analysis.person_foreground`, runs the OpenCV
+Zoo PP-HumanSeg March 2023 FP32 checkpoint. It adds `person.foreground` version 1
+without editing pixels. The 192 × 192 binary grid spans the full oriented image
+rectangle and is shown with nearest-neighbor sampling in the stage comparison.
+It represents pooled person foreground. Exposed-skin classification and person
+instances require further operations. See the
+[checkpoint decision](decisions/0004-first-ai-checkpoint.md).
 
 ## Proposed first catalog
 

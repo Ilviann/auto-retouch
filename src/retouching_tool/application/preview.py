@@ -1,14 +1,16 @@
 """Local, toolkit-independent display reads and processing previews."""
 
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from functools import partial
 
 from ..errors import RetouchingError
 from ..imaging.jpeg import JpegRuntime, decode_jpeg, encode_rgb_samples, read_srgb_jpeg
 from ..jobs.execution import ImageDiagnostics
+from ..jobs.journal import runner_lock
 from ..pipeline.definition import parse_pipeline
 from ..pipeline.executor import StageRuntime, StageSession
-from ..pipeline.image_state import ContextEntry
+from ..pipeline.image_state import PERSON_FOREGROUND, ContextEntry
 from ..pipeline.validation import validate_pipeline
 from ..storage.batch_paths import current_file_stamp
 from .batch import IndexedImage, SourceIndex
@@ -31,6 +33,7 @@ class PicturePreview:
     original: DisplayImage
     result: DisplayImage | None = None
     context: tuple[ContextEntry, ...] = ()
+    result_caption: str | None = None
 
 
 class StageComparison:
@@ -54,6 +57,18 @@ def _display(rgb, limit):
     return DisplayImage(rgb.width, rgb.height, rgb.tobytes())
 
 
+def _foreground_overlay(display, foreground):
+    from PIL import Image
+
+    size = (display.width, display.height)
+    opacity = foreground.labels.replace(b"\x01", b"\x70")
+    with (Image.frombytes("RGB", size, display.rgb) as image,
+          Image.frombytes("L", (foreground.width, foreground.height), opacity) as labels,
+          labels.resize(size, Image.Resampling.NEAREST) as matte):
+        image.paste((0, 224, 160), mask=matte)
+        return DisplayImage(*size, image.tobytes())
+
+
 def _check_source(image):
     if image.header is None:
         raise RetouchingError("INPUT_HEADER_INVALID", image.issue or "Re-index a readable JPEG.")
@@ -66,8 +81,8 @@ def _check_source(image):
 
 
 class PreviewService:
-    def __init__(self, editor, diagnostics):
-        self.editor, self.diagnostics = editor, diagnostics
+    def __init__(self, root, editor, diagnostics):
+        self.root, self.editor, self.diagnostics = root, editor, diagnostics
 
     def _source_display(self, image, runtime, limit):
         _check_source(image)
@@ -94,8 +109,6 @@ class PreviewService:
     def picture(self, index: SourceIndex, image_id, request_id, *, process=False, stage_id=None,
                 through_stage=False, parameters=None, _comparison=None) -> PicturePreview:
         """Display the original, run the enabled pipeline, or compare a selected stage in memory."""
-        from PIL import Image
-
         log = ImageDiagnostics(self.diagnostics)
         runtime = JpegRuntime(log, image_id, preview_request_id=request_id)
         image = next((item for item in index.images if item.image_id == image_id), None)
@@ -108,27 +121,9 @@ class PreviewService:
                 original = self._source_display(image, runtime, PICTURE_SIZE)
                 return PicturePreview(request_id, f"Original · {image.path.name}", original)
             title, stages = self._stages(stage_id, through_stage, parameters)
-            prefix, remaining = (stages[:-1], stages[-1:]) if through_stage else ((), stages)
-            baseline_key = (self.editor.backend, self.editor.checkpoints, prefix)
-            _check_source(image)
-            baseline = _comparison._baseline if _comparison is not None else None
-            if baseline is not None and baseline[0] == baseline_key:
-                _, state, original = baseline
-            else:
-                state = decode_jpeg(image.path, source_id=image_id, runtime=runtime)
-                _check_source(image)
-                for stage in prefix:
-                    state = self._process_stage(state, stage, log, image_id, request_id)
-                original = _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE)
-                if _comparison is not None:
-                    _comparison._baseline = (baseline_key, state, original)
-            initial_revision = state.pixel_revision
-            for stage in remaining:
-                state = self._process_stage(state, stage, log, image_id, request_id)
-            _check_source(image)
-            result = (original if state.pixel_revision == initial_revision else
-                      _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE))
-            return PicturePreview(request_id, f"{title} · {image.path.name}", original, result, state.context)
+            lock = runner_lock(self.root) if any(stage.model_ref is not None for stage in stages) else nullcontext()
+            with lock:
+                return self._render(image, stages, runtime, title, stage_id, through_stage, _comparison)
         except Exception as exc:
             code = exc.code if isinstance(exc, RetouchingError) else "PREVIEW_FAILED"
             message = str(exc) if isinstance(exc, RetouchingError) else "Cannot produce the preview. Check local diagnostics."
@@ -138,11 +133,42 @@ class PreviewService:
                 raise
             raise RetouchingError(code, message) from exc
 
-    def _process_stage(self, state, stage, log, image_id, request_id):
-        runtime = StageRuntime(log, self.editor.backend, self.editor.checkpoints, None, stage, image_id,
-                               preview_request_id=request_id)
-        with StageSession(self.editor.registry, self.editor.catalog, runtime) as session:
-            return session.process(state, image_id=image_id)
+    def _render(self, image, stages, runtime, title, stage_id, through_stage, comparison):
+        from PIL import Image
+
+        prefix, remaining = (stages[:-1], stages[-1:]) if through_stage else ((), stages)
+        baseline_key = (self.editor.backend, self.editor.checkpoints, prefix)
+        _check_source(image)
+        baseline = comparison._baseline if comparison is not None else None
+        if baseline is not None and baseline[0] == baseline_key:
+            _, state, original = baseline
+        else:
+            state = decode_jpeg(image.path, source_id=image.image_id, runtime=runtime)
+            _check_source(image)
+            for stage in prefix:
+                state = self._process_stage(state, stage, runtime)
+            original = _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE)
+            if comparison is not None:
+                comparison._baseline = (baseline_key, state, original)
+        initial_revision = state.pixel_revision
+        for stage in remaining:
+            state = self._process_stage(state, stage, runtime)
+        _check_source(image)
+        result = (original if state.pixel_revision == initial_revision else
+                  _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE))
+        caption = None
+        foreground = state.entry(PERSON_FOREGROUND.key)
+        if foreground is not None and foreground.producer_id == stage_id:
+            result = _foreground_overlay(result, foreground.value)
+            caption = "Detected person foreground"
+        return PicturePreview(runtime.preview_request_id, f"{title} · {image.path.name}", original, result,
+                              state.context, caption)
+
+    def _process_stage(self, state, stage, runtime):
+        stage_runtime = StageRuntime(runtime.diagnostics, self.editor.backend, self.editor.checkpoints,
+                                     None, stage, runtime.image_id, preview_request_id=runtime.preview_request_id)
+        with StageSession(self.editor.registry, self.editor.catalog, stage_runtime) as session:
+            return session.process(state, image_id=runtime.image_id)
 
     def _stages(self, stage_id, through_stage, parameters):
         editor = self.editor

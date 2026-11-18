@@ -7,9 +7,10 @@ from uuid import uuid4
 
 from ..errors import RetouchingError
 from ..json_io import atomic_json, read_json
+from ..operations.person_foreground import MODEL as PERSON_FOREGROUND_MODEL
 from ..pipeline.assets import ModelCatalog
 from ..pipeline.definition import PipelineDefinition, parse_pipeline
-from ..pipeline.registry import reference_registry
+from ..pipeline.registry import application_registry
 from ..pipeline.validation import validate_pipeline
 
 
@@ -17,8 +18,8 @@ class PipelineService:
     def __init__(self, checkpoints, backend, diagnostics, *, autosave=None, registry=None, catalog=None):
         self.checkpoints, self.backend, self.diagnostics = checkpoints, backend, diagnostics
         self.autosave = autosave
-        self.registry = registry if registry is not None else reference_registry()
-        self.catalog = catalog if catalog is not None else ModelCatalog()
+        self.registry = registry if registry is not None else application_registry()
+        self.catalog = catalog if catalog is not None else ModelCatalog((PERSON_FOREGROUND_MODEL,))
         self.status = validate_pipeline(PipelineDefinition("Empty foundation pipeline"), self.registry,
                                         self.catalog, checkpoints, backend)
 

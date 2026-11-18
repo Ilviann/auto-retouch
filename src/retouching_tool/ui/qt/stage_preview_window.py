@@ -32,10 +32,12 @@ class StagePreviewWindow(QDialog):
         pictures = QHBoxLayout()
         self.before = FittedPicture("stagePreviewBefore")
         self.after = FittedPicture("stagePreviewAfter")
-        for picture, caption in ((self.before, "Before this stage" if through_stage else "Source photo"),
-                                 (self.after, "After this stage")):
+        before_caption = QLabel("Before this stage" if through_stage else "Source photo",
+                                alignment=Qt.AlignmentFlag.AlignCenter)
+        self.after_caption = QLabel("After this stage", alignment=Qt.AlignmentFlag.AlignCenter)
+        for picture, caption in ((self.before, before_caption), (self.after, self.after_caption)):
             column = QVBoxLayout()
-            column.addWidget(QLabel(caption, alignment=Qt.AlignmentFlag.AlignCenter))
+            column.addWidget(caption)
             column.addWidget(picture, 1)
             pictures.addLayout(column, 1)
         layout.addLayout(pictures, 1)
@@ -123,6 +125,7 @@ class StagePreviewWindow(QDialog):
             if current:
                 self.before.show_pixels(pixmap(preview.original))
                 self.after.show_pixels(pixmap(preview.result))
+                self.after_caption.setText(preview.result_caption or "After this stage")
                 measurements = statistics_text(preview.context)
                 self.statistics.setText(measurements)
                 self.statistics.setVisible(bool(measurements))

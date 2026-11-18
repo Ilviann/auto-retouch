@@ -36,7 +36,7 @@ class ApplicationService:
         editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
                                  autosave=state / "last-pipeline.json")
         self.pipeline_service = editor
-        self.preview_service = PreviewService(editor, self.diagnostics)
+        self.preview_service = PreviewService(self.root, editor, self.diagnostics)
         self.job_service = JobService(self.root, self.batch_service, editor, self.diagnostics)
         self.job_worker = WorkerService(self.root, backend, self.diagnostics)
         if options.sources:
