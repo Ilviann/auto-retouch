@@ -3,13 +3,14 @@
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGroupBox,
                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit,
-                              QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
-                              QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
+                              QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
+                              QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
 from ...imaging.jpeg import JpegSettings
@@ -62,6 +63,21 @@ def _size(byte_count):
         value /= 1024
 
 
+class ProcessingDialog(QDialog):
+    def __init__(self, parent, confirm_break):
+        super().__init__(parent)
+        self.setWindowTitle("Processing")
+        self.resize(720, 460)
+        self.break_button = _button("Break", "cancelJob", confirm_break)
+        self.close_button = _button("Close", "closeProcessing", self.reject)
+
+    def reject(self):
+        if self.close_button.isEnabled():
+            super().reject()
+        elif self.break_button.isEnabled():
+            self.break_button.click()
+
+
 class BatchPanel(QWidget):
     pipeline_locked = Signal(bool)
     settings_available = Signal(bool)
@@ -75,6 +91,9 @@ class BatchPanel(QWidget):
         self._sources = sources
         self._index = None
         self._plan = None
+        self._plan_revision = 0
+        self._space_check_after = None
+        self._space_check = None
         self._job_id = None
         self._status = None
         self._run = None
@@ -123,7 +142,7 @@ class BatchPanel(QWidget):
         self.recursive = QCheckBox("Include subfolders")
         self.recursive.setObjectName("batchRecursive")
         self.recursive.toggled.connect(self._scan)
-        self.scan = _button("Scan sources", "scanSources", self._scan)
+        self.scan = _button("Rescan source folder", "scanSources", self._scan)
         scan_row = _row(self.recursive)
         scan_row.addStretch()
         scan_row.addWidget(self.scan)
@@ -179,31 +198,20 @@ class BatchPanel(QWidget):
         self.setup_message = _label("batchSetupMessage")
         for label in (self.pipeline_summary, self.space, self.setup_message):
             layout.addWidget(label)
-        self.check_space = _button("Check disk space", "checkBatchSpace", self._check_space)
-        self.start = _button("Start batch", "startBatch", self._create)
-        self.job_details = QToolButton(text="Job progress and history", checkable=True, objectName="jobDetails")
-        layout.addLayout(_row(self.check_space, self.start, self.job_details))
+        self.start = _button("Start processing", "startBatch", self._create)
+        self.history = _button("Open saved job…", "openSavedJob", self._open_history)
+        layout.addLayout(_row(self.start, self.history))
         self._build_monitor()
-        layout.addWidget(self.monitor)
-        self.job_details.toggled.connect(self._toggle_monitor)
-        self.monitor.hide()
         return setup
 
-    def _toggle_monitor(self, visible):
-        self.monitor.setVisible(visible)
-        if visible:
-            self.monitor.parentWidget().layout().activate()
-            self.setup_scroll.ensureWidgetVisible(self.history)
-
     def _build_monitor(self):
-        monitor = QWidget()
+        self.monitor = monitor = ProcessingDialog(self, self._confirm_break)
+        monitor.finished.connect(self._monitor_closed)
         layout = QVBoxLayout(monitor)
-        self.history = _button("Open saved job…", "openSavedJob", self._open_history)
         self.refresh = _button("Refresh", "refreshJob", self._refresh)
-        self.resume = _button("Resume", "resumeJob", self._start)
+        self.resume = _button("Continue", "resumeJob", self._start)
         self.pause = _button("Pause", "pauseJob", partial(self._request, "pause"))
-        self.cancel = _button("Cancel remaining", "cancelJob", partial(self._request, "cancel"))
-        layout.addLayout(_row(self.history, self.refresh, self.resume, self.pause, self.cancel))
+        self.cancel = monitor.break_button
         self.job_heading = _label("jobHeading")
         self.job_heading.setText("No job selected.")
         self.job_diagnostics = _button("Job diagnostics…", "openJobDiagnostics",
@@ -223,8 +231,13 @@ class BatchPanel(QWidget):
             layout.addWidget(widget)
         self.results = _table("jobImages", ("Source JPEG", "Result", "Attempts", "Warnings", "Stages"), 0)
         layout.addWidget(self.results, 1)
-        self.monitor = monitor
-        self.results.setMaximumHeight(185)
+        layout.addLayout(_row(self.refresh, self.pause, self.resume, self.cancel, monitor.close_button))
+        for button in monitor.findChildren(QPushButton):
+            button.setAutoDefault(False)
+
+    def _monitor_closed(self):
+        if self._job_id and not self._closing:
+            self._invalidate_plan()
 
     def _show_sources(self):
         self.source_text.setText("; ".join(map(str, self._sources)))
@@ -248,7 +261,10 @@ class BatchPanel(QWidget):
     def _choose_destination(self):
         path = QFileDialog.getExistingDirectory(self, "Choose destination folder", self.destination.text())
         if path:
-            self.destination.setText(path)
+            if path == self.destination.text():
+                self._invalidate_plan()
+            else:
+                self.destination.setText(path)
 
     def _invalidate_index(self):
         self._index = None
@@ -257,8 +273,13 @@ class BatchPanel(QWidget):
 
     def _invalidate_plan(self):
         self._plan = None
+        self._plan_revision += 1
+        can_check = self.destination.text().strip() and self._selected_ids()
+        self._space_check_after = monotonic() + 0.3 if can_check else None
         self.setup_message.clear()
         self._show_estimate()
+        if can_check:
+            self.space.setText(f"{self.space.text()}\nChecking paths and disk space…")
         self._update_controls()
 
     def _selected_ids(self):
@@ -279,7 +300,7 @@ class BatchPanel(QWidget):
     def _show_index(self, index):
         self._index = index
         self.images.set_index(index)
-        self._show_estimate()
+        self._invalidate_plan()
         if not index.images:
             self.setup_message.setText("No JPEGs found. Choose another source or include subfolders.")
         elif any(image.issue for image in index.images):
@@ -290,11 +311,31 @@ class BatchPanel(QWidget):
             "mode": self.mode.currentData(), "selected_ids": self._selected_ids(),
         }
 
-    def _check_space(self):
-        self._invalidate_plan()
-        self.setup_message.setText("Checking paths and disk space…")
-        args, options = self._plan_args()
-        self._submit("preflight", partial(self.application.batch_service.preflight, *args, **options))
+    def _update_space_check(self):
+        if self._space_check is not None:
+            revision, future = self._space_check
+            if not future.done():
+                return
+            self._space_check = None
+            try:
+                plan = future.result()
+            except Exception as exc:
+                if not isinstance(exc, RetouchingError):
+                    self.application.diagnostics.emit("DESKTOP_BATCH_COMMAND_FAILED", "Cannot check batch disk space.",
+                        component="desktop", action="preflight", level="ERROR", exc_info=True)
+                if revision == self._plan_revision:
+                    self._show_estimate()
+                    code = getattr(exc, "code", "DESKTOP_BATCH_COMMAND_FAILED")
+                    self.space.setText(f"{self.space.text()}\n{code}: {exc}")
+            else:
+                if revision == self._plan_revision:
+                    self._show_plan(plan)
+        if (self._space_check_after is not None and monotonic() >= self._space_check_after and not self._closing
+                and self._task is None and self._run is None and self._stage_preview is None):
+            self._space_check_after = None
+            args, options = self._plan_args()
+            future = self._executor.submit(self.application.batch_service.preflight, *args, **options)
+            self._space_check = self._plan_revision, future
 
     def _show_estimate(self):
         selected = self._selected_ids()
@@ -317,9 +358,9 @@ class BatchPanel(QWidget):
         for volume in plan.volumes:
             folders = ", ".join(map(str, volume.paths))
             lines.append(f"{_size(volume.required_bytes)} required · {_size(volume.available_bytes)} free on {folders}")
-        self.space.setText("\n".join(lines))
         if not plan.ready:
-            self.setup_message.setText("Free disk space or choose a different destination, then check again.")
+            lines.append("Free disk space and rescan the source folder, or choose another destination.")
+        self.space.setText("\n".join(lines))
 
     def refresh_pipeline(self):
         status = self.application.pipeline_service.status
@@ -336,8 +377,6 @@ class BatchPanel(QWidget):
             self._picture_window.close()
         if previous.temporary != config.temporary:
             self._invalidate_plan()
-            if self.check_space.isEnabled():
-                self._check_space()
 
     def _current_image(self):
         selected = self.images.selectedItems()
@@ -346,9 +385,11 @@ class BatchPanel(QWidget):
         return None
 
     def show_diagnostic_photo(self, event):
-        if self._index is not None:
+        if self._index is not None and (not self.monitor.isVisible() or self.monitor.close_button.isEnabled()):
             for row, image in enumerate(self._index.images):
                 if image.image_id == event.image_id:
+                    if self.monitor.isVisible():
+                        self.monitor.reject()
                     self.images.setCurrentRow(row)
                     self.images.scrollToItem(self.images.item(row))
                     self.setup_scroll.ensureWidgetVisible(self.images)
@@ -356,10 +397,10 @@ class BatchPanel(QWidget):
         if self._status is not None and self._status.job_id == event.job_id:
             for row, image in enumerate(self._status.images):
                 if image.image_id == event.image_id:
-                    self.job_details.setChecked(True)
+                    if not self.monitor.isVisible():
+                        self.monitor.open()
                     self.results.selectRow(row)
                     self.results.scrollToItem(self.results.item(row, 0))
-                    self.setup_scroll.ensureWidgetVisible(self.results)
                     return True
         return False
 
@@ -446,7 +487,17 @@ class BatchPanel(QWidget):
             return job_id, editor.status.definition != reviewed
 
         self.pipeline_locked.emit(True)
-        self.setup_message.setText("Validating the pipeline and saving the job snapshot…")
+        self._status = self._job_id = None
+        self.job_heading.setText("Preparing job")
+        self.job_message.setText("Validating the pipeline and saving the job snapshot…")
+        self.job_counts.clear()
+        self.job_metadata.clear()
+        self.worker_warning.clear()
+        self.results.setRowCount(0)
+        self.job_progress.setRange(0, 0)
+        self.job_progress.show()
+        if not self.monitor.isVisible():
+            self.monitor.open()
         self._submit("create", freeze)
 
     def _start(self):
@@ -455,12 +506,12 @@ class BatchPanel(QWidget):
         self._submit("start", partial(self.application.job_worker.start, self._job_id))
 
     def _open_history(self):
-        self.job_message.setText("Looking for saved jobs…")
+        self.setup_message.setText("Looking for saved jobs…")
         self._submit("history", self.application.job_service.saved_jobs)
 
     def _choose_saved_job(self, jobs):
         if not jobs:
-            self.job_message.setText("No saved jobs found.")
+            self.setup_message.setText("No saved jobs found.")
             return
         labels = [f"{job.modified.astimezone():%Y-%m-%d %H:%M:%S}  ·  {job.job_id}" for job in jobs]
         label, accepted = QInputDialog.getItem(self, "Open saved job", "Last updated · Job ID", labels, editable=False)
@@ -470,6 +521,19 @@ class BatchPanel(QWidget):
     def _refresh(self):
         self._poll_failed = False
         self._submit("refresh", partial(self.application.job_service.status, self._job_id))
+
+    def _confirm_break(self):
+        if not self.cancel.isEnabled():
+            return
+        answer = QMessageBox.question(self.monitor, "Break processing?",
+            "Cancel the remaining work for this job? Completed exports will be kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self._run is not None:
+            self._request("cancel")
+        elif self._status and self._status.status == "paused" and self._task is None:
+            self._submit("break", partial(self.application.job_service.cancel_remaining, self._job_id))
 
     def _request(self, command):
         if self._run is None:
@@ -542,7 +606,7 @@ class BatchPanel(QWidget):
         picture = action in ("original", "preview")
         current = not picture or self._preview_still_current()
         retrying_resize = False
-        feedback = self.setup_message if action in ("scan", "preflight", "create") or picture else self.job_message
+        feedback = self.setup_message if action in ("scan", "create", "history", "open") or picture else self.job_message
         try:
             result = future.result()
         except Exception as exc:
@@ -554,7 +618,7 @@ class BatchPanel(QWidget):
             feedback.setText(f"{code}: {exc}" if current else "")
             if isinstance(exc, ResizeApprovalRequired) and current and not self._closing:
                 prompt = str(exc) if action == "create" else f"{exc}\nAllow this for this preview?"
-                if confirm_resize(self, prompt):
+                if confirm_resize(self.monitor if action == "create" else self, prompt):
                     retrying_resize = True
                     approvals = (*self._resize_approvals, exc.stage_id)
                     if action == "create":
@@ -563,27 +627,27 @@ class BatchPanel(QWidget):
                         self._request_picture(process=True, resize_approvals=approvals)
             if action == "poll":
                 self._poll_failed = True
+            if action == "break" and not self._closing:
+                self._submit("poll", partial(self.application.job_service.status, self._job_id))
+            if action == "create" and not retrying_resize:
+                if not isinstance(exc, ResizeApprovalRequired):
+                    self._plan = None
+                    self._show_estimate()
+                self.monitor.done(QDialog.DialogCode.Rejected)
         else:
             if action != "poll":
                 feedback.clear()
             match action:
                 case "scan":
                     self._show_index(result)
-                case "preflight":
-                    self._show_plan(result)
                 case "original" | "preview":
                     if current:
                         self._show_picture(result)
                 case "create":
+                    self._plan = None
+                    self._show_estimate()
                     self._job_id, pipeline_changed = result
-                    self._status = None
-                    self.results.setRowCount(0)
-                    self.job_counts.clear()
-                    self.job_metadata.clear()
-                    self.job_progress.hide()
-                    self.worker_warning.clear()
                     if not self._closing:
-                        self.job_details.setChecked(True)
                         if pipeline_changed:
                             self.job_message.setText("Pipeline availability changed during validation. Review this saved job before starting it.")
                             self._submit("poll", partial(self.application.job_service.status, self._job_id))
@@ -593,6 +657,7 @@ class BatchPanel(QWidget):
                     self._run = result
                     self._poll_failed = False
                     self._request_sent = None
+                    self.job_message.clear()
                     if self._closing:
                         self._request("pause")
                 case "history":
@@ -600,17 +665,18 @@ class BatchPanel(QWidget):
                         self._choose_saved_job(result)
                 case "open":
                     self.worker_warning.clear()
+                    self.job_message.clear()
                     self._show_status(result)
-                case "refresh" | "poll":
+                    if not self._closing:
+                        self.monitor.open()
+                case "refresh" | "poll" | "break":
                     self._show_status(result)
         finally:
-            if action == "create" and not retrying_resize:
-                self._plan = None
-                self._show_estimate()
             if action in ("create", "preview") and not retrying_resize:
                 self.pipeline_locked.emit(False)
 
     def _tick(self):
+        self._update_space_check()
         if self._task and self._task[1].done():
             self._finish_task()
         if self._task is None and self._run is not None:
@@ -630,7 +696,7 @@ class BatchPanel(QWidget):
             elif not self._closing and not self._poll_failed:
                 self._submit("poll", partial(self.application.job_service.status, self._job_id))
         self._update_controls()
-        if self._closing and self._task is None and self._run is None and self.images.shutdown():
+        if self._closing and self._task is None and self._run is None and self._space_check is None and self.images.shutdown():
             self.ready_to_close.emit()
 
     def _update_controls(self):
@@ -644,7 +710,6 @@ class BatchPanel(QWidget):
         choosing_preview = self._task is not None and self._task[0] in ("original", "preview")
         self.images.setEnabled(idle or (not self._closing and choosing_preview))
         self.scan.setEnabled(idle and bool(self._sources))
-        self.check_space.setEnabled(idle and selected > 0 and bool(self.destination.text().strip()))
         executable = self.application.pipeline_service.status.executable
         self.start.setEnabled(idle and self._plan is not None and self._plan.ready and executable)
         image = self._current_image()
@@ -663,11 +728,15 @@ class BatchPanel(QWidget):
 
         self.history.setEnabled(idle)
         self.job_diagnostics.setEnabled(not self._closing and bool(self._job_id))
-        self.refresh.setEnabled(idle and bool(self._job_id))
+        self.refresh.setVisible(idle or self._poll_failed)
+        self.refresh.setEnabled(bool(self._job_id) and (idle or (running and self._poll_failed and self._task is None)))
         self.resume.setEnabled(idle and bool(self._job_id) and (self._status is None or not self._status.terminal))
-        self.resume.setText("Start saved job" if self._status is None or self._status.status == "queued" else "Resume")
+        queued = idle and self._status is not None and self._status.status == "queued"
+        self.resume.setText("Start saved job" if queued else "Continue")
         self.pause.setEnabled(running and not self._closing and self._request_sent is None)
-        self.cancel.setEnabled(running and not self._closing and self._request_sent != "cancel")
+        paused = idle and self._status is not None and self._status.status == "paused"
+        self.cancel.setEnabled(paused or self.pause.isEnabled())
+        self.monitor.close_button.setEnabled(idle)
         if self._job_id is None:
             return
         if running:
@@ -687,10 +756,9 @@ class BatchPanel(QWidget):
         self._closing = True
         thumbnails_stopped = self.images.shutdown()
         if self._run is not None:
-            self.job_details.setChecked(True)
             if self._request_sent is None:
                 self._request("pause")
-        if self._task is not None or self._run is not None or not thumbnails_stopped:
+        if self._task is not None or self._run is not None or self._space_check is not None or not thumbnails_stopped:
             self._update_controls()
             return False
         if self._picture_window is not None:

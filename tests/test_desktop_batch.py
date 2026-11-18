@@ -19,7 +19,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QInputDialog, QLabel,
-                               QMessageBox, QPushButton, QSlider)
+                               QMessageBox, QProgressBar, QPushButton, QSlider)
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
@@ -102,10 +102,9 @@ class DesktopBatchTests(unittest.TestCase):
         self.until(lambda: panel.images.count() == expected and panel.scan.isEnabled(),
                    "automatic source scan did not finish")
 
-    def check_space(self, panel, *, ready=True):
-        panel.check_space.click()
-        self.until(lambda: panel.check_space.isEnabled(), "disk check did not return")
-        self.assertEqual(panel.start.isEnabled(), ready, panel.setup_message.text())
+    def wait_for_space(self, panel, *, ready=True):
+        self.until(lambda: panel._space_check_after is None and panel._space_check is None, "disk check did not return")
+        self.assertEqual(panel.start.isEnabled(), ready, panel.space.text())
 
     def start_at_checkpoint(self, panel, action, button):
         worker = panel.application.job_worker
@@ -127,7 +126,7 @@ class DesktopBatchTests(unittest.TestCase):
         app = panel.application
         self.wait_for_scan(panel, 1)
         panel.destination.setText(str(self.destination))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         plan = panel._plan
         config = app.config
         add_fixture_stages(app.pipeline_service)
@@ -177,7 +176,7 @@ class DesktopBatchTests(unittest.TestCase):
                 self.assertTrue(dialog.isVisible() and window.isVisible())
             finally:
                 release.set()
-        self.until(lambda: "SCRATCH_INSIDE_SOURCE" in panel.setup_message.text(),
+        self.until(lambda: "SCRATCH_INSIDE_SOURCE" in panel.space.text(),
                    "edited scratch path was not rechecked")
         self.assertFalse(panel.start.isEnabled())
         self.assertEqual(load_config(self.root), app.config)
@@ -201,22 +200,30 @@ class DesktopBatchTests(unittest.TestCase):
         card.toggle.click()
         self.until(panel.start.isEnabled, "explicit enable did not restore the batch")
 
-    def test_settings_while_staged_worker_active_and_resume(self):
+    def test_processing_modal_pause_edit_settings_and_continue_saved_job(self):
         window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
         self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
         panel.mode.setCurrentIndex(panel.mode.findData("staged"))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         self.start_at_checkpoint(panel, "pause", panel.start)
+        self.assertIs(self.qt.activeModalWidget(), panel.monitor)
+        self.assertFalse(panel.monitor.close_button.isEnabled())
+        self.assertFalse(panel.resume.isEnabled())
+        panel.pause.click()
+        self.until(panel.resume.isEnabled, "worker did not pause")
+        self.assertTrue(panel.cancel.isEnabled())
+        panel.monitor.close_button.click()
         window.findChild(QPushButton, "openSettings").click()
         dialog = self.qt.activeModalWidget()
         self.assertIsInstance(dialog, SettingsDialog)
         dialog.fields["temporary"].setText("future scratch")
         dialog.fields["logs"].setText("future logs")
         dialog.buttons.button(QDialogButtonBox.StandardButton.Save).click()
-        self.until(lambda: self.qt.activeModalWidget() is None, "settings did not save during the batch")
-        panel.pause.click()
-        self.until(panel.resume.isEnabled, "worker did not pause")
+        self.until(lambda: self.qt.activeModalWidget() is None, "settings did not save")
+        with patch.object(QInputDialog, "getItem", side_effect=lambda *args, **kwargs: (args[3][0], True)):
+            panel.history.click()
+            self.until(panel.monitor.isVisible, "saved processing dialog did not reopen")
         panel.resume.click()
         self.until(lambda: "2 exported" in panel.job_counts.text(), "could not resume with the frozen paths")
         self.assertFalse((self.root / "future scratch").exists())
@@ -237,28 +244,30 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertIn("1 unreadable", panel.source_summary.text())
 
             panel.destination.setText(str(self.nested))
-            self.check_space(panel, ready=False)
-            self.assertIn("DESTINATION_INSIDE_SOURCE", panel.setup_message.text())
+            self.wait_for_space(panel, ready=False)
+            self.assertIn("DESTINATION_INSIDE_SOURCE", panel.space.text())
             panel.destination.setText(str(self.destination))
-            self.check_space(panel, ready=False)
-            self.assertIn("BATCH_INDEX_INCOMPLETE", panel.setup_message.text())
+            self.wait_for_space(panel, ready=False)
+            self.assertIn("BATCH_INDEX_INCOMPLETE", panel.space.text())
             row = next(row for row in range(3) if panel.images.item(row).text() == corrupt.name)
             panel.images.item(row).setCheckState(Qt.CheckState.Unchecked)
             self.assertIn("1 excluded", panel.source_summary.text())
             self.assertIn("Estimated temporary space", panel.space.text())
-            self.check_space(panel)
+            self.wait_for_space(panel)
             self.assertIn("MiB", panel.space.text())
             self.assertIn("required", panel.space.text())
             collision = self.destination / "a.jpg"
             collision.write_bytes(b"occupied after preflight")
             panel.start.click()
-            self.until(lambda: panel.check_space.isEnabled(), "job creation did not return")
+            self.until(lambda: panel.scan.isEnabled(), "job creation did not return")
             self.assertIn("OUTPUT_COLLISION", panel.setup_message.text())
             self.assertFalse(panel.start.isEnabled())
             self.assertFalse(panel.application.job_service.saved_jobs())
             self.assertEqual(collision.read_bytes(), b"occupied after preflight")
             collision.unlink()
-            self.check_space(panel)
+            with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.destination)):
+                panel.findChild(QPushButton, "chooseDestination").click()
+            self.wait_for_space(panel)
             panel.quality.setValue(81)
             panel.chroma.setCurrentText("4:2:0")
             panel.progressive.setChecked(True)
@@ -282,6 +291,70 @@ class DesktopBatchTests(unittest.TestCase):
         finally:
             self.close_window(window)
 
+    def test_auto_preflight_after_folder_selection_rescan_and_destination_edit(self):
+        _, panel = self.open_window()
+        self.assertIsNone(panel.findChild(QPushButton, "checkBatchSpace"))
+        self.assertEqual(panel.start.text(), "Start processing")
+        self.assertEqual(panel.scan.text(), "Rescan source folder")
+        with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.destination)):
+            panel.findChild(QPushButton, "chooseDestination").click()
+        with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.source)):
+            panel.findChild(QPushButton, "chooseSourceFolder").click()
+        self.until(panel.start.isEnabled, "selecting the source did not validate disk space")
+
+        collision = self.destination / "a.jpg"
+        collision.touch()
+        panel.scan.click()
+        self.assertFalse(panel.start.isEnabled())
+        self.until(lambda: "OUTPUT_COLLISION" in panel.space.text(), "rescan missed the new collision")
+        collision.unlink()
+
+        service = panel.application.batch_service
+        preflight = service.preflight
+        started, release = Event(), Event()
+
+        def delayed(index, destination, **options):
+            if destination == self.destination:
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError("Disk check test did not release the request")
+            return preflight(index, destination, **options)
+
+        with patch.object(service, "preflight", delayed):
+            panel.scan.click()
+            self.until(started.is_set, "new rescan did not check the destination")
+            try:
+                panel.destination.setText(str(self.source))
+            finally:
+                release.set()
+            self.wait_for_space(panel, ready=False)
+            self.assertIsNone(panel._plan)
+            self.assertNotIn("required ·", panel.space.text())
+        panel.destination.setText(str(self.destination))
+        self.until(panel.start.isEnabled, "valid destination did not restore start")
+
+    def test_confirmed_break_of_paused_job(self):
+        _, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 2)
+        panel.destination.setText(str(self.destination))
+        panel.mode.setCurrentIndex(panel.mode.findData("staged"))
+        self.wait_for_space(panel)
+        self.start_at_checkpoint(panel, "pause", panel.start)
+        panel.pause.click()
+        self.until(panel.resume.isEnabled, "Continue did not become available")
+        self.assertIs(self.qt.activeModalWidget(), panel.monitor)
+        self.assertEqual(panel.resume.text(), "Continue")
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No):
+            panel.cancel.click()
+        self.assertTrue(panel.resume.isEnabled())
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            panel.cancel.click()
+        self.until(lambda: panel.job_heading.text().startswith("Canceled"), "paused job was not canceled")
+        self.assertEqual(list(self.destination.iterdir()), [])
+        self.assertFalse(panel.resume.isEnabled())
+        panel.monitor.close_button.click()
+        self.assertIsNone(self.qt.activeModalWidget())
+
     def test_diagnostics_search_copy_and_workspace_links(self):
         with Image.new("RGB", (40, 30), (240, 160, 80)) as image:
             image.save(self.source / "bright.jpg")
@@ -293,7 +366,7 @@ class DesktopBatchTests(unittest.TestCase):
         window.pipeline_page._refresh_cards()
         panel.refresh_pipeline()
         panel.destination.setText(str(self.destination))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         panel.start.click()
         self.until(lambda: panel.history.isEnabled() and panel.results.rowCount() == 2,
                    "finished job did not become available")
@@ -352,11 +425,15 @@ class DesktopBatchTests(unittest.TestCase):
         # A fresh index assigns new image IDs. The same event still links to its saved job row.
         panel.scan.click()
         self.wait_for_scan(panel, 2)
+        with patch.object(QInputDialog, "getItem", side_effect=lambda *args, **kwargs: (args[3][0], True)):
+            panel.history.click()
+            self.until(panel.monitor.isVisible, "saved processing dialog did not reopen")
         dialog = open_diagnostics(panel.job_diagnostics)
         row = next(row for row, event in enumerate(dialog.events) if event.code == "EXPOSURE_CLIPPED")
         dialog.table.selectRow(row)
         dialog.photo.click()
         self.assertEqual(Path(panel.results.item(panel.results.currentRow(), 0).text()).name, "bright.jpg")
+        panel.monitor.close_button.click()
 
         dialog = open_diagnostics(window.findChild(QPushButton, "openDiagnostics"))
         self.assertEqual(dialog.job_id.text(), "")
@@ -376,10 +453,10 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertFalse(panel.application.job_service.saved_jobs())
         self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         panel.mode.setCurrentIndex(panel.mode.findData("staged"))
         self.assertFalse(panel.start.isEnabled())
-        self.check_space(panel)
+        self.wait_for_space(panel)
         self.start_at_checkpoint(panel, "pause", panel.start)
         job_id = panel.application.job_service.saved_jobs()[0].job_id
         panel.pause.click()
@@ -393,14 +470,21 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIn(str(self.nested / "фото.jpg"), panel.source_text.text())
         self.assertTrue(panel.job_heading.text().startswith("No job selected"))
         self.wait_for_scan(panel, 2)
-        panel.job_details.click()
         with patch.object(QInputDialog, "getItem", side_effect=lambda *args, **kwargs: (args[3][0], True)):
             panel.history.click()
             self.until(lambda: panel.resume.isEnabled(), "saved job did not reopen")
         self.assertIn(job_id, panel.job_heading.text())
         self.assertIn("Staged", panel.job_metadata.text())
         self.start_at_checkpoint(panel, "cancel", panel.resume)
-        panel.cancel.click()
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as confirm:
+            QTest.keyClick(panel.monitor, Qt.Key.Key_Escape)
+            confirm.assert_called_once()
+            self.assertEqual(confirm.call_args.args[-1], QMessageBox.StandardButton.No)
+        self.assertTrue(panel.monitor.isVisible())
+        self.assertTrue(panel.pause.isEnabled())
+        self.assertIsNone(panel._request_sent)
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            panel.cancel.click()
         self.until(lambda: panel.history.isEnabled(), "canceled job did not finish")
         self.assertTrue(panel.job_heading.text().startswith("Canceled"))
         self.assertIn("2 canceled", panel.job_counts.text())
@@ -412,7 +496,7 @@ class DesktopBatchTests(unittest.TestCase):
         self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
         panel.mode.setCurrentIndex(panel.mode.findData("staged"))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         self.start_at_checkpoint(panel, "pause", panel.start)
         jobs = panel.application.job_service
         job_id = jobs.saved_jobs()[0].job_id
@@ -422,7 +506,6 @@ class DesktopBatchTests(unittest.TestCase):
 
         _, panel = self.open_window()
         self.wait_for_scan(panel, 2)
-        panel.job_details.click()
         with patch.object(QInputDialog, "getItem", side_effect=lambda *args, **kwargs: (args[3][0], True)):
             panel.history.click()
             self.until(lambda: panel.resume.isEnabled(), "saved paused job did not reopen")
@@ -436,7 +519,7 @@ class DesktopBatchTests(unittest.TestCase):
         _, panel = self.open_window(tuple(self.originals), pipeline=pipeline)
         self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         editor = panel.application.pipeline_service
         preflight = editor.preflight
 
@@ -456,7 +539,7 @@ class DesktopBatchTests(unittest.TestCase):
         _, panel = self.open_window(tuple(self.originals))
         self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         worker = panel.application.job_worker
         command = worker._command
 
@@ -651,7 +734,10 @@ class DesktopBatchTests(unittest.TestCase):
         window, panel = self.open_window((self.source,))
         self.wait_for_scan(panel, 1)
         editor = panel.application.pipeline_service
-        stage = window.pipeline_page._command(editor.add_operation, EXPOSURE.operation, 1).stages[0].stage
+        descriptor = replace(EXPOSURE, operation="test.manual_resize",
+                             parameters=(replace(EXPOSURE.parameters[0], preview_on_change=False),))
+        editor.registry.register(descriptor, Exposure)
+        stage = window.pipeline_page._command(editor.add_operation, descriptor.operation, 1).stages[0].stage
         self.qt.processEvents()
         preview = panel.application.preview_service
         picture = preview.picture
@@ -663,11 +749,18 @@ class DesktopBatchTests(unittest.TestCase):
                 raise ResizeApprovalRequired(stage.id, "Approve the test resize?")
             return picture(*args, **kwargs)
 
+        def approve_resize(parent, *args):
+            if parent is panel._stage_preview:
+                self.assertIs(self.qt.activeModalWidget(), parent)
+                self.assertFalse(parent.render_dialog.isVisible())
+            return QMessageBox.StandardButton.Yes
+
         with patch.object(preview, "picture", side_effect=render), patch.object(
-                QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+                QMessageBox, "question", side_effect=approve_resize):
             window.pipeline_page.stage_cards[stage.id].preview.click()
             dialog = panel._stage_preview
-            self.until(lambda: dialog.after.pixmap() is not None and not dialog.feedback.text(), "stage resize was not retried")
+            self.assertIs(self.qt.activeModalWidget(), dialog.render_dialog)
+            self.until(lambda: not dialog.after.pixmap().isNull(), "stage resize was not retried")
             dialog.close()
             panel.preview.click()
             self.until(lambda: panel._picture_window is not None, "pipeline resize was not retried")
@@ -675,7 +768,7 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertEqual(approvals, [(), (stage.id,), (), (stage.id,)])
 
         panel.destination.setText(str(self.destination))
-        self.check_space(panel)
+        self.wait_for_space(panel)
         with patch.object(panel.application.job_service, "create", side_effect=ResizeApprovalRequired(stage.id, "Resize?")), patch.object(
                 QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as prompt:
             panel.start.click()
@@ -714,25 +807,54 @@ class DesktopBatchTests(unittest.TestCase):
         with patch.object(service, "picture", side_effect=render):
             window.pipeline_page.stage_cards[stage.id].preview.click()
             dialog = panel._stage_preview
+            self.assertIs(self.qt.activeModalWidget(), dialog.render_dialog)
+            modal_bar = dialog.render_dialog.findChild(QProgressBar)
+            self.assertEqual((modal_bar.minimum(), modal_bar.maximum()), (0, 0))
             self.until(lambda: not dialog.after.pixmap().isNull(), "initial preview did not render")
+            live = dialog.findChild(QDoubleSpinBox, "parameter-stops")
+
+            def layout_rects():
+                return [widget.geometry() for widget in
+                        (dialog.before, dialog.after, live, dialog.live_progress, dialog.apply_preview, dialog.close_button)]
+
+            idle_rects = layout_rects()
+            self.assertIs(self.qt.activeModalWidget(), dialog)
+            self.assertTrue(dialog.live_progress.isVisible())
+            self.assertGreater(dialog.live_progress.maximum(), 0)
             with patch.object(dialog.after, "show_pixels", wraps=dialog.after.show_pixels) as paint:
                 dialog.findChild(QDoubleSpinBox, "parameter-manual").setValue(2)
                 self.assertTrue(dialog.apply_preview.isEnabled())
-                live = dialog.findChild(QDoubleSpinBox, "parameter-stops")
                 live.setValue(1)
                 try:
                     self.until(started.is_set, "first live preview did not start")
+                    self.assertTrue(dialog.live_progress.isVisible())
+                    self.assertEqual(dialog.live_progress.maximum(), 0)
+                    self.assertIs(self.qt.activeModalWidget(), dialog)
+                    self.assertEqual(layout_rects(), idle_rects)
                     self.assertEqual(requests, [{"stops": 0, "manual": 0, "blend": 1}, {"stops": 1, "manual": 0, "blend": 1}])
                     live.setValue(2)
                 finally:
                     release.set()
-                self.until(lambda: len(requests) == 3 and not dialog.feedback.text(), "latest live preview did not render")
+                self.until(lambda: len(requests) == 3 and dialog._future is None, "latest live preview did not render")
                 self.assertEqual(requests[-1], {"stops": 2, "manual": 0, "blend": 1})
                 paint.assert_called_once()
             live_red = dialog.after.pixmap().toImage().pixelColor(0, 0).red()
             dialog.apply_preview.click()
-            self.until(lambda: len(requests) == 4 and not dialog.feedback.text(), "manual preview did not render")
+            self.assertIs(self.qt.activeModalWidget(), dialog.render_dialog)
+            self.assertEqual(layout_rects(), idle_rects)
+            self.until(lambda: len(requests) == 4 and dialog._future is None, "manual preview did not render")
+            self.assertIs(self.qt.activeModalWidget(), dialog)
+            self.assertTrue(dialog.live_progress.isVisible())
+            self.assertGreater(dialog.live_progress.maximum(), 0)
+            self.assertEqual(layout_rects(), idle_rects)
             self.assertEqual(requests[-1], {"stops": 2, "manual": 2, "blend": 1})
             self.assertGreater(dialog.after.pixmap().toImage().pixelColor(0, 0).red(), live_red)
-            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
-                dialog.close()
+            dialog.findChild(QDoubleSpinBox, "parameter-manual").setValue(1)
+            dialog.apply_preview.click()
+            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard) as prompt:
+                dialog.render_dialog.close_preview.click()
+                self.assertFalse(dialog.render_dialog.close_preview.isEnabled())
+                self.assertTrue(dialog.render_dialog.isVisible())
+                prompt.assert_not_called()
+                self.until(lambda: panel._stage_preview is None, "stage preview did not finish closing")
+                prompt.assert_called_once()

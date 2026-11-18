@@ -2,15 +2,16 @@
 
 The workspace places source and destination controls above the pipeline editor
 and photo grid. Source selection, recursion changes, and restored sources trigger
-a header scan. **Scan sources** refreshes the current index. Clicking a tile
+a header scan. **Rescan source folder** refreshes the current index. Clicking a tile
 selects it for viewing. Its checkbox controls batch inclusion. Thumbnails
 decode locally one at a time, and the grid releases offscreen icons.
 
 The batch summary shows indexed temporary and JPEG output estimates before a
 destination is set. Changing inclusion or schedule recalculates the estimates.
-An unreadable included header makes the estimate incomplete. **Check disk space**
-validates paths and collisions and adds the required and available space per
-volume. The workspace uses binary units for both estimates and free space.
+An unreadable included header makes the estimate incomplete. When a destination
+and included photos are available, the workspace automatically checks paths and
+output collisions and displays required and available space per volume. The
+workspace uses binary units for both estimates and free space.
 
 Operation cards describe image and context inputs and effects from the operation
 descriptor. **View original** can open an indexed image without a destination.
@@ -66,6 +67,12 @@ and the cached stage input on close,
 automatic and manual refresh, stale result rejection, save/discard/cancel, and
 recovery from a failed save. A test operation supplies the manual parameter.
 An offscreen comparison render was inspected with a generated JPEG.
+
+On 2026-11-19, three focused offscreen Qt checks passed for stage preview
+progress. A mixed-parameter reference stage exercised both the window-modal
+progress panel and the fixed footer bar. The checks compared pane, progress bar
+and control geometry across renders, verified that the manual panel yields to
+resize approval, and closed a running preview through its progress panel.
 
 ```bat
 .venv\Scripts\python.exe -m unittest discover -s tests -p test_preview.py -v

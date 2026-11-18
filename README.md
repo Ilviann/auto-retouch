@@ -97,10 +97,13 @@ stages in the comparison input. Both stage previews let you adjust and save
 settings. Pixel stages have a **Blending** slider for mixing the stage input
 with its result.
 
-To export, set the schedule and JPEG options, then select **Check disk space**
-and **Start batch**. Pause and cancel take effect after the current work unit.
-To resume after relaunching, expand **Job progress and history** and select
-**Open saved job**.
+Choose a destination and set the schedule and JPEG options. Disk status updates
+automatically when you select folders, rescan, change the included photos, or
+switch schedules. Select **Start processing** when the batch is ready.
+The processing window shows progress and per-photo results. **Pause** waits for
+the current unit to finish. **Continue** resumes the saved job. **Break** asks
+for confirmation before canceling the remaining work and keeps completed exports.
+To resume after relaunching, choose **Open saved job…** and then **Continue**.
 
 Run focused desktop batch checks in the existing environment:
 

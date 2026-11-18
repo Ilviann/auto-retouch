@@ -239,7 +239,11 @@ Original, whole-pipeline, and stage previews open as modal dialogs. Stage
 comparisons display the input and result side by side.
 The stage parameters are a local draft. Parameters marked `preview_on_change`
 refresh after a short debounce. Other parameters enter the preview when the
-user selects **Preview changes**. Only the latest requested settings can update
+user selects **Preview changes**. Automatic renders use a fixed-size footer bar
+that stays visible between updates. Stages with manual parameters open a
+window-modal progress panel on their initial render and on **Preview changes**.
+Both bars animate while rendering because the renderer reports completion only.
+Only the latest requested settings can update
 the panes. **Save** on close commits the draft through the editor and last-used
 pipeline persistence. **Discard** closes the comparison and **Cancel** keeps it open.
 

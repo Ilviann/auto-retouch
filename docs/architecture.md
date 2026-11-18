@@ -31,9 +31,9 @@ services. See [desktop batch evidence](verification/desktop-batch.md).
 Milestone 5b connects the pipeline editor to the shared editor and operation
 registry. See [desktop pipeline evidence](verification/desktop-pipeline.md).
 The desktop workspace places the pipeline editor alongside a thumbnail grid,
-with folder paths above and estimates, export settings, and expandable job
-progress on the same screen. Thumbnail and picture commands return plain RGB
-display data. Qt owns the display objects and picture window. See
+with folder paths above, automatic disk status and export settings in the
+workspace, and a modal window for job progress and controls. Thumbnail and
+picture commands return plain RGB display data. Qt owns the display objects and picture window. See
 [desktop workspace evidence](verification/desktop-workspace.md).
 The diagnostics dialog reads retained and in-memory log events through a headless
 search service. Qt owns the worker thread dispatch, local time formatting, and

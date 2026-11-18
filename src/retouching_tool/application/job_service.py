@@ -175,6 +175,12 @@ class JobService:
             job = self._load(journal, job_id)
             return job, self._status(journal, job)
 
+    def cancel_remaining(self, job_id) -> JobStatus:
+        """Cancel a saved job at its current boundary and retire its finished checkpoints."""
+        control = JobControl()
+        control.cancel.set()
+        return self.run(job_id, control=control)
+
     def run(self, job_id, *, control: JobControl | None = None) -> JobStatus:
         """Run synchronously. A new call resumes an interrupted or paused job."""
         try:

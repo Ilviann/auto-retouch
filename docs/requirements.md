@@ -64,6 +64,9 @@ presets rather than fixed processing paths.
 | U52 | Application settings provide independent methods for downscaling and upscaling. Every stage that scales images can override either method on its own stage card. |
 | U53 | Each stage card shows the algorithm name, implementation version, enable checkbox, tagged In and Out rows, stage-specific controls, both stage previews, and move, remove and settings actions. Required and optional inputs are visually distinct. The Alibaba settings menu opens the publisher page and checks required model files. |
 | U54 | Stages that return changed pixels offer a blending slider from 0.0 to 1.0 to mix their input pixels with their result. |
+| U55 | Automatic stage preview updates use a fixed-size progress bar that stays visible while idle. Explicit updates use a modal or overlay progress panel. Showing progress keeps the comparison panes and settings in place. |
+| U56 | Update batch disk status automatically when the user chooses a source folder, chooses a destination folder, or rescans the source. |
+| U57 | **Start processing** opens a modal window showing progress, **Pause**, **Continue**, and **Break**. Ask for confirmation before breaking processing. |
 
 ### Feature priorities
 

@@ -10,25 +10,36 @@ batch preflight, saved jobs and worker process.
   Scanning reads headers, remembers the current paths, and lists every indexed
   JPEG. All entries start selected. An unreadable header blocks planning until
   the affected photo is repaired or explicitly excluded.
-- The destination must be an existing folder. **Check disk space** shows the
-  scratch and output estimates plus required and available bytes per volume.
-  A changed input selection, destination, or schedule requires a fresh check.
-  **Start batch** revalidates paths, free space and pipeline readiness, then
+- The destination must be an existing folder. Choosing folders, rescanning,
+  changing included photos, or switching schedules automatically refreshes
+  scratch and output estimates and required and available bytes per volume.
+  **Start processing** revalidates paths, free space and pipeline readiness, then
   freezes the pipeline and JPEG quality, chroma and progressive settings.
   If validation changes the pipeline definition, the job stays queued for review.
-- **Job** shows frozen settings, skipped operations, per-photo attempts and
+- The processing modal shows frozen settings, skipped operations, per-photo attempts and
   warnings, and committed progress. Staged progress shows work units and per-photo
   completed stages. Failed and canceled photos count toward units accounted for.
   Worker errors and incomplete diagnostic delivery have their own notice.
-- Pause and cancel apply to an active worker at its next scheduler boundary.
-  Closing the window during a run requests a pause and waits for the worker
-  to stop. **Open saved job** lists local journals by last update. Opening
-  a journal shows its committed state. Resume uses the frozen job settings.
+- **Pause** and a confirmed **Break** apply to an active worker at its next
+  scheduler boundary. Escape and the processing window's close control also
+  ask before breaking an active run. A paused job can be continued, closed
+  for later, or canceled with confirmation. Closing the main application
+  requests a pause and waits for the worker to stop. **Open saved job…** lists
+  local journals by last update. **Continue** uses the frozen job settings.
 - The Qt adapter uses one background thread for scanning, preflight, freezing
   jobs, launching workers and reading journals. Application commands and
   worker transport retain their plain-Python and local process boundaries.
 
 ## Focused verification
+
+On 2026-11-19, 12 focused Qt integration checks and two headless cancellation
+checks passed in the prepared environment. Generated JPEGs and local workers
+exercised both folder-selection orders, same-folder reselection, rescan after
+an output collision, and a destination change during an in-flight disk check.
+The modal checks covered progress, pause, continue, saved-job recovery and
+both answers to the Break confirmation. Headless checks verified that cancellation
+keeps completed exports and retires staged checkpoints. The paused processing
+window was also inspected in a Qt offscreen render.
 
 Verified on 2026-11-18 on Windows 11 build 26300, Python 3.14.7 and the prepared
 DirectML environment with PySide6 Essentials 6.12.0. Integration checks used

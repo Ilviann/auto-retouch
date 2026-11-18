@@ -1,7 +1,8 @@
 """Modal stage comparison, including local draft settings and preview scheduling."""
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+                               QProgressBar, QPushButton, QVBoxLayout)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
 from .photo_grid import pixmap
@@ -13,6 +14,27 @@ def confirm_resize(parent, message):
     buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
     return QMessageBox.question(parent, "Allow temporary resizing?", message, buttons,
                                 QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+
+
+class RenderProgressDialog(QDialog):
+    def __init__(self, preview):
+        super().__init__(preview)
+        self.setWindowTitle(preview.windowTitle())
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        layout = QVBoxLayout(self)
+        self.message = QLabel()
+        layout.addWidget(self.message)
+        progress = QProgressBar(accessibleName="Stage preview progress")
+        progress.setRange(0, 0)
+        progress.setMinimumWidth(260)
+        layout.addWidget(progress)
+        self.close_preview = QPushButton("Close preview", autoDefault=False)
+        self.close_preview.clicked.connect(self.reject)
+        layout.addWidget(self.close_preview, alignment=Qt.AlignmentFlag.AlignRight)
+
+    def reject(self):
+        # Closing the preview waits for its render before resolving the draft.
+        self.parentWidget().reject()
 
 
 class StagePreviewWindow(QDialog):
@@ -70,12 +92,19 @@ class StagePreviewWindow(QDialog):
             layout.addWidget(settings)
 
         self.feedback = QLabel(objectName="stagePreviewFeedback", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
+        self.feedback.hide()
         layout.addWidget(self.feedback)
         actions = QHBoxLayout()
-        self.pending = QLabel("Settings are waiting for Preview changes.", objectName="stagePreviewPending")
-        actions.addWidget(self.pending)
-        actions.addStretch()
         self._has_manual_settings = any(not p.preview_on_change for p in descriptor.editable_parameters)
+        self._manual_refresh = self._has_manual_settings
+        self.render_dialog = RenderProgressDialog(self)
+        self.live_progress = QProgressBar(self, accessibleName="Automatic preview progress", textVisible=False)
+        self.live_progress.setFixedSize(120, self.live_progress.sizeHint().height())
+        if self._has_manual_settings and not any(p.preview_on_change for p in descriptor.editable_parameters):
+            self.live_progress.hide()
+        actions.addWidget(self.live_progress)
+        self.status = QLabel()
+        actions.addWidget(self.status, 1)
         self.apply_preview = QPushButton("Preview changes", objectName="previewChanges", autoDefault=False)
         self.apply_preview.clicked.connect(self._preview_changes)
         actions.addWidget(self.apply_preview)
@@ -101,6 +130,7 @@ class StagePreviewWindow(QDialog):
 
     def _preview_changes(self):
         self._requested = self._draft.copy()
+        self._manual_refresh = self._has_manual_settings
         if self._failed:
             self._submitted = None
         self._live_timer.stop()
@@ -113,7 +143,6 @@ class StagePreviewWindow(QDialog):
         self._submitted = self._requested.copy()
         self._future = self._submit(self._submitted, self._resize_approvals)
         self._failed = False
-        self.feedback.setText("Rendering preview…")
         self._poll_timer.start()
         self._update_actions()
 
@@ -128,7 +157,9 @@ class StagePreviewWindow(QDialog):
         except RetouchingError as exc:
             self._failed = current
             if current:
+                self.render_dialog.hide()
                 self.feedback.setText(f"{exc.code}: {exc}")
+                self.feedback.show()
                 if (isinstance(exc, ResizeApprovalRequired) and not self._close_requested
                         and confirm_resize(self, f"{exc}\nAllow this for this stage preview?")):
                     self._resize_approvals += (exc.stage_id,)
@@ -142,17 +173,35 @@ class StagePreviewWindow(QDialog):
                 self.statistics.setText(measurements)
                 self.statistics.setVisible(bool(measurements))
                 self.feedback.clear()
-        self._update_actions()
+                self.feedback.hide()
+        # An approved resize retries the same request with the same progress UI.
+        if current and self._submitted is not None:
+            self._manual_refresh = False
         if self._close_requested:
             self._close_requested = False
             self.close_button.setEnabled(True)
+            self._update_actions()
             self.reject()
-        elif not self._live_timer.isActive():
-            self.start_preview()
+        else:
+            if not self._live_timer.isActive():
+                self.start_preview()
+            self._update_actions()
 
     def _update_actions(self):
         unapplied = self._draft != self._requested
-        self.pending.setVisible(unapplied)
+        busy = self._future is not None
+        message = "Finishing preview before closing…" if self._close_requested else "Rendering preview…"
+        self.render_dialog.message.setText(message)
+        self.render_dialog.close_preview.setEnabled(not self._close_requested)
+        self.render_dialog.setVisible(busy and self._manual_refresh)
+        self.live_progress.setRange(0, 0 if busy and not self._manual_refresh else 1)
+        self.live_progress.setValue(0)
+        if busy:
+            self.status.setText(message)
+        elif unapplied:
+            self.status.setText("Changes pending")
+        else:
+            self.status.setText("Preview failed" if self._failed else "Ready")
         self.apply_preview.setVisible(self._has_manual_settings or self._failed)
         self.apply_preview.setEnabled(not self._close_requested and (unapplied or self._failed))
 
@@ -161,7 +210,6 @@ class StagePreviewWindow(QDialog):
         if self._future is not None:
             self._close_requested = True
             self.close_button.setEnabled(False)
-            self.feedback.setText("Finishing the current preview before closing…")
             self._update_actions()
             return
         if self._draft != self._original:
@@ -178,5 +226,6 @@ class StagePreviewWindow(QDialog):
                     self._save(self._draft.copy())
                 except RetouchingError as exc:
                     self.feedback.setText(f"{exc.code}: {exc}")
+                    self.feedback.show()
                     return
         super().reject()

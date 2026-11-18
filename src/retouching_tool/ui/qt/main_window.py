@@ -54,9 +54,19 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(content)
 
     def _diagnostics(self, job_id=""):
-        dialog = DiagnosticsDialog(self, self.batch_panel.application,
-                                   self.batch_panel.show_diagnostic_photo, self.pipeline_page.show_diagnostic_operation,
+        monitor = self.batch_panel.monitor
+
+        def show_operation(event):
+            found = self.pipeline_page.show_diagnostic_operation(event)
+            if found and monitor.isVisible():
+                monitor.reject()
+            return found
+
+        dialog = DiagnosticsDialog(monitor if monitor.isVisible() else self, self.batch_panel.application,
+                                   self.batch_panel.show_diagnostic_photo, show_operation,
                                    job_id=job_id)
+        if monitor.isVisible() and not monitor.close_button.isEnabled():
+            dialog.operation.hide()
         dialog.finished.connect(dialog.deleteLater)
         dialog.open()
 

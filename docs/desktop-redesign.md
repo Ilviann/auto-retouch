@@ -22,8 +22,8 @@ evaluation. [Product requirements](requirements.md)
 batch settings. **Contact sheet** and **Inspect** share that state. Switching
 between them preserves the viewed photo, the grid position and batch inclusion.
 The pipeline inspector stays alongside either view. A persistent footer offers
-**Review batch**. **Jobs** holds running and saved jobs. Settings and Diagnostics
-are reachable from both areas.
+**Review batch**. **Start processing** opens the processing modal. The workspace
+also provides access to saved jobs, Settings and Diagnostics.
 
 - **Contact sheet.** Give the viewed tile a clear outline and batch inclusion
   its own fixed-corner checkbox. Show counts as “10 of 11 included.” Provide
@@ -69,12 +69,12 @@ are reachable from both areas.
   scrolling panels. Review shows enabled and skipped operations, schedule,
   filename collisions and required/free space per volume. Keep temporary and
   output estimates visible from indexing onward and sum them on shared volumes.
-  Show a specific remedy for a blocker. Offer **Start batch** when preflight
+  Show a specific remedy for a blocker. Offer **Start processing** when preflight
   succeeds. Put JPEG compression controls in a format-specific Export section.
   Every future exporter must preserve capture metadata, add tool provenance and
   verify the output before counting it as complete.
-- **Jobs.** Keep progress and Pause within reach from Workspace. In Jobs, show
-  the frozen pipeline, pause/resume/cancel controls, recoverable work, failures
+- **Jobs.** Show progress and Pause, Continue and confirmed Break in the processing
+  modal, along with the frozen pipeline, recoverable work, failures
   and verified exports. In sequential mode, identify the current photo. In
   staged mode, identify the operation and progress through its pass, with a
   separate exported count. Future edits apply to the editor and future jobs.
