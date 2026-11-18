@@ -515,20 +515,24 @@ class DesktopBatchTests(unittest.TestCase):
         self.until(lambda: panel._picture_window is not None, "original window did not open")
         original = panel._picture_window
         self.assertTrue(original.isWindow())
+        self.assertIs(self.qt.activeModalWidget(), original)
         self.assertTrue(original.windowTitle().startswith("Original"))
         self.assertIsNotNone(original.picture.pixmap())
         self.assertFalse(original.original_toggle.isVisible())
+        original.close()
+        self.assertIsNone(self.qt.activeModalWidget())
         panel.destination.setText(str(self.source))
         with patch.object(QFileDialog, "getExistingDirectory") as choose:
             panel.preview.click()
             choose.assert_not_called()
-        self.until(lambda: panel._picture_window is not None and panel._picture_window is not original,
-                   "whole pipeline window did not open")
+        self.until(lambda: panel._picture_window is not None, "whole pipeline window did not open")
         whole = panel._picture_window
+        self.assertIs(self.qt.activeModalWidget(), whole)
         self.assertTrue(whole.original_toggle.isVisible())
         self.assertIsNotNone(whole.findChild(QLabel, "previewStatistics"))
         self.assertFalse(whole.picture.pixmap().isNull())
         whole.close()
+        self.assertIsNone(self.qt.activeModalWidget())
         self.assertIsNone(panel._picture_window)
         self.assertIsNone(whole.original)
         self.assertIsNone(whole.result)

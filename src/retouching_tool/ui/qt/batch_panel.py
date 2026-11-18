@@ -427,8 +427,7 @@ class BatchPanel(QWidget):
         self._picture_window = window = PictureWindow(self.window(), preview)
         window.finished.connect(self._finish_picture)
         window.finished.connect(window.deleteLater)
-        window.show()
-        window.raise_()
+        window.open()
 
     def _finish_picture(self):
         self._picture_window = None

@@ -195,7 +195,8 @@ and place them at the paths shown on the card under the configured model folder
 | Stage card **Preview pipeline** | Compare the result of the preceding enabled stages against the result after applying the selected stage | Inspect the operation with its upstream changes and analysis context. |
 | Context analysis | Run selected analysis and display region/mask overlays or measurements | Inspect output even when pixels are unchanged. |
 
-Stage comparisons display the input and result side by side in a modal window.
+Original, whole-pipeline, and stage previews open as modal dialogs. Stage
+comparisons display the input and result side by side.
 The stage parameters are a local draft. Parameters marked `preview_on_change`
 refresh after a short debounce. Other parameters enter the preview when the
 user selects **Preview changes**. Only the latest requested settings can update
