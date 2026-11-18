@@ -18,6 +18,8 @@ def open_session(path, backend):
         options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
     providers = [(provider, {"arena_extend_strategy": "kSameAsRequested"})] if backend == "cuda" else [provider]
     try:
+        if backend == "cuda":
+            ort.preload_dlls()
         session = ort.InferenceSession(str(path), sess_options=options, providers=providers, enable_fallback=False)
     except Exception as exc:
         raise RetouchingError("AI_SESSION_FAILED", f"Cannot load the ONNX checkpoint on {provider}. "

@@ -11,11 +11,11 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, Q
                               QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
                               QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
 
-from ...errors import RetouchingError
+from ...errors import ResizeApprovalRequired, RetouchingError
 from ...imaging.jpeg import JpegSettings
 from .photo_grid import PhotoGrid
 from .picture_window import PictureWindow
-from .stage_preview_window import StagePreviewWindow
+from .stage_preview_window import StagePreviewWindow, confirm_resize
 
 
 def _label(name):
@@ -383,8 +383,8 @@ class BatchPanel(QWidget):
         comparison = self.application.preview_service.stage_comparison(self._index, image.image_id, stage_id,
                                                                        through_stage=through_stage)
 
-        def submit(parameters):
-            return self._executor.submit(comparison.render, uuid4().hex, parameters)
+        def submit(parameters, approvals):
+            return self._executor.submit(comparison.render, uuid4().hex, parameters, resize_approvals=approvals)
 
         if self._picture_window is not None:
             self._picture_window.close()
@@ -404,15 +404,17 @@ class BatchPanel(QWidget):
         self.pipeline_locked.emit(False)
         self._update_controls()
 
-    def _request_picture(self, *, process):
+    def _request_picture(self, *, process, resize_approvals=()):
         image = self._current_image()
         request_id = uuid4().hex
         self._preview_target = self._index, image.image_id, request_id
+        self._resize_approvals = resize_approvals
         if process:
             self.pipeline_locked.emit(True)
         self.setup_message.setText("Processing preview…" if process else "Opening original…")
         self._submit("preview" if process else "original", partial(
-            self.application.preview_service.picture, self._index, image.image_id, request_id, process=process))
+            self.application.preview_service.picture, self._index, image.image_id, request_id, process=process,
+            resize_approvals=resize_approvals))
 
     def _preview_still_current(self):
         index, image_id, _ = self._preview_target
@@ -432,14 +434,15 @@ class BatchPanel(QWidget):
     def _finish_picture(self):
         self._picture_window = None
 
-    def _create(self):
+    def _create(self, *, resize_approvals=()):
         args, options = self._plan_args()
+        self._resize_approvals = resize_approvals
         settings = JpegSettings(self.quality.value(), self.chroma.currentText(), self.progressive.isChecked())
         editor = self.application.pipeline_service
         reviewed = editor.status.definition
 
         def freeze():
-            job_id = self.application.job_service.create(*args, **options, settings=settings)
+            job_id = self.application.job_service.create(*args, **options, settings=settings, resize_approvals=resize_approvals)
             return job_id, editor.status.definition != reviewed
 
         self.pipeline_locked.emit(True)
@@ -538,6 +541,7 @@ class BatchPanel(QWidget):
         self._task = None
         picture = action in ("original", "preview")
         current = not picture or self._preview_still_current()
+        retrying_resize = False
         feedback = self.setup_message if action in ("scan", "preflight", "create") or picture else self.job_message
         try:
             result = future.result()
@@ -548,6 +552,15 @@ class BatchPanel(QWidget):
                     level="ERROR", exc_info=True, action=action, job_id=self._job_id)
             code = getattr(exc, "code", "DESKTOP_BATCH_COMMAND_FAILED")
             feedback.setText(f"{code}: {exc}" if current else "")
+            if isinstance(exc, ResizeApprovalRequired) and current and not self._closing:
+                prompt = str(exc) if action == "create" else f"{exc}\nAllow this for this preview?"
+                if confirm_resize(self, prompt):
+                    retrying_resize = True
+                    approvals = (*self._resize_approvals, exc.stage_id)
+                    if action == "create":
+                        self._create(resize_approvals=approvals)
+                    elif action == "preview":
+                        self._request_picture(process=True, resize_approvals=approvals)
             if action == "poll":
                 self._poll_failed = True
         else:
@@ -591,10 +604,10 @@ class BatchPanel(QWidget):
                 case "refresh" | "poll":
                     self._show_status(result)
         finally:
-            if action == "create":
+            if action == "create" and not retrying_resize:
                 self._plan = None
                 self._show_estimate()
-            if action in ("create", "preview"):
+            if action in ("create", "preview") and not retrying_resize:
                 self.pipeline_locked.emit(False)
 
     def _tick(self):

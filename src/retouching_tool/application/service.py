@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..cli import LaunchOptions
-from ..config import AppConfig, FolderSettings, LoggingSettings, parse_config
+from ..config import AppConfig, FolderSettings, LoggingSettings, ScalingSettings, parse_config
 from ..diagnostics.history import DiagnosticHistory
 from ..diagnostics.reports import DiagnosticReport, write_report
 from ..errors import RetouchingError
@@ -30,15 +30,15 @@ class ApplicationService:
         self.diagnostic_history = DiagnosticHistory(diagnostics, root / "logs")
         self._source_index = None
 
-    def startup(self, options: LaunchOptions, backend: str) -> StartupSnapshot:
+    def startup(self, options: LaunchOptions, backend: str, *, pytorch_backend=None) -> StartupSnapshot:
         notices = []
         state = self.root / ".state"
         editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
-                                 autosave=state / "last-pipeline.json")
+                                 autosave=state / "last-pipeline.json", scaling=self.config.scaling, pytorch_backend=pytorch_backend)
         self.pipeline_service = editor
         self.preview_service = PreviewService(self.root, editor, self.diagnostics)
         self.job_service = JobService(self.root, self.batch_service, editor, self.diagnostics)
-        self.job_worker = WorkerService(self.root, backend, self.diagnostics)
+        self.job_worker = WorkerService(self.root, backend, self.diagnostics, pytorch_backend=pytorch_backend)
         if options.sources:
             sources = options.sources
         else:
@@ -87,13 +87,16 @@ class ApplicationService:
         except OSError as exc:
             raise RetouchingError("STATE_WRITE_FAILED", f"Cannot save last-used settings in {state}; check permissions/free space: {exc}") from exc
         self.diagnostics.emit("STARTUP_STATE_READY", "Startup settings loaded; no processing started", component="application",
-                              source_count=len(sources), pipeline_origin=origin, backend=backend)
+                              source_count=len(sources), pipeline_origin=origin, backend=backend, pytorch_backend=pytorch_backend)
         return StartupSnapshot(sources, pipeline["name"], origin, backend, self.config.checkpoints,
-                               self.config.temporary, self.config.logs, tuple(notices), stages=editor.status.stages)
+                               self.config.temporary, self.config.logs, tuple(notices), stages=editor.status.stages,
+                               pytorch_backend=pytorch_backend)
 
-    def save_settings(self, folders: FolderSettings, logging: LoggingSettings) -> AppConfig:
+    def save_settings(self, folders: FolderSettings, logging: LoggingSettings,
+                      scaling: ScalingSettings | None = None) -> AppConfig:
         path = self.config.file
-        data = {"schema_version": 1, "paths": asdict(folders), "logging": asdict(logging)}
+        data = {"schema_version": 1, "paths": asdict(folders), "logging": asdict(logging),
+                "scaling": asdict(scaling or self.config.scaling)}
         try:
             config = parse_config(path, data)
             for name in ("checkpoints", "temporary", "logs"):
@@ -118,6 +121,7 @@ class ApplicationService:
                 raise
             raise error from exc
         self.config = config
+        self.pipeline_service.scaling = config.scaling
         self.batch_service.scratch = config.temporary
         self.diagnostics.emit("CONFIG_SAVED", "Updated application settings", component="configuration",
                               config_path=path, checkpoints=config.checkpoints, temporary=config.temporary,
@@ -160,7 +164,7 @@ class ApplicationService:
                 else:
                     photo_names.update(image.source.name for image in status.images)
                     photo_names.update(image.output.name for image in status.images)
-                    settings.update(mode=job.mode, recursive=job.recursive, backend=job.backend, versions=job.versions,
+                    settings.update(mode=job.mode, recursive=job.recursive, backend=job.backend, pytorch_backend=job.pytorch_backend, versions=job.versions,
                                     pipeline=_report_pipeline(job.pipeline), pipeline_sha256=job.pipeline_sha256,
                                     models=job.models, jpeg=asdict(job.settings), status=status.status,
                                     skipped_stages=[asdict(stage) for stage in status.skipped_stages],
@@ -174,10 +178,12 @@ class ApplicationService:
                                             for image in status.images])
             else:
                 pipeline = editor.status.definition
-                settings.update(backend=editor.backend, versions=runtime_versions(editor.backend),
+                settings.update(backend=editor.backend, pytorch_backend=editor.pytorch_backend,
+                                versions=runtime_versions(editor.backend, editor.pytorch_backend),
                                 pipeline=_report_pipeline(pipeline), models=model_manifests(pipeline, editor.catalog),
                                 config_path=str(config.file), checkpoints=str(config.checkpoints),
-                                temporary=str(config.temporary), logs=str(config.logs), logging=asdict(config.logging))
+                                temporary=str(config.temporary), logs=str(config.logs), logging=asdict(config.logging),
+                                scaling=asdict(config.scaling))
                 notes.append("Settings describe the current workspace at export time. Saved jobs have separate frozen settings.")
             return write_report(self.diagnostic_history, destination, settings, job_id=job_id,
                                 photo_names=photo_names, limitations=notes, cancelled=cancelled)

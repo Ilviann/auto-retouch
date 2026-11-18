@@ -3,10 +3,16 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
 
-from ...errors import RetouchingError
+from ...errors import ResizeApprovalRequired, RetouchingError
 from .photo_grid import pixmap
 from .picture_window import FittedPicture, statistics_text
-from .stage_card import parameter_control
+from .stage_card import ScalingControl, parameter_control
+
+
+def confirm_resize(parent, message):
+    buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    return QMessageBox.question(parent, "Allow temporary resizing?", message, buttons,
+                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
 
 
 class StagePreviewWindow(QDialog):
@@ -21,6 +27,7 @@ class StagePreviewWindow(QDialog):
         self._requested = self._original.copy()
         self._submitted = None
         self._future = None
+        self._resize_approvals = ()
         self._failed = False
         self._close_requested = False
         self._live_timer = QTimer(self, interval=120, singleShot=True)
@@ -56,8 +63,9 @@ class StagePreviewWindow(QDialog):
                 hint = ("Updates the preview automatically." if parameter.preview_on_change
                         else "Select Preview changes to update the preview.")
                 control.setToolTip(hint)
-                control.valueChanged.connect(lambda value, p=parameter, initial=control.value():
-                                             self._change(p, value, initial))
+                signal = control.currentIndexChanged if isinstance(control, ScalingControl) else control.valueChanged
+                signal.connect(lambda _, p=parameter, widget=control, initial=control.value():
+                               self._change(p, widget.value(), initial))
                 form.addRow(parameter.label, control)
             layout.addWidget(settings)
 
@@ -103,7 +111,7 @@ class StagePreviewWindow(QDialog):
         if self._close_requested or self._future is not None or self._requested == self._submitted:
             return
         self._submitted = self._requested.copy()
-        self._future = self._submit(self._submitted)
+        self._future = self._submit(self._submitted, self._resize_approvals)
         self._failed = False
         self.feedback.setText("Rendering preview…")
         self._poll_timer.start()
@@ -121,6 +129,10 @@ class StagePreviewWindow(QDialog):
             self._failed = current
             if current:
                 self.feedback.setText(f"{exc.code}: {exc}")
+                if (isinstance(exc, ResizeApprovalRequired) and not self._close_requested
+                        and confirm_resize(self, f"{exc}\nAllow this for this stage preview?")):
+                    self._resize_approvals += (exc.stage_id,)
+                    self._submitted = None
         else:
             if current:
                 self.before.show_pixels(pixmap(preview.original))

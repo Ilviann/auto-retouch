@@ -36,9 +36,9 @@ presets rather than fixed processing paths.
 | U24 | Provide a root-folder CMD script that checks or prepares the virtual environment. |
 | U25 | Provide a root-folder CMD script that runs the application with its virtual environment, with options to specify photo sources and load a specific pipeline instead of the last-used pipeline. |
 | U26 | Application configuration specifies the AI checkpoint folder and temporary-artifact folder. |
-| U27 | Only the setup script asks which inference backend to use, through an interactive menu with CUDA as default. |
-| U28 | Setup installs or updates support for only the chosen backend. |
-| U29 | The run script uses the backend installed by setup without offering backend selection. |
+| U27 | Only setup asks for devices. It prompts independently for ONNX Runtime (CUDA, DirectML, CPU) and PyTorch (CUDA, CPU). CUDA is the default at each prompt. |
+| U28 | Setup installs or updates the selected build of each runtime and their dependencies in the Python 3.14 virtual environment. |
+| U29 | Launch uses the two devices recorded by setup. The development machine uses ONNX Runtime DirectML and PyTorch CPU. |
 | U30 | Provide detailed logging, especially useful warning/error feedback, to support tool improvement and bug investigation. |
 | U31 | Use PySide6 with Qt Widgets for the initial desktop GUI. |
 | U32 | Keep the GUI separate behind an application boundary so another toolkit can replace it if problems arise. |
@@ -60,6 +60,8 @@ presets rather than fixed processing paths.
 | U48 | Provide an in-app UI for editing application configuration. |
 | U49 | Give batch photo retouching higher implementation priority than logging and application maintenance. |
 | U50 | Previews run without a destination folder. Keep preview images in memory and discard them when the preview window closes. |
+| U51 | The Alibaba skin-retouching stage accepts the incoming image or one crop per face when an upstream stage supplies face rectangles or masks. Its input limit is 5000 pixels on the longest side. Warn before reducing an oversized input. If the user continues, preserve aspect ratio, reduce its longest side to 5000 pixels, process it, and scale the result back to its exact input dimensions. |
+| U52 | Application settings provide independent methods for downscaling and upscaling. Every stage that scales images can override either method on its own stage card. |
 
 ### Feature priorities
 
@@ -105,8 +107,8 @@ Representative coverage and visual acceptance remain unreviewed.
 | F19 | Proposed script names are `prepare_env.cmd` and `run.cmd`. Preparation creates or verifies a project-local `.venv` using Python 3.14 and installs reproducible application dependencies. A check-only mode does not create or modify the environment. |
 | F20 | The launcher invokes `.venv\Scripts\python.exe` explicitly. It forwards repeatable `--source` paths and optional `--pipeline` and `--config` paths. It opens the application without automatically starting photo processing. |
 | F21 | Keep machine-local configuration separate from portable pipeline JSON. Resolve relative checkpoint/temporary paths against the configuration file's directory, and validate the effective folders before processing. |
-| F22 | Setup offers CUDA (default), DirectML, and CPU; installs/updates only the selected backend support plus shared application packages; and records the ready backend in environment-owned metadata. Switching removes previous backend-exclusive packages. |
-| F23 | Each neural operation declares backend/model-format support. Launch reads the environment's recorded backend; missing metadata, unavailable hardware, or incompatible stages produce actionable errors. No runtime backend flag, config override, automatic selection, or automatic backend fallback. |
+| F22 | Setup records both selected backends in environment-owned metadata after both pass execution checks. Switching removes conflicting runtime builds. |
+| F23 | Each neural operation declares its inference runtime, supported devices and model formats. Launch uses the two recorded devices. Missing metadata, unavailable hardware, or incompatible stages produce actionable errors. Backend selection is setup-only and automatic fallback is disabled. |
 | F24 | Persist structured logs with readable console/UI messages and correlated session/job/image/stage context. Include actionable warnings, exception tracebacks, retry outcomes, effective pipeline/model/backend versions, and stage timings. |
 | F25 | Provide searchable/filterable diagnostics, links to affected images/stages, copyable error details, and per-batch warning/error summaries. Tracebacks are available at normal logging verbosity. |
 | F26 | Log setup, launch, worker, and native-runtime failures where observable. Support configurable verbosity and bounded log rotation/retention outside processing scratch; report logging failures explicitly. |
@@ -310,10 +312,10 @@ only faces cannot by themselves satisfy this scope.
     resolution, invalid configuration, and configured checkpoint/temporary folders.
     Explicit invalid options must fail clearly without silently loading another
     pipeline or starting a job.
-13. **Setup backend:** verify the interactive menu and default CUDA selection,
+13. **Setup backends:** verify the two interactive menus and their CUDA defaults,
     repeated preparation, backend switching without conflicting packages, ready
     metadata, failed-update handling, and check-only validation without prompting.
-    Verify launch uses exactly the recorded backend, reports unavailable hardware
+    Verify launch uses the recorded device for each runtime, reports unavailable hardware
     or incompatible stages, and cannot override it through CLI/config or silently
     switch backends. Compare CPU/DirectML/CUDA model outputs in separately prepared
     setups on the same inputs where available, with documented tolerances and

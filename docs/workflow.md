@@ -29,7 +29,7 @@ provisioning. See
 | Stage | Deliverable | Completion evidence |
 | --- | --- | --- |
 | 1. Requirements | Confirmed constraints, proposed defaults, open decisions, acceptance criteria | User corrections incorporated; unknowns explicitly recorded. |
-| 1a. Runtime foundation | Python 3.14 metadata/dependency definitions, root environment/launch CMD scripts, setup-only backend menu with CUDA default, configuration and bootstrap logging, modular package skeleton | Clean/repeated preparation and backend switching; single-backend metadata; check-only behavior; launcher uses recorded backend; CLI/config precedence; startup error evidence; imports under `.venv` on Python 3.14. |
+| 1a. Runtime foundation | Python 3.14 dependency locks, root CMD scripts, independent ONNX Runtime and PyTorch setup menus with CUDA defaults, configuration and bootstrap logging | Clean and repeated preparation, switching, recorded backend pair, read-only validation, launch with the recorded devices, CLI/config precedence, startup errors, and imports under `.venv`. |
 | 2. Evaluation preparation | Local image manifest, preset rubric, benchmark procedure, candidate shortlist | Representative images and permission to use them; identifiable photos stay outside public version control. |
 | 3. Pipeline contract and engine feasibility | Versioned JSON, operation registry/lifecycle, conventional reference operation, neural-stage candidates, Natural/Beauty definitions | JSON round-trip and validation; user-reviewed retouching comparisons; measured RAM/VRAM and timing; dependency/weight inventory. |
 | 4. Recoverable batch schedulers | Folder validation, input manifest, sequential and staged execution, lossless artifacts, export, retry, pause/cancel/recovery | Approximately 500 images in both modes; mode-equivalence, disk/memory, model release, and interruption checks. |
@@ -81,8 +81,8 @@ the run script does not provide backend switching.
 Until level 3 is available, complete portable development work and mark CUDA
 acceptance as pending.
 
-On this machine, ordinary application development uses the prepared DirectML
-environment. Setup testing and backend changes are reserved for tasks that improve
+On this machine, ordinary application development uses the prepared ONNX Runtime
+DirectML and PyTorch CPU environment. Setup testing and backend changes are reserved for tasks that improve
 or fix setup scripts (user instruction, 2026-11-17). Do not rerun preparation or
 switch backends as a routine application check; headless core tests can run in
 the existing DirectML environment without invoking neural inference.

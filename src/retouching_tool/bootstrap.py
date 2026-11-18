@@ -30,9 +30,9 @@ def main(argv=None) -> int:
                 old.emit("LOG_CONFIG_FAILED", log.failure, level="WARNING")
             old.close()
         backend = validate_ready(root)
-        log.emit("BACKEND_READY", "Recorded backend passed actual inference check", **asdict(backend))
+        log.emit("BACKEND_READY", "ONNX Runtime and PyTorch executed on the devices selected in setup", **asdict(backend))
         service = ApplicationService(root, config, log)
-        snapshot = service.startup(options, backend.backend)
+        snapshot = service.startup(options, backend.backend, pytorch_backend=backend.pytorch_backend)
         from .ui.qt.startup import run_desktop
         log.emit("GUI_STARTED", "Opening Auto ReTouch; no batch started")
         result = run_desktop(snapshot, service)

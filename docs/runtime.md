@@ -6,9 +6,10 @@ virtual environment. Milestone 1a implements the script names, flags, configurat
 environment metadata, and startup skeleton below. Milestone 3a adds registered
 pipeline validation and reference-stage cards. The headless application service
 supports sequential and staged job execution and recovery, including execution in
-a worker subprocess. The worker uses the environment interpreter and backend
-selected at application startup. The Qt desktop window exposes batch setup and
-saved-job controls. Model provisioning awaits checkpoint selection. See the
+a worker subprocess. The worker uses the environment interpreter and both backends
+recorded by setup. The Qt desktop window exposes batch setup and
+saved-job controls. The foreground and Alibaba retouching stages resolve manually
+installed, checksum-verified checkpoints from the configured model folder. See the
 [runtime evidence](verification/runtime-foundation.md) and
 [desktop batch evidence](verification/desktop-batch.md).
 
@@ -44,66 +45,56 @@ checking the installed pins and codec support. See
 The user reports an AMD Ryzen 7 7840HS APU with Radeon 780M Graphics, DirectX 12
 Ultimate capability, and no NVIDIA CUDA GPU. Keep the RTX 20-series / 6 GB production
 target and make most development validation possible through CPU and AMD backends.
-The setup menu selects one installed backend. Model/runtime compatibility is
-still subject to validation. A generated Add graph has executed on CPU and
-DirectML; this establishes neither portrait-model compatibility nor CUDA acceptance.
+Setup selects one device per runtime. On the Radeon 780M development machine,
+select DirectML for ONNX Runtime and CPU for PyTorch. Use the prepared environment
+for ordinary development. Run preparation or change devices for setup work only.
 
-Development-machine policy (confirmed 2026-11-17): use the prepared DirectML
-environment for ordinary application development. Run setup tests and change
-computing backends only for setup-script improvements or bug fixes. Routine
-application verification must use the existing environment without preparation
-or backend switching.
-
-| Profile | Intended use | Candidate inference package |
+| Runtime | Setup choices | Development machine |
 | --- | --- | --- |
-| `cpu` | Portable development, automated functional tests, reference inference | ONNX Runtime CPU; native PyTorch CPU if the chosen model needs it. |
-| `directml` | AMD GPU integration tests on this Windows machine | ONNX Runtime DirectML for compatible ONNX models. |
-| `cuda` | NVIDIA production and minimum-hardware validation | ONNX Runtime CUDA or a model-specific native PyTorch CUDA adapter. |
+| ONNX Runtime | CUDA (default), DirectML, CPU | DirectML |
+| PyTorch | CUDA (default), CPU | CPU |
 
-Running `prepare_env.cmd` interactively asks which backend to install or update:
+Each neural operation declares its inference runtime and supported devices.
+For example, ONNX foreground segmentation can run on the Radeon GPU in the
+same pipeline as a native PyTorch operation on the CPU. Windows CPython 3.14
+has native PyTorch CPU and CUDA builds. The available `torch-directml` wheels
+target older Python versions. [PyTorch release matrix](https://github.com/pytorch/pytorch/blob/main/RELEASE.md)
+and [torch-directml release files](https://pypi.org/project/torch-directml/#files).
+
+Running `prepare_env.cmd` displays two prompts.
 
 ```text
-Select inference backend:
+Select ONNX Runtime backend:
   1. CUDA (default)
   2. DirectML
   3. CPU
 Choice [1]:
+
+Select PyTorch backend:
+  1. CUDA (default)
+  2. CPU
+Choice [1]:
 ```
 
-Pressing Enter chooses CUDA. Show the currently installed backend when one exists,
-but keep CUDA as the menu default. Only setup offers backend selection; no backend
-command-line flag or application configuration override is exposed.
+Setup collects both choices before updating an existing environment. Each Enter
+accepts CUDA for that prompt. Setup installs the two selected hash-pinned builds
+and shared packages in the project-local `.venv`. Switching devices removes
+conflicting builds before installation. Checkpoints stay in the configured folder.
 
-Install/update shared application dependencies and support for only the selected
-backend, using its complete pinned dependency set under `requirements/`. Maintain
-one environment in `.venv`. If the selection changes, remove the previous backend's
-exclusive packages rather than accumulating alternative runtime installations.
-Do not co-install conflicting ONNX Runtime package variants that supply the same
-`onnxruntime` import package. Checkpoints and temporary data are not removed by a
-backend change.
+Setup writes schema 2 of `.venv/retouching-backend.json` after both execution
+probes pass. It records `onnx_backend`, `pytorch_backend`, and the hash covering
+the shared and selected locks. Upgrading an environment with single-backend
+metadata requires running setup once and answering both prompts.
 
-Record the selected backend and dependency-set identity in environment-owned
-metadata, proposed as `.venv/retouching-backend.json`. Record readiness only after
-preparation and validation succeed. A failed update/switch must not leave stale
-metadata claiming the environment is ready. This metadata is managed by setup,
-not a user-facing backend setting.
+`prepare_env.cmd --check` validates the recorded pair without prompting or
+changing the environment. The ONNX probe verifies the provider in the execution
+profile. The PyTorch probe checks the installed build, tensor device, and result.
+Unavailable devices produce an error with the runtime and selected device.
 
-`prepare_env.cmd --check` validates the recorded backend without a selection prompt
-or modifying the environment. Missing/inconsistent metadata is an actionable setup
-error, not a reason to guess a backend from installed package names.
-
-Preparation/check diagnostics report Python version, profile, installed runtime,
-available providers/devices, and a small actual inference result for the selected
-compute backend. GPU availability is separate from package installation success.
-Do not report an explicit GPU check as successful if it executed only on CPU.
-
-`run.cmd` reads the prepared environment's metadata and uses that backend only.
-It has no backend menu, backend flag, automatic selection, or automatic fallback.
-If that backend is unavailable or incompatible, show an error and direct the user
-to rerun setup. Validate the pipeline's operations against the installed backend
-before processing. Ordinary CPU image operations remain available in every setup;
-they do not represent a change of inference backend. Report any runtime-internal
-CPU model partitions without treating them as proof of complete GPU execution.
+Launch, previews and workers use the recorded pair. Pipeline validation checks
+each stage against its own runtime's selection. Saved jobs record both choices
+and package versions. Earlier ONNX-only jobs can resume with their original
+ONNX device and versions. Device selection is available only during setup.
 Snapshot actual providers, devices, precision, and runtime versions per job;
 include them in cache identities and validation records. Portable pipeline JSON
 and user-editable app configuration contain no backend-selection setting.
@@ -133,8 +124,8 @@ Proposed root script: `prepare_env.cmd`.
 3. Create `.venv` when absent. If an existing environment is incompatible or
    damaged, stop with a remediation message instead of silently deleting it or
    falling back to system packages.
-4. Ask for the backend with CUDA as default, then install/synchronize only its
-   locked backend support, shared dependencies, and application package through
+4. Ask for the ONNX Runtime backend and the PyTorch backend. Both default to CUDA.
+   Install their locked builds, shared dependencies, and application package through
    that environment's interpreter. Repeated preparation must be safe and retain a
    compatible environment rather than needlessly rebuilding it.
 5. Verify package versions, dependency consistency, and required imports. Report
@@ -165,7 +156,7 @@ Proposed root script: `run.cmd`.
   working directory for command-line path resolution.
 - Open the desktop application with the requested settings. Launch does not start
   automatic processing or bypass destination/pipeline validation.
-- Use the backend recorded by setup. Missing backend support or incompatible
+- Use the devices recorded by setup. Missing backend support or incompatible
   hardware is an error; changing it requires rerunning `prepare_env.cmd`.
 - Preserve setup/launch console errors and diagnostic file locations, including
   failures before environment/configuration/UI initialization. Full context and
@@ -212,8 +203,8 @@ collision resolution before processing. Do not silently flatten or overwrite.
 
 ## Machine-local configuration
 
-The desktop **Settings…** dialog shows the active configuration file, installed
-backend, configured folder values and effective paths. Edit the checkpoint,
+The desktop **Settings…** dialog shows the active configuration file, both
+runtime devices, configured folder values and effective paths. Edit the checkpoint,
 temporary-artifact and log folders, minimum log severity, size limits and
 retention period. Cancel discards the draft. Save validates folders and logging
 options, then atomically replaces the active file, including an explicit
@@ -286,7 +277,7 @@ The default file is `<app-root>\config.json`, with a versioned
 Settings are separate layers: application config supplies machine-local folders;
 CLI options override the initial source/pipeline/config selection; pipeline JSON
 supplies ordered operations and parameters; a job snapshots the effective result.
-The prepared environment supplies its single installed backend.
+The prepared environment supplies each runtime's selected device.
 UI edits affect current settings and future jobs, not already running jobs.
 
 ## References

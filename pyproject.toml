@@ -12,3 +12,6 @@ dependencies = ["PySide6-Essentials==6.12.0", "numpy==2.5.5", "Pillow==13.0.0", 
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"retouching_tool.operations.alibaba_networks" = ["LICENSE"]

@@ -8,6 +8,13 @@ from .json_io import read_json
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 LOG_LIMITS = {"max_file_mb": 1024, "max_total_mb": 10240, "retention_days": 3650}
+SCALING_METHODS = ("bilinear", "nearest")
+
+
+@dataclass(frozen=True)
+class ScalingSettings:
+    downscale: str = "bilinear"
+    upscale: str = "bilinear"
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,7 @@ class AppConfig:
     logging: LoggingSettings
     using_defaults: bool
     folders: FolderSettings
+    scaling: ScalingSettings = ScalingSettings()
 
 
 def _keys(data, allowed, label):
@@ -49,7 +57,7 @@ def load_config(root: Path, explicit: Path | None = None) -> AppConfig:
 
 
 def parse_config(path: Path, data, *, defaults=False) -> AppConfig:
-    _keys(data, ["schema_version", "paths", "logging"], "configuration")
+    _keys(data, ["schema_version", "paths", "logging", "scaling"], "configuration")
     if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
         raise RetouchingError("CONFIG_INVALID", "Configuration schema_version must be 1")
     paths = data.get("paths", {})
@@ -83,4 +91,10 @@ def parse_config(path: Path, data, *, defaults=False) -> AppConfig:
             raise RetouchingError("CONFIG_INVALID", f"logging.{name} must be an integer in 1..{maximum}")
     if logging_settings.max_total_mb < logging_settings.max_file_mb:
         raise RetouchingError("CONFIG_INVALID", "logging.max_total_mb must be at least max_file_mb")
-    return AppConfig(path, **resolved, logging=logging_settings, using_defaults=defaults, folders=folders)
+    scaling_data = data.get("scaling", {})
+    _keys(scaling_data, ["downscale", "upscale"], "scaling")
+    scaling = ScalingSettings(**scaling_data)
+    for direction in ("downscale", "upscale"):
+        if getattr(scaling, direction) not in SCALING_METHODS:
+            raise RetouchingError("CONFIG_INVALID", f"scaling.{direction} must be one of {', '.join(SCALING_METHODS)}")
+    return AppConfig(path, **resolved, logging=logging_settings, using_defaults=defaults, folders=folders, scaling=scaling)

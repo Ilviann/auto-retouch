@@ -36,10 +36,12 @@ def reference_registry():
 
 
 def application_registry():
+    from ..operations.alibaba_skin import DESCRIPTOR as ALIBABA_SKIN, AlibabaSkin
     from ..operations.auto_exposure import DESCRIPTOR as AUTO_EXPOSURE, AutoExposure
     from ..operations.person_foreground import DESCRIPTOR, PersonForeground
 
     registry = reference_registry()
     registry.register(AUTO_EXPOSURE, AutoExposure)
     registry.register(DESCRIPTOR, PersonForeground)
+    registry.register(ALIBABA_SKIN, AlibabaSkin)
     return registry

@@ -23,7 +23,7 @@ from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
-from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter
+from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS
 from retouching_tool.ui.qt.main_window import MainWindow
 from retouching_tool.ui.qt.stage_card import StageCard
 
@@ -47,14 +47,15 @@ class QtIntegrationTests(unittest.TestCase):
     def test_window_displays_effective_state_and_warning(self):
         path = Path("D:/пример с пробелами")
         snapshot = StartupSnapshot((path,), "Explicit test", "test.json", "cpu", path, path, path,
-                                   ("LOG_WRITE_FAILED: simulated persistent warning",))
+                                   ("LOG_WRITE_FAILED: simulated persistent warning",), pytorch_backend="cuda")
         window = MainWindow(snapshot)
         try:
             window.show()
             self.app.processEvents()
             details = window.findChild(QPlainTextEdit, "startupDetails").toPlainText()
             self.assertIn("Explicit test", details)
-            self.assertIn("Backend: cpu", details)
+            self.assertIn("ONNX Runtime Backend: cpu", details)
+            self.assertIn("PyTorch Backend: cuda", details)
             self.assertIn("пример с пробелами", details)
             self.assertIn("LOG_WRITE_FAILED", details)
             self.assertIn("Auto ReTouch", window.windowTitle())
@@ -196,7 +197,8 @@ class QtIntegrationTests(unittest.TestCase):
                 ("directml",), "https://example.test/model", "Test-authored synthetic bytes; no production weights"),))
             editor = PipelineService(root / "models", "directml", log, catalog=catalog, autosave=root / "last.json")
             skin = ContextSpec("test.skin", pixel_sensitive=False)
-            descriptor = OperationDescriptor("test.model", 1, "Synthetic analysis fixture", parameters=(Parameter("strength", "Strength", .5, 0, 1),),
+            descriptor = OperationDescriptor("test.model", 1, "Synthetic analysis fixture",
+                                              parameters=(Parameter("strength", "Strength", .5, 0, 1), *SCALING_PARAMETERS),
                                               provides=(skin,), model_refs=("fixture",))
             editor.registry.register(descriptor, None)
             editor.registry.register(OperationDescriptor("test.consumer", 1, "Synthetic context consumer", requires=(skin,)), None)
@@ -230,6 +232,11 @@ class QtIntegrationTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(editor.status.definition.stages[0].parameter("strength"), .7)
                 card = window.findChild(StageCard, "stage-model")
+                method = card.findChild(QComboBox, "parameter-downscale")
+                self.assertEqual(method.currentText(), "Use app setting")
+                method.setCurrentIndex(method.findData("nearest"))
+                method.activated.emit(method.currentIndex())
+                self.assertEqual(editor.status.definition.stages[0].parameter("downscale"), "nearest")
                 # Explicit navigation alone opens a publisher page; rechecks never do.
                 with patch("retouching_tool.ui.qt.stage_card.QDesktopServices.openUrl", return_value=True) as open_url:
                     card.findChild(QPushButton, "modelPage").click()

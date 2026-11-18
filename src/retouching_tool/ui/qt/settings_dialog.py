@@ -8,8 +8,9 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox,
                                QVBoxLayout)
 
-from ...config import FolderSettings, LoggingSettings, LOG_LEVELS, LOG_LIMITS
+from ...config import FolderSettings, LoggingSettings, ScalingSettings, LOG_LEVELS, LOG_LIMITS
 from ...errors import RetouchingError
+from .stage_card import ScalingControl
 
 
 def _label(text):
@@ -30,7 +31,8 @@ class SettingsDialog(QDialog):
         location.addRow("Configuration file", _label(str(config.file)))
         if config.using_defaults:
             location.addRow("", _label("Save creates this file."))
-        location.addRow("Installed backend", _label(application.pipeline_service.backend))
+        location.addRow("ONNX Runtime backend", _label(application.pipeline_service.backend))
+        location.addRow("PyTorch backend", _label(application.pipeline_service.pytorch_backend or "Unconfigured"))
         layout.addLayout(location)
 
         self.folder_group = QGroupBox("Folders")
@@ -47,6 +49,16 @@ class SettingsDialog(QDialog):
             folders.addRow(title, row)
             folders.addRow("", _label(f"In use: {getattr(config, name)}"))
         layout.addWidget(self.folder_group)
+
+        self.scaling_group = QGroupBox("Image scaling")
+        scaling_form = QFormLayout(self.scaling_group)
+        self.scaling = {}
+        for name, title in (("downscale", "Downscaling"), ("upscale", "Upscaling")):
+            control = ScalingControl(objectName=f"default-{name}")
+            control.setValue(getattr(config.scaling, name))
+            self.scaling[name] = control
+            scaling_form.addRow(title, control)
+        layout.addWidget(self.scaling_group)
 
         self.log_group = QGroupBox("Logging")
         log = QFormLayout(self.log_group)
@@ -86,11 +98,13 @@ class SettingsDialog(QDialog):
         logging = LoggingSettings(self.level.currentText(), **{name: spin.value() for name, spin in self.limits.items()})
         # Folder probes and model checksums can take time. Keep the event loop and job monitor responsive.
         self.folder_group.setEnabled(False)
+        self.scaling_group.setEnabled(False)
         self.log_group.setEnabled(False)
         self.buttons.setEnabled(False)
         self.message.setText("Validating and saving settings…")
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="settings")
-        self.pending = executor.submit(self.application.save_settings, folders, logging)
+        scaling = ScalingSettings(**{name: control.value() for name, control in self.scaling.items()})
+        self.pending = executor.submit(self.application.save_settings, folders, logging, scaling)
         executor.shutdown(wait=False)
         self.timer.start()
 
@@ -108,6 +122,7 @@ class SettingsDialog(QDialog):
                                                   config_path=self.application.config.file)
             self.message.setText(f"{getattr(exc, 'code', 'CONFIG_SAVE_FAILED')}: {exc}")
             self.folder_group.setEnabled(True)
+            self.scaling_group.setEnabled(True)
             self.log_group.setEnabled(True)
             self.buttons.setEnabled(True)
         else:

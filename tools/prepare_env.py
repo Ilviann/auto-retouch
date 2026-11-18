@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from retouching_tool import __version__
 from retouching_tool.diagnostics.service import Diagnostics, redact
-from retouching_tool.environment import (RUNTIMES, lock_identity, probe_backend, read_ready_backend,
+from retouching_tool.environment import (RUNTIMES, lock_identity, probe_backends, read_ready_backends, locked_versions,
                                         validate_packages, validate_python, validate_venv)
 from retouching_tool.errors import RetouchingError
 from retouching_tool.json_io import atomic_json
@@ -41,16 +41,22 @@ def run(command, log, *, timeout=900):
     log.emit("SETUP_COMMAND_OK", detail or "Command succeeded", component="setup", exit_code=0)
 
 
-def select_backend(input_fn=input):
-    print("Select inference backend:\n  1. CUDA (default)\n  2. DirectML\n  3. CPU")
+def select_backend(runtime, choices, input_fn=input):
+    print(f"Select {runtime} backend:")
+    for index, device in enumerate(choices, 1):
+        label = "DirectML" if device == "directml" else device.upper()
+        print(f"  {index}. {label}{' (default)' if index == 1 else ''}")
     for _ in range(3):
         try:
             choice = input_fn("Choice [1]: ").strip()
         except EOFError as exc:
             raise RetouchingError("SETUP_INPUT_REQUIRED", "Setup requires an interactive backend selection; rerun prepare_env.cmd in a console") from exc
-        if choice in ("", "1", "2", "3"):
-            return {"": "cuda", "1": "cuda", "2": "directml", "3": "cpu"}[choice]
-        print("Enter 1, 2, or 3.")
+        if choice == "":
+            return choices[0]
+        for index, device in enumerate(choices, 1):
+            if choice == str(index):
+                return device
+        print(f"Enter a number from 1 to {len(choices)}.")
     raise RetouchingError("SETUP_SELECTION_INVALID", "No valid backend selected after three attempts; rerun prepare_env.cmd")
 
 
@@ -71,29 +77,35 @@ def prepare(root, log, *, check=False, input_fn=input, runner=run):
         venv.EnvBuilder(with_pip=True).create(environment)
         log.emit("ENVIRONMENT_CREATED", "Created project-local Python 3.14 environment", component="setup")
     if check:
-        backend = read_ready_backend(root)
+        backend, pytorch_backend = read_ready_backends(root)
     else:
         if metadata.exists():
             # Display even stale metadata without trusting readiness.
             try:
-                print(f"Currently prepared backend: {read_ready_backend(root)}")
+                onnx, pytorch = read_ready_backends(root)
+                print(f"Currently prepared: ONNX Runtime {onnx}, PyTorch {pytorch}")
             except RetouchingError as exc:
                 log.emit("BACKEND_METADATA_STALE", str(exc), level="WARNING", component="setup")
-        backend = select_backend(input_fn)
+        backend = select_backend("ONNX Runtime", ("cuda", "directml", "cpu"), input_fn)
+        pytorch_backend = select_backend("PyTorch", ("cuda", "cpu"), input_fn)
         # Readiness is invalidated BEFORE any package update, including same-profile updates.
         metadata.unlink(missing_ok=True)
-        log.emit("BACKEND_SELECTED", f"Preparing {backend}; readiness invalidated until checks pass", component="setup", backend=backend)
-        runner([str(python), "-B", str(root / "tools" / "prepare_env.py"), "--internal-remove-conflicts", backend], log, timeout=120)
+        log.emit("BACKEND_SELECTED", f"Preparing ONNX Runtime {backend} and PyTorch {pytorch_backend}",
+                 component="setup", backend=backend, pytorch_backend=pytorch_backend)
+        runner([str(python), "-B", str(root / "tools" / "prepare_env.py"), "--internal-remove-conflicts", backend, pytorch_backend], log, timeout=120)
         runner([str(python), "-m", "pip", "install", "--require-hashes", "--only-binary=:all:", "--no-deps",
-                "-r", str(root / "requirements" / f"{backend}.lock")], log)
+                "-r", str(root / "requirements" / f"{backend}.lock"),
+                "-r", str(root / "requirements" / f"pytorch-{pytorch_backend}.lock")], log,
+               timeout=14400 if pytorch_backend == "cuda" else 1800)
         runner([str(python), "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", str(root)], log)
     runner([str(python), "-m", "pip", "check"], log, timeout=60)
-    runner([str(python), "-B", str(root / "tools" / "prepare_env.py"), "--internal-probe", backend], log, timeout=120)
+    runner([str(python), "-B", str(root / "tools" / "prepare_env.py"), "--internal-probe", backend, pytorch_backend], log, timeout=120)
     if not check:
-        atomic_json(metadata, {"schema_version": 1, "ready": True, "backend": backend,
-                               "lock_sha256": lock_identity(root, backend), "app_version": __version__,
+        atomic_json(metadata, {"schema_version": 2, "ready": True, "onnx_backend": backend, "pytorch_backend": pytorch_backend,
+                               "lock_sha256": lock_identity(root, backend, pytorch_backend), "app_version": __version__,
                                "python": sys.version, "prepared_at": datetime.now(timezone.utc).isoformat()})
-    log.emit("ENVIRONMENT_READY", f"{backend} environment {'checked (no environment changes)' if check else 'prepared'}", component="setup", backend=backend)
+    log.emit("ENVIRONMENT_READY", f"ONNX Runtime {backend}, PyTorch {pytorch_backend}: {'checked' if check else 'prepared'}",
+             component="setup", backend=backend, pytorch_backend=pytorch_backend)
 
 
 def main(argv=None):
@@ -107,9 +119,9 @@ def main(argv=None):
             validate_venv(ROOT)
             if argv == ["--internal-environment-check"]:
                 return 0
-            if len(argv) != 2 or argv[1] not in RUNTIMES:
+            if len(argv) != 3 or argv[1] not in RUNTIMES or argv[2] not in ("cuda", "cpu"):
                 raise RetouchingError("SETUP_ARGUMENT_INVALID", "Invalid internal setup invocation")
-            backend = argv[1]
+            backend, pytorch_backend = argv[1:]
             if argv[0] == "--internal-remove-conflicts":
                 from importlib import metadata
                 installed = []
@@ -121,11 +133,18 @@ def main(argv=None):
                         continue
                 if any(p != RUNTIMES[backend] for p in installed):
                     run([sys.executable, "-m", "pip", "uninstall", "-y", *installed], log)
+                try:
+                    torch_version = metadata.version("torch")
+                except metadata.PackageNotFoundError:
+                    torch_version = None
+                if torch_version and torch_version != locked_versions(ROOT, backend, pytorch_backend)["torch"]:
+                    run([sys.executable, "-m", "pip", "uninstall", "-y", "torch"], log)
             elif argv[0] == "--internal-probe":
-                validate_packages(ROOT, backend)
+                validate_packages(ROOT, backend, pytorch_backend)
                 from retouching_tool.ui.qt.startup import verify_imports
                 log.emit("GUI_IMPORT_OK", "Qt Widgets imported without creating a GUI", component="setup", qt_version=verify_imports())
-                log.emit("BACKEND_PROBE_OK", "Generated Add graph executed on selected provider", component="setup", **asdict(probe_backend(backend)))
+                log.emit("BACKEND_PROBE_OK", "ONNX Runtime and PyTorch executed Add on the selected devices",
+                         component="setup", **asdict(probe_backends(backend, pytorch_backend)))
             else:
                 raise RetouchingError("SETUP_ARGUMENT_INVALID", "Unknown internal setup command")
             return 0

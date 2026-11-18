@@ -91,7 +91,8 @@ class PipelinePanel(QWidget):
     def _show_details(self, name):
         snapshot = self.snapshot
         text = "\n".join([
-            f"Pipeline: {name}", f"Loaded from: {self.origin}", f"Backend: {snapshot.backend}", "",
+            f"Pipeline: {name}", f"Loaded from: {self.origin}", f"ONNX Runtime Backend: {snapshot.backend}",
+            f"PyTorch Backend: {snapshot.pytorch_backend or 'Unconfigured'}", "",
             "Sources at launch:", *([str(p) for p in snapshot.sources] or ["No sources selected"]), "",
             f"Checkpoints: {self.config.checkpoints}", f"Temporary artifacts: {self.config.temporary}",
             f"Logs: {self.config.logs}",

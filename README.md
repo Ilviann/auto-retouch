@@ -12,8 +12,8 @@ application packages in a project-local virtual environment. Root CMD scripts
 will prepare/check that environment and launch the app with source/pipeline
 options. Configuration specifies checkpoint and temporary-artifact folders.
 **Settings…** edits local folders, logging severity, size limits, and retention.
-Setup asks for CUDA (default), DirectML, or CPU and installs only the selected
-backend support plus shared dependencies. Launch always uses the recorded backend.
+Setup asks separately for the ONNX Runtime backend (CUDA, DirectML, or CPU) and
+the PyTorch backend (CUDA or CPU). Each stage uses its runtime's recorded device.
 NVIDIA acceptance requires testing on actual NVIDIA hardware.
 Open **Diagnostics…** to search retained local logs and copy technical details.
 **Job diagnostics…** in the monitor opens the selected job's warnings and errors.
@@ -40,7 +40,9 @@ are implemented. The Qt window shows startup settings and loaded stage cards wit
 on/off controls, numeric parameters, asset errors, and dependency status. Headless
 services support add/remove/reorder, atomic JSON save/load, and last-used restore.
 CPU statistics and manual exposure are contract references. Natural and Beauty
-presets and portrait models remain pending.
+presets remain pending. To try the local CPU retouching model, add **Alibaba skin
+retouching** and use its preview to compare the original and edited image. The
+stage offers strength and scaling controls. [Model files and stage behavior](docs/stages.md#alibaba-skin-retouching-stage).
 
 The 3b storage slice now uses uncompressed float32 TIFF intermediates with typed
 context manifests, immutable source metadata blobs, checksum validation and
@@ -60,13 +62,14 @@ history** opens the monitor below the batch controls. See
 [desktop workspace verification](docs/verification/desktop-workspace.md).
 
 Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
-`prepare_env.cmd` and choose a backend (Enter selects CUDA). Setup installs the
-hash-pinned dependency set in `.venv` and validates actual provider execution.
+`prepare_env.cmd` and answer both prompts. Enter selects CUDA at either prompt.
+Setup installs the hash-pinned packages in `.venv` and tests execution on both devices.
 GPU setup fails when its provider cannot execute; it never silently falls back.
 CUDA also requires compatible NVIDIA drivers/CUDA/cuDNN runtime provisioning;
 that profile has not been hardware-tested here.
 
-On this development machine, **use the existing DirectML environment**. Rerun
+On this development machine, choose **2. DirectML** for ONNX Runtime and
+**2. CPU** for PyTorch. Use the prepared environment for development. Rerun
 setup or change backends only for setup improvements or bug fixes. Launch with
 `run.cmd`; `run.cmd --help` lists repeatable `--source`, `--pipeline`, and `--config`
 options. Launch never installs packages or starts processing automatically.

@@ -6,6 +6,7 @@ import json
 import math
 
 from ..errors import RetouchingError
+from ..config import SCALING_METHODS
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,22 @@ class Parameter:
 
 
 @dataclass(frozen=True)
+class ScalingParameter:
+    name: str
+    label: str
+    default: str = "inherit"
+    preview_on_change: bool = False
+
+    def validate(self, value):
+        if value not in ("inherit", *SCALING_METHODS):
+            raise RetouchingError("PARAMETER_INVALID", f"Unknown {self.name} method. Choose an app setting or a supported filter.")
+        return value
+
+
+SCALING_PARAMETERS = (ScalingParameter("downscale", "Downscaling"), ScalingParameter("upscale", "Upscaling"))
+
+
+@dataclass(frozen=True)
 class ContextSpec:
     key: str
     version: int = 1
@@ -31,11 +48,20 @@ class ContextSpec:
 
 
 @dataclass(frozen=True)
+class ResizeLimit:
+    longest_side: int
+    bypass_if_zero: str | None = None
+
+    def applies(self, stage):
+        return stage.enabled and (self.bypass_if_zero is None or stage.parameter(self.bypass_if_zero) != 0)
+
+
+@dataclass(frozen=True)
 class OperationDescriptor:
     operation: str
     version: int
     title: str
-    parameters: tuple[Parameter, ...] = ()
+    parameters: tuple[Parameter | ScalingParameter, ...] = ()
     requires: tuple[ContextSpec, ...] = ()
     optional: tuple[ContextSpec, ...] = ()
     provides: tuple[ContextSpec, ...] = ()
@@ -46,6 +72,15 @@ class OperationDescriptor:
     model_refs: tuple[str, ...] = ()
     backends: tuple[str, ...] = ("cpu", "directml", "cuda")
     representation: str = "linear-srgb-float32"
+    inference_runtime: str = "onnxruntime"
+    resize_limit: ResizeLimit | None = None
+
+    def execution_backend(self, onnx_backend, pytorch_backend):
+        if self.inference_runtime == "onnxruntime":
+            return onnx_backend
+        if self.inference_runtime == "pytorch":
+            return pytorch_backend
+        raise ValueError(f"Unknown inference runtime {self.inference_runtime}")
 
 
 @dataclass(frozen=True)
@@ -54,16 +89,21 @@ class StageDefinition:
     operation: str
     operation_version: int
     enabled: bool
-    parameters: tuple[tuple[str, float], ...] = ()
+    parameters: tuple[tuple[str, float | str], ...] = ()
     model_ref: str | None = None
 
-    def parameter(self, name: str) -> float:
+    def parameter(self, name: str) -> float | str:
         return dict(self.parameters)[name]
+
+    def portable_parameters(self):
+        # Omitting inherited filters preserves identities of pre-scaling saved jobs and checkpoints.
+        return {key: value for key, value in self.parameters
+                if key not in ("downscale", "upscale") or value != "inherit"}
 
     @property
     def identity(self):
         encoded = json.dumps({"id": self.id, "operation": self.operation, "version": self.operation_version,
-                              "parameters": dict(self.parameters), "model_ref": self.model_ref},
+                              "parameters": self.portable_parameters(), "model_ref": self.model_ref},
                              sort_keys=True, allow_nan=False).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
@@ -77,7 +117,7 @@ class PipelineDefinition:
     def to_json(self):
         return {"schema_version": self.schema_version, "name": self.name, "stages": [
             {"id": s.id, "operation": s.operation, "operation_version": s.operation_version,
-             "enabled": s.enabled, "parameters": dict(s.parameters),
+             "enabled": s.enabled, "parameters": s.portable_parameters(),
              **({"model_ref": s.model_ref} if s.model_ref is not None else {})} for s in self.stages]}
 
 

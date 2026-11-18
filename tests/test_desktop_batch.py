@@ -145,12 +145,15 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIn("directml", labels)
         self.assertIn(f"In use: {config.temporary}", labels)
         dialog.fields["temporary"].setText("discard")
+        dialog.scaling["downscale"].setValue("nearest")
         dialog.buttons.button(QDialogButtonBox.StandardButton.Cancel).click()
         self.assertFalse(config.file.exists())
         self.assertIs(panel._plan, plan)
 
         dialog = open_settings()
         self.assertEqual(dialog.fields["temporary"].text(), config.folders.temporary)
+        self.assertEqual(dialog.scaling["downscale"].value(), "bilinear")
+        dialog.scaling["upscale"].setValue("nearest")
         dialog.fields["temporary"].setText("logs")
         save = dialog.buttons.button(QDialogButtonBox.StandardButton.Save)
         save.click()
@@ -178,6 +181,7 @@ class DesktopBatchTests(unittest.TestCase):
                    "edited scratch path was not rechecked")
         self.assertFalse(panel.start.isEnabled())
         self.assertEqual(load_config(self.root), app.config)
+        self.assertEqual(app.config.scaling.upscale, "nearest")
         card = window.pipeline_page.stage_cards[stage_id]
         self.assertIn("MODEL_MISSING", card.findChild(QLabel, "stageStatus").text())
         self.assertIn("empty models", window.pipeline_page.details.toPlainText())
@@ -635,6 +639,44 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertEqual(payload["stages"][2]["parameters"], {"stops": 1})
         self.assertEqual(payload["stages"][0]["parameters"], {"stops": 1})
         self.assertEqual(list(self.destination.iterdir()), [])
+        self.assertFalse(panel.application.job_service.saved_jobs())
+
+    def test_resize_consent_is_local_to_each_preview_and_job(self):
+        from retouching_tool.errors import ResizeApprovalRequired
+
+        window, panel = self.open_window((self.source,))
+        self.wait_for_scan(panel, 1)
+        editor = panel.application.pipeline_service
+        stage = window.pipeline_page._command(editor.add_operation, EXPOSURE.operation, 1).stages[0].stage
+        self.qt.processEvents()
+        preview = panel.application.preview_service
+        picture = preview.picture
+        approvals = []
+
+        def render(*args, **kwargs):
+            approvals.append(kwargs["resize_approvals"])
+            if stage.id not in approvals[-1]:
+                raise ResizeApprovalRequired(stage.id, "Approve the test resize?")
+            return picture(*args, **kwargs)
+
+        with patch.object(preview, "picture", side_effect=render), patch.object(
+                QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            window.pipeline_page.stage_cards[stage.id].preview.click()
+            dialog = panel._stage_preview
+            self.until(lambda: dialog.after.pixmap() is not None and not dialog.feedback.text(), "stage resize was not retried")
+            dialog.close()
+            panel.preview.click()
+            self.until(lambda: panel._picture_window is not None, "pipeline resize was not retried")
+            panel._picture_window.close()
+        self.assertEqual(approvals, [(), (stage.id,), (), (stage.id,)])
+
+        panel.destination.setText(str(self.destination))
+        self.check_space(panel)
+        with patch.object(panel.application.job_service, "create", side_effect=ResizeApprovalRequired(stage.id, "Resize?")), patch.object(
+                QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as prompt:
+            panel.start.click()
+            self.until(lambda: panel._task is None, "resize request did not finish")
+            prompt.assert_called_once()
         self.assertFalse(panel.application.job_service.saved_jobs())
 
     def test_stage_preview_applies_manual_settings_explicitly_and_drops_stale_results(self):

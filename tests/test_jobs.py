@@ -22,7 +22,8 @@ from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
 from retouching_tool.imaging.jpeg import JpegSettings
 from retouching_tool.jobs.journal import MAX_ATTEMPTS, JobJournal, JournalError, open_journal, runner_lock
-from retouching_tool.operations.reference import Exposure
+from retouching_tool.operations.reference import Exposure, ReferenceOperation
+from retouching_tool.pipeline.definition import OperationDescriptor
 from retouching_tool.storage.artifacts import ArtifactStore, MANIFEST_LIMIT
 from retouching_tool.storage.tiff_pixels import TIFF_OVERHEAD_LIMIT
 
@@ -615,6 +616,52 @@ with fault:
             self.failure("JOB_RUNTIME_CHANGED", lambda: self.jobs.run(job_id))
         self.assertEqual(self.jobs.status(job_id).images[0].status, "queued")
         self.assertFalse(list(self.destination.iterdir()))
+        self.assertEqual(self.jobs.run(job_id).status, "completed")
+
+    def test_mixed_backends_in_preview_and_both_job_modes(self):
+        self.jpeg("portrait.jpg")
+        index = self.app.batch_service.index((self.source,), recursive=True)
+        editor = self.app.pipeline_service
+        editor.pytorch_backend = "cpu"
+        calls = []
+
+        class RecordDevice(ReferenceOperation):
+            def process(self, state):
+                calls.append((self.stage.operation, self.runtime.backend))
+                return state
+
+        expected = [("test.onnxruntime", "directml"), ("test.pytorch", "cpu")]
+        for operation, device in expected:
+            descriptor = OperationDescriptor(operation, 1, operation, backends=(device,),
+                                             inference_runtime=operation.split(".")[1])
+            editor.registry.register(descriptor, RecordDevice)
+            editor.add_operation(operation, 1)
+        self.app.preview_service.picture(index, index.images[0].image_id, "mixed-preview", process=True)
+        self.assertEqual(calls, expected)
+        for mode in ("sequential", "staged"):
+            with self.subTest(mode=mode):
+                destination = self.root / mode
+                destination.mkdir()
+                job_id = self.jobs.create(index, destination, mode=mode)
+                with open_journal(self.root, job_id) as journal:
+                    snapshot = journal.snapshot()
+                self.assertEqual((snapshot["backend"], snapshot["pytorch_backend"]), ("directml", "cpu"))
+                self.assertIn("pytorch", snapshot["versions"])
+                editor.pytorch_backend = "cuda"
+                self.failure("JOB_RUNTIME_CHANGED", lambda: self.jobs.run(job_id))
+                editor.pytorch_backend = "cpu"
+                calls.clear()
+                self.assertEqual(self.jobs.run(job_id).status, "completed")
+                self.assertEqual(calls, expected)
+
+    def test_legacy_onnx_checkpoint_resumes_after_pair_is_configured(self):
+        self.jpeg("portrait.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        with open_journal(self.root, job_id) as journal:
+            self.assertNotIn("pytorch_backend", journal.snapshot())
+        self.pause_after_checkpoint(job_id)
+        self.app.pipeline_service.pytorch_backend = "cpu"
         self.assertEqual(self.jobs.run(job_id).status, "completed")
 
     def test_simulated_disk_full_can_resume_without_marking_image_failed(self):

@@ -6,7 +6,8 @@ from pathlib import Path
 from threading import Event
 from uuid import uuid4
 
-from ..errors import RetouchingError
+from ..errors import ResizeApprovalRequired, RetouchingError
+from ..imaging.scaling import fit_longest_side
 from ..imaging.jpeg import JpegRuntime, JpegSettings, decode_jpeg, export_jpeg
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import (MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError,
@@ -91,19 +92,39 @@ class JobService:
                            journal_path=path, level="WARNING", exc_info=True)
         return tuple(sorted(result, key=lambda job: (job.modified, job.job_id), reverse=True))
 
-    def create(self, index, destination, *, mode="sequential", settings=JpegSettings(), selected_ids=None) -> str:
+    def create(self, index, destination, *, mode="sequential", settings=JpegSettings(), selected_ids=None,
+               resize_approvals=()) -> str:
         """Validate and persist a frozen job. No photos are decoded or exported here."""
         job_id = uuid4().hex
         context = {"index_id": index.index_id, "destination_path": destination}
         try:
             if not isinstance(settings, JpegSettings):
                 raise RetouchingError("JOB_SETTINGS_INVALID", "Provide validated JPEG compression settings.")
-            definition = self.pipeline.preflight()
+            definition = self.pipeline.resolve_scaling(self.pipeline.preflight())
             skipped = tuple(StageSkip(item.stage.id, ", ".join(issue.code for issue in item.issues) or "disabled")
                             for item in self.pipeline.status.stages if not item.stage.enabled)
             plan = self.batch.preflight(index, destination, mode=mode, selected_ids=selected_ids, job_id=job_id)
             if not plan.ready:
                 raise RetouchingError("JOB_SPACE_INSUFFICIENT", "Free the disk space reported by preflight before creating this job.")
+            approvals = []
+            for stage in definition.stages:
+                desc = self.pipeline.registry.descriptor(stage.operation, stage.operation_version)
+                limit = desc.resize_limit
+                if limit is None or not limit.applies(stage):
+                    continue
+                oversized = [p.source.header for p in plan.images if
+                             max(p.source.header.width, p.source.header.height) > limit.longest_side]
+                if oversized:
+                    if stage.id not in resize_approvals:
+                        first = oversized[0]
+                        width, height = fit_longest_side((first.width, first.height), limit.longest_side)
+                        raise ResizeApprovalRequired(stage.id,
+                            f"{desc.title}: {len(oversized)} selected image(s) may exceed the {limit.longest_side} px limit. "
+                            f"For example, a full {first.width} × {first.height} input would be reduced to "
+                            f"{width} × {height}. "
+                            "Only oversized inputs or face crops are resized. Original dimensions are restored, "
+                            "but fine detail may be lost. Allow this for this stage in this job?")
+                    approvals.append(stage.id)
             inputs = []
             for planned in plan.images:
                 image = planned.source
@@ -119,10 +140,15 @@ class JobService:
             snapshot = JobSnapshot(job_id, index.index_id, index.recursive,
                                    tuple((root.path, root.identity) for root in index.roots), plan.destination,
                                    file_identity(plan.destination.stat()), plan.scratch, self.pipeline.checkpoints.resolve(),
-                                   self.pipeline.backend, definition, settings, runtime_versions(self.pipeline.backend),
-                                   model_manifests(definition, self.pipeline.catalog), skipped, tuple(inputs), plan.mode)
+                                   self.pipeline.backend, definition, settings,
+                                   runtime_versions(self.pipeline.backend, self.pipeline.pytorch_backend),
+                                   model_manifests(definition, self.pipeline.catalog), skipped, tuple(inputs), plan.mode,
+                                   self.pipeline.pytorch_backend, tuple(approvals))
             with open_journal(self.root, job_id, create=True) as journal:
                 journal.initialize(snapshot.encode(), (item.image_id for item in inputs))
+        except ResizeApprovalRequired as exc:
+            self._emit(job_id, exc.code, str(exc), level="WARNING", stage_instance_id=exc.stage_id, **context)
+            raise
         except Exception as exc:
             self._emit(job_id, getattr(exc, "code", "JOB_CREATE_FAILED"), str(exc), level="ERROR", exc_info=True, **context)
             raise
@@ -131,7 +157,8 @@ class JobService:
             self._emit(job_id, "JOB_STAGE_SKIPPED", "Frozen pipeline skips this stage", stage_instance_id=stage.stage_id,
                        skip_reason=stage.reason)
         self._emit(job_id, "JOB_CREATED", "Saved the job snapshot", mode=snapshot.mode, image_count=len(snapshot.inputs),
-                   pipeline_sha256=snapshot.pipeline_sha256, backend=snapshot.backend, versions=snapshot.versions, **context)
+                   pipeline_sha256=snapshot.pipeline_sha256, backend=snapshot.backend,
+                   pytorch_backend=snapshot.pytorch_backend, versions=snapshot.versions, **context)
         return job_id
 
     def status(self, job_id) -> JobStatus:
@@ -193,13 +220,14 @@ class JobService:
         _, scratch, _ = BatchService(job.scratch, self.diagnostics).validate_folders(index, job.destination)
         if scratch != job.scratch:
             raise RetouchingError("JOB_FOLDER_CHANGED", "The frozen scratch folder resolves elsewhere. Restore it before resuming.")
-        if job.backend != self.pipeline.backend:
+        if (job.backend != self.pipeline.backend or
+                job.pytorch_backend is not None and job.pytorch_backend != self.pipeline.pytorch_backend):
             raise RetouchingError("JOB_RUNTIME_CHANGED", "Restore the job's recorded prepared backend or create a new job.")
-        current_versions = runtime_versions(job.backend)
+        current_versions = runtime_versions(job.backend, job.pytorch_backend)
         if any(value != current_versions.get(key) for key, value in job.versions.items() if key != "windows"):
             raise RetouchingError("JOB_RUNTIME_CHANGED", "Restore the job's recorded runtime and prepared backend, or create a new job.")
         registry, catalog = self.pipeline.registry, self.pipeline.catalog
-        status = validate_pipeline(job.pipeline, registry, catalog, job.checkpoints, job.backend)
+        status = validate_pipeline(job.pipeline, registry, catalog, job.checkpoints, job.backend, job.pytorch_backend)
         for original, item in zip(job.pipeline.stages, status.stages, strict=True):
             if original.enabled and (item.issues or item.dependency_errors):
                 self._emit(job.job_id, "JOB_STAGE_UNAVAILABLE", "Cannot run the frozen enabled stage", level="ERROR",
@@ -301,8 +329,9 @@ class JobService:
             state = self._decode(item, runtime)
             for stage in job.pipeline.stages:
                 if stage.enabled:
-                    stage_runtime = StageRuntime(log, job.backend, job.checkpoints, job.job_id, stage,
-                                                 image_id=item.image_id, attempt=attempt)
+                    device = job.stage_backend(self.pipeline.registry, stage)
+                    stage_runtime = StageRuntime(log, device, job.checkpoints, job.job_id, stage,
+                                                 image_id=item.image_id, attempt=attempt, resize_approved=stage.id in job.resize_approvals)
                     with StageSession(self.pipeline.registry, self.pipeline.catalog, stage_runtime) as session:
                         state = session.process(state, image_id=item.image_id, attempt=attempt)
             return state

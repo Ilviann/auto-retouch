@@ -104,9 +104,10 @@ tests do not establish portrait quality.
 - Keep real portrait data and large model assets out of source control by default.
 - Keep `.venv` and machine-local config/state out of source control; commit templates
   and reproducible dependency definitions. Launch must not install/upgrade packages.
-- Only setup selects a backend interactively, with CUDA as default. Install/update
-  only its support plus shared application dependencies. Launch uses the backend
-  recorded in `.venv`, without backend flags, config overrides, or automatic
+- Only setup selects the ONNX Runtime and PyTorch backends, using independent
+  prompts with CUDA as the default for each. Install the selected runtime builds
+  and shared dependencies. Launch uses both choices recorded in `.venv`, without
+  backend flags, config overrides, or automatic
   backend fallback. See `docs/runtime.md`; avoid conflicting runtime packages.
 - Record model/code redistribution terms before choosing distributable assets.
 - Do not silently lower output resolution or select a weaker retouching mode.
@@ -127,7 +128,7 @@ tests do not establish portrait quality.
 - Use a single agent by default. Do not spawn sub-agents unless the user explicitly
   requests delegation. Workflow roles do not themselves authorize spawning.
 - Follow `docs/workflow.md` for task completion and review evidence.
-- On this development machine, use the prepared DirectML backend for main
+- On this development machine, use ONNX Runtime DirectML and PyTorch CPU for main
   application development. Run setup tests or change computing backends only
   when the task concerns setup-script improvements or bug fixes; ordinary app
   development must not switch backends or rerun preparation.

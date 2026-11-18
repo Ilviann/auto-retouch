@@ -98,7 +98,7 @@ class WorkerTests(unittest.TestCase):
         self.log = Diagnostics(self.root / "logs", console=StringIO())
         self.addCleanup(self.log.close)
         self.app = ApplicationService(self.root, load_config(self.root), self.log)
-        self.app.startup(LaunchOptions((), None, None), "directml")
+        self.app.startup(LaunchOptions((), None, None), "directml", pytorch_backend="cpu")
         self.app.pipeline_service.load(ROOT / "examples/pipelines/reference.json")
         self.app.pipeline_service.set_enabled("exposure-reference", True)
         self.jobs, self.worker = self.app.job_service, self.app.job_worker

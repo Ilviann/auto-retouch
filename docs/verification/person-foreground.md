@@ -30,6 +30,14 @@ Verification used separate temporary destinations and removed its local outputs.
 
 ## Focused regression checks
 
+The scaling settings change also ran the verified local PP-HumanSeg model with
+a generated 401 × 96 RGB input in the prepared DirectML environment. Both
+bilinear and nearest-neighbor preprocessing produced finite 1 × 2 × 192 × 192
+outputs, and changing filters changed the output scores. Headless and Qt checks
+exercise inheritance, overrides, portable JSON, preview and frozen job settings.
+The synthetic Alibaba crop checks in `tests/test_retouch_scaling.py` exercise
+geometry and approval separately from neural inference.
+
 Generated fixtures covered missing checkpoint disable and explicit recovery,
 preview overlay coordinates, the workspace lock, one live session at a time,
 staged pause and resume from saved masks, and an inference allocation failure

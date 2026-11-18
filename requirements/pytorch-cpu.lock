@@ -1,0 +1,2 @@
+-r pytorch-common.lock
+torch==2.15.0 --hash=sha256:cf02d11e13819807389e172ecb8f400f6135969af860e2a9f677f67a011e6194

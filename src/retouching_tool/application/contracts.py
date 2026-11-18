@@ -15,3 +15,4 @@ class StartupSnapshot:
     notices: tuple[str, ...]
     processing_available: bool = False
     stages: tuple[StageStatus, ...] = ()
+    pytorch_backend: str | None = None

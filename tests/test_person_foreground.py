@@ -16,7 +16,7 @@ from PIL import Image
 from retouching_tool.application.job_service import JobControl
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
-from retouching_tool.config import load_config
+from retouching_tool.config import ScalingSettings, load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
 from retouching_tool.jobs.journal import JobJournal, runner_lock
@@ -140,7 +140,7 @@ class PersonForegroundTests(unittest.TestCase):
         masks = []
 
         def inspect(operation, state):
-            if operation.stage == second:
+            if operation.stage.id == second.id:
                 entry = state.entry(PERSON_FOREGROUND.key)
                 self.assertEqual(entry.producer_id, first.id)
                 self.assertTrue(entry.compatible(state))
@@ -194,3 +194,24 @@ class PersonForegroundTests(unittest.TestCase):
                 self.assertEqual(evidence["stage_instance_id"], stage.id)
                 self.assertEqual(evidence["image_id"], failed.image_id)
                 self.assertIn("Generated inference allocation failure", evidence["exception"])
+
+    def test_scaling_inheritance_preview_and_frozen_jobs(self):
+        self.install_test_asset()
+        stage = self.add_stage().stage
+        self.editor.set_parameter(stage.id, "downscale", "nearest")
+        old_job = self.create("staged", "old")
+        self.app.save_settings(self.app.config.folders, self.app.config.logging, ScalingSettings("bilinear", "nearest"))
+        new_job = self.create("sequential", "new")
+        for job_id, expected_up in ((old_job, "bilinear"), (new_job, "nearest")):
+            snapshot, _ = self.app.job_service.read_snapshot(job_id)
+            self.assertEqual(dict(snapshot.pipeline.stages[0].parameters),
+                             {"downscale": "nearest", "upscale": expected_up})
+        portable = self.editor.status.definition.to_json()
+        self.assertEqual(portable["stages"][0]["parameters"], {"downscale": "nearest"})
+        for selection in (None, stage.id):
+            _, stages = self.app.preview_service._stages(selection, False, None)
+            self.assertEqual(dict(stages[0].parameters), {"downscale": "nearest", "upscale": "nearest"})
+        with self.assertRaisesRegex(RetouchingError, "Unknown downscale"):
+            self.editor.set_parameter(stage.id, "downscale", "typo")
+        self.editor.load_data(portable)
+        self.assertEqual(self.editor.status.definition.stages[0].parameter("upscale"), "inherit")

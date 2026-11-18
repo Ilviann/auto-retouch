@@ -2,9 +2,11 @@
 
 from dataclasses import replace
 
+from ..config import ScalingSettings
 from ..errors import RetouchingError
+from ..imaging.scaling import resize_rgb
 from ..pipeline.assets import ModelFile, ModelManifest
-from ..pipeline.definition import OperationDescriptor
+from ..pipeline.definition import OperationDescriptor, SCALING_PARAMETERS
 from ..pipeline.image_state import PERSON_FOREGROUND, ContextEntry, PersonForegroundMask
 from .onnx_session import open_session
 
@@ -17,38 +19,23 @@ MODEL = ModelManifest(
     "Apache-2.0 for all files, including the ONNX weights: https://huggingface.co/opencv/human_segmentation_pphumanseg#license",
 )
 DESCRIPTOR = OperationDescriptor("analysis.person_foreground", 1, "Person foreground (AI)",
-    provides=(PERSON_FOREGROUND,), model_refs=(MODEL.ref,), backends=MODEL.backends)
+    parameters=SCALING_PARAMETERS, provides=(PERSON_FOREGROUND,), model_refs=(MODEL.ref,), backends=MODEL.backends)
 MODEL_SIZE = 192
 SCORES = "save_infer_model/scale_0.tmp_1"
 
 
-def _model_input(pixels):
+def _model_input(pixels, methods=ScalingSettings()):
     import numpy as np
 
-    # Sample four sRGB neighbors per model pixel. Even a full-size portrait
-    # needs only model-sized temporary arrays, including during color conversion.
-    def sample_axis(length):
-        center = (np.arange(MODEL_SIZE, dtype=np.float32) + .5) * (length / MODEL_SIZE) - .5
-        center = np.clip(center, 0, length - 1)
-        low = center.astype(np.intp)
-        return low, np.minimum(low + 1, length - 1), center - low.astype(np.float32)
-
-    def srgb(rows, cols):
-        linear = pixels[rows[:, None], cols[None, :]]
-        return np.where(linear <= .0031308, 12.92 * linear, 1.055 * linear ** (1 / 2.4) - .055)
-
-    y0, y1, fy = sample_axis(pixels.shape[0])
-    x0, x1, fx = sample_axis(pixels.shape[1])
-    x, y = fx[None, :, None], fy[:, None, None]
-    top = srgb(y0, x0) * (1 - x) + srgb(y0, x1) * x
-    bottom = srgb(y1, x0) * (1 - x) + srgb(y1, x1) * x
-    rgb = (top * (1 - y) + bottom * y) * 2 - 1
+    rgb = resize_rgb(pixels, (MODEL_SIZE, MODEL_SIZE), methods, encode_srgb=True) * 2 - 1
     return np.ascontiguousarray(rgb.transpose(2, 0, 1)[None, ...], dtype=np.float32)
 
 
 class PersonForeground:
     def __init__(self, stage):
         self.stage = stage
+        # Pre-scaling job journals omit filters and must replay the original bilinear sampler.
+        self.methods = ScalingSettings(**stage.portable_parameters())
         self._session = None
 
     def prepare(self, runtime):
@@ -67,7 +54,7 @@ class PersonForeground:
         import numpy as np
 
         try:
-            scores, = self._session.run([SCORES], {self._input_name: _model_input(state.pixels)})
+            scores, = self._session.run([SCORES], {self._input_name: _model_input(state.pixels, self.methods)})
         except Exception as exc:
             raise RetouchingError("AI_INFERENCE_FAILED", "PP-HumanSeg could not process this image. "
                                   "Check the device memory and inference error details.") from exc

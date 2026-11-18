@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 
-from ..errors import RetouchingError
+from ..errors import ResizeApprovalRequired, RetouchingError
 from .validation import retained
 from .definition import PipelineDefinition, StageDefinition, parse_pipeline
 
@@ -19,6 +19,7 @@ class StageRuntime:
     image_id: str | None = None
     attempt: int = 1
     preview_request_id: str | None = None
+    resize_approved: bool = False
 
     def emit(self, code, message, *, level="INFO", exc_info=False, **details):
         self.diagnostics.emit(code, message, level=level, exc_info=exc_info, component="pipeline",
@@ -73,7 +74,12 @@ class StageSession:
             keys = [entry.spec.key for entry in state.context]
             if len(keys) != len(set(keys)):
                 raise RetouchingError("CONTEXT_INVALID", "Duplicate image context keys")
-            # Stale optional context is absent, never an invitation to use it.
+            for spec in desc.optional:
+                entry = state.entry(spec.key)
+                if desc.changes_pixels and not spec.pixel_sensitive and entry is not None and (
+                        entry.spec != spec or not entry.compatible(state)):
+                    raise RetouchingError("CONTEXT_INVALID", f"Regenerate {spec.key} for this image before editing pixels.")
+            # Stale optional measurements are absent.
             current = replace(state, context=tuple(e for e in state.context if e.compatible(state)))
             for spec in desc.requires:
                 entry = current.entry(spec.key)
@@ -89,6 +95,8 @@ class StageSession:
             runtime.emit("STAGE_COMPLETED", "Image-stage unit completed", duration_ms=(perf_counter() - started) * 1000,
                          pixel_revision=result.pixel_revision)
             return result
+        except ResizeApprovalRequired:
+            raise
         except Exception:
             runtime.emit("STAGE_PROCESS_FAILED", "Image-stage unit failed; inspect technical details before retrying", level="ERROR", exc_info=True,
                          duration_ms=(perf_counter() - started) * 1000)

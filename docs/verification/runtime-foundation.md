@@ -4,6 +4,23 @@ Date: 2026-11-17. Outcome: runtime foundation complete on the available machine.
 No photo-processing engine, portrait checkpoint, visual-quality acceptance,
 minimum-hardware benchmark, or CUDA acceptance is claimed.
 
+## Independent runtime devices, 2026-11-18
+
+The main Python 3.14.7 environment passed setup and read-only validation with
+ONNX Runtime 1.24.4 DirectML and PyTorch 2.15.0 CPU. The profiled ONNX Add ran on
+`DmlExecutionProvider` and the PyTorch tensor Add ran on `cpu`. Both returned
+`[4, 6]`. The focused setup tests also checked menu defaults, cancellation or
+invalid input before updating, failed updates and read-only validation.
+In a temporary project copy, a clean CPU/CPU install, repeated setup, switching
+ONNX to DirectML and back to CPU, and launch from an external working directory
+all passed. PyTorch stayed on CPU throughout the switch tests.
+
+A generated JPEG and two test operations verified per-runtime device routing in
+preview, sequential and staged processing. A saved job rejected a changed PyTorch
+device. An older ONNX-only staged job resumed from its checkpoint after adding the
+PyTorch CPU selection. Separate checks exercised a real worker, Qt startup and the
+read-only device display. NVIDIA hardware acceptance for both runtimes is pending.
+
 ## Environment and scope
 
 - Windows 11, build 26300; standard 64-bit CPython 3.14.7 (MSC 1944/AMD64).

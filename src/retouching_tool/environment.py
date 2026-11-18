@@ -1,6 +1,6 @@
 """Environment readiness and a generated, weight-free ONNX provider probe."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from importlib import metadata
 import json
@@ -25,6 +25,8 @@ class BackendInfo:
     available_providers: tuple[str, ...]
     executed_providers: tuple[str, ...]
     result: tuple[float, ...]
+    pytorch_backend: str | None = None
+    pytorch_version: str | None = None
 
 
 def validate_python() -> None:
@@ -49,19 +51,25 @@ def validate_venv(root: Path) -> None:
         raise RetouchingError("ENVIRONMENT_INVALID", "Environment must not inherit system site packages; recreate it explicitly")
 
 
-def lock_identity(root: Path, backend: str) -> str:
+def lock_files(backend, pytorch_backend):
     if backend not in RUNTIMES:
         raise RetouchingError("BACKEND_INVALID", "Unknown prepared backend; rerun prepare_env.cmd")
+    if pytorch_backend not in ("cpu", "cuda"):
+        raise RetouchingError("BACKEND_INVALID", "Choose CPU or CUDA for PyTorch in prepare_env.cmd")
+    return ("shared.lock", f"{backend}.lock", "pytorch-common.lock", f"pytorch-{pytorch_backend}.lock")
+
+
+def lock_identity(root: Path, backend: str, pytorch_backend: str) -> str:
     digest = hashlib.sha256()
-    for name in ("shared.lock", f"{backend}.lock"):
+    for name in lock_files(backend, pytorch_backend):
         digest.update(name.encode())
         digest.update((root / "requirements" / name).read_bytes())
     return digest.hexdigest()
 
 
-def locked_versions(root: Path, backend: str) -> dict[str, str]:
+def locked_versions(root: Path, backend: str, pytorch_backend: str) -> dict[str, str]:
     result = {}
-    for name in ("shared.lock", f"{backend}.lock"):
+    for name in lock_files(backend, pytorch_backend):
         for line in (root / "requirements" / name).read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if "==" in line and not line.startswith("#"):
@@ -70,8 +78,8 @@ def locked_versions(root: Path, backend: str) -> dict[str, str]:
     return result
 
 
-def validate_packages(root: Path, backend: str) -> None:
-    expected = locked_versions(root, backend)
+def validate_packages(root: Path, backend: str, pytorch_backend: str) -> None:
+    expected = locked_versions(root, backend, pytorch_backend)
     for package, version in expected.items():
         try:
             actual = metadata.version(package)
@@ -146,6 +154,8 @@ def probe_backend(backend: str) -> BackendInfo:
         if backend != "cpu":
             options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
         try:
+            if backend == "cuda":
+                ort.preload_dlls()
             session = ort.InferenceSession(probe_graph(), sess_options=options, providers=[provider])
             session.disable_fallback()
             actual = tuple(session.get_providers())
@@ -166,23 +176,39 @@ def probe_backend(backend: str) -> BackendInfo:
     return BackendInfo(backend, ort.__version__, available, executed, tuple(float(v) for v in output))
 
 
-def read_ready_backend(root: Path) -> str:
+def probe_backends(onnx_backend, pytorch_backend):
+    onnx_info = probe_backend(onnx_backend)
+    try:
+        import torch
+        if pytorch_backend not in ("cuda", "cpu") or (torch.version.cuda is not None) != (pytorch_backend == "cuda"):
+            raise ValueError(f"Installed torch {torch.__version__} does not match the selected build")
+        x = torch.tensor([1., 2.], device=pytorch_backend)
+        result = x + torch.tensor([3., 4.], device=pytorch_backend)
+        if result.device.type != pytorch_backend or result.tolist() != [4., 6.]:
+            raise ValueError("Unexpected PyTorch Add result or execution device")
+    except Exception as exc:
+        raise RetouchingError("PYTORCH_PROBE_FAILED", f"Cannot run PyTorch on {pytorch_backend}: {exc}. "
+                              "Check the driver and selected PyTorch build in setup.") from exc
+    return replace(onnx_info, pytorch_backend=pytorch_backend, pytorch_version=torch.__version__)
+
+
+def read_ready_backends(root: Path) -> tuple[str, str]:
     try:
         data = read_json(root / ".venv" / "retouching-backend.json")
     except RetouchingError as exc:
         raise RetouchingError("BACKEND_NOT_READY", "Cannot read backend metadata; rerun prepare_env.cmd") from exc
     if (not isinstance(data, dict) or type(data.get("schema_version")) is not int
-            or data.get("schema_version") != 1 or data.get("ready") is not True):
-        raise RetouchingError("BACKEND_NOT_READY", "Environment has no ready backend; rerun prepare_env.cmd")
-    backend = data.get("backend")
-    if (not isinstance(backend, str) or backend not in RUNTIMES
-            or data.get("lock_sha256") != lock_identity(root, backend) or data.get("app_version") != __version__):
+            or data.get("schema_version") != 2 or data.get("ready") is not True):
+        raise RetouchingError("BACKEND_NOT_READY", "Run prepare_env.cmd to select both ONNX Runtime and PyTorch backends.")
+    backend, pytorch_backend = data.get("onnx_backend"), data.get("pytorch_backend")
+    if (not isinstance(backend, str) or backend not in RUNTIMES or pytorch_backend not in ("cuda", "cpu")
+            or data.get("lock_sha256") != lock_identity(root, backend, pytorch_backend) or data.get("app_version") != __version__):
         raise RetouchingError("BACKEND_METADATA_INVALID", "Backend metadata is inconsistent with dependency locks/application; rerun prepare_env.cmd")
-    return backend
+    return backend, pytorch_backend
 
 
 def validate_ready(root: Path) -> BackendInfo:
     validate_venv(root)
-    backend = read_ready_backend(root)
-    validate_packages(root, backend)
-    return probe_backend(backend)
+    backends = read_ready_backends(root)
+    validate_packages(root, *backends)
+    return probe_backends(*backends)

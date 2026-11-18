@@ -3,11 +3,33 @@
 from PySide6.QtCore import QSignalBlocker, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
+
+from ...config import SCALING_METHODS
+from ...pipeline.definition import ScalingParameter
+
+
+class ScalingControl(QComboBox):
+    """Keep portable filter names independent of their display labels."""
+
+    def __init__(self, *, inherit=False, **kwargs):
+        super().__init__(**kwargs)
+        if inherit:
+            self.addItem("Use app setting", "inherit")
+        for method in SCALING_METHODS:
+            self.addItem({"bilinear": "Bilinear", "nearest": "Nearest neighbor"}[method], method)
+
+    def value(self):
+        return self.currentData()
+
+    def setValue(self, method):
+        self.setCurrentIndex(self.findData(method))
 
 
 def parameter_control(parameter):
+    if isinstance(parameter, ScalingParameter):
+        return ScalingControl(inherit=True, objectName=f"parameter-{parameter.name}")
     control = QDoubleSpinBox(objectName=f"parameter-{parameter.name}")
     control.setDecimals(4)
     control.setRange(parameter.minimum, parameter.maximum)
@@ -70,8 +92,12 @@ class StageCard(QGroupBox):
                 on_parameter(stage_id, name, control.value())
 
         for name, control in self.parameters.items():
-            control.editingFinished.connect(
-                lambda name=name, control=control: commit(name, control, self.displayed_values[name]))
+            if isinstance(control, ScalingControl):
+                control.activated.connect(lambda _index, name=name, control=control:
+                                          on_parameter(stage_id, name, control.value()))
+            else:
+                control.editingFinished.connect(
+                    lambda name=name, control=control: commit(name, control, self.displayed_values[name]))
         layout.addLayout(form)
         recheck = QPushButton("Recheck assets and dependencies")
         recheck.setObjectName("recheckStage")

@@ -10,7 +10,7 @@ import re
 
 from ..pipeline.definition import ContextSpec
 from ..pipeline.image_state import (MAX_FOREGROUND_GRID, ContextEntry, ImageState, ImageStatistics,
-                                    PersonForegroundMask, SourceMetadata)
+                                    FaceRegion, FaceRegions, PersonForegroundMask, SourceMetadata)
 
 REPRESENTATION = "linear-srgb-float32"
 MAX_METADATA_BYTES = 16 * 1024 * 1024
@@ -66,7 +66,7 @@ def validate_context(entry, state):
                 and sum(value.histogram) == value.pixel_count
                 and all(integer(v) and v <= value.pixel_count for v in (value.clipped_low, value.clipped_high)),
                 "Invalid statistics counts")
-    elif not isinstance(value, PersonForegroundMask):
+    elif not isinstance(value, (PersonForegroundMask, FaceRegions)):
         require(type(value) is tuple and len(value) <= 4096 and all(finite(v) for v in value),
                 "Unsupported context payload; a versioned codec is required")
 
@@ -103,6 +103,9 @@ def encode_context(entry):
     value = entry.value
     if isinstance(value, ImageStatistics):
         data["value"] = {"kind": "statistics-v1", "data": data["value"]}
+    elif isinstance(value, FaceRegions):
+        data["value"] = {"kind": "face-regions-v1", "data": [
+            {**asdict(region), "mask": b64encode(region.mask).decode("ascii")} for region in value.regions]}
     elif isinstance(value, PersonForegroundMask):
         data["value"] = {"kind": "person-foreground-v1", "data": {
             "width": value.width, "height": value.height, "labels": b64encode(value.labels).decode("ascii")}}
@@ -124,6 +127,13 @@ def decode_context(data):
     elif data["value"]["kind"] == "measurements-v1":
         require(isinstance(payload, list), "Expected measurement list")
         value = tuple(payload)
+    elif data["value"]["kind"] == "face-regions-v1":
+        require(isinstance(payload, list) and len(payload) <= 256, "Invalid face region list")
+        regions = []
+        for item in payload:
+            fields(item, "left top right bottom mask_width mask_height mask")
+            regions.append(FaceRegion(**{**item, "mask": b64decode(item["mask"], validate=True)}))
+        value = FaceRegions(tuple(regions))
     elif data["value"]["kind"] == "person-foreground-v1":
         fields(payload, "width height labels")
         width, height, labels = payload["width"], payload["height"], payload["labels"]

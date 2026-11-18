@@ -27,6 +27,8 @@ class RuntimeIntegrationTests(unittest.TestCase):
         expected = {"cpu": "CPUExecutionProvider", "directml": "DmlExecutionProvider", "cuda": "CUDAExecutionProvider"}[result.backend]
         self.assertEqual(result.result, (4.0, 6.0))
         self.assertEqual(result.executed_providers, (expected,))
+        self.assertIn(result.pytorch_backend, ("cpu", "cuda"))
+        self.assertTrue(result.pytorch_version)
 
 
     def test_cmd_help_from_another_working_directory(self):

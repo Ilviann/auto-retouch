@@ -190,15 +190,17 @@ class WorkerRun:
 
 
 class WorkerService:
-    def __init__(self, root, backend, diagnostics):
+    def __init__(self, root, backend, diagnostics, *, pytorch_backend=None):
         self.root, self.backend, self.diagnostics = root, backend, diagnostics
+        self.pytorch_backend = pytorch_backend
         self._lock = Lock()
         self._active = None
 
     def _command(self, job_id, run_id):
         return [sys.executable, "-I", "-B", "-X", "utf8", "-X", "faulthandler",
                 "-m", "retouching_tool.jobs.worker_process", str(self.root.resolve()), job_id,
-                self.backend, self.diagnostics.session_id, run_id, self.diagnostics.settings.level]
+                self.backend, *(["--pytorch-backend", self.pytorch_backend] if self.pytorch_backend else []),
+                self.diagnostics.session_id, run_id, self.diagnostics.settings.level]
 
     def start(self, job_id) -> WorkerRun:
         """Start or resume a saved job. Read progress through the existing job service."""

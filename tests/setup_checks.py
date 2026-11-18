@@ -41,11 +41,11 @@ class SetupChecks(unittest.TestCase):
         python.touch()
         locks = self.root / "requirements"
         locks.mkdir()
-        for name in ("cpu.lock", "shared.lock"):
+        for name in ("cpu.lock", "shared.lock", "directml.lock", "pytorch-common.lock", "pytorch-cpu.lock"):
             (locks / name).write_bytes((ROOT / "requirements" / name).read_bytes())
         from retouching_tool import __version__
-        path = self.write(".venv/retouching-backend.json", {"schema_version": 1, "ready": True, "backend": "cpu",
-                          "lock_sha256": lock_identity(self.root, "cpu"), "app_version": __version__})
+        path = self.write(".venv/retouching-backend.json", {"schema_version": 2, "ready": True, "onnx_backend": "cpu",
+                          "pytorch_backend": "cpu", "lock_sha256": lock_identity(self.root, "cpu", "cpu"), "app_version": __version__})
         return path
 
 
@@ -77,8 +77,9 @@ class SetupChecks(unittest.TestCase):
         def runner(command, log, **kwargs):
             if "install" in command:
                 raise RetouchingError("SIMULATED_INSTALL_FAILURE", "injected package failure")
+        choices = iter(("3", "2"))
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RetouchingError):
-            setup.prepare(self.root, self.log, input_fn=lambda _: "3", runner=runner)
+            setup.prepare(self.root, self.log, input_fn=lambda _: next(choices), runner=runner)
         self.assertFalse(path.exists())
 
 
@@ -90,10 +91,24 @@ class SetupChecks(unittest.TestCase):
 
     def test_setup_menu_cuda_default_and_invalid_input_bounded(self):
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(setup.select_backend(lambda _: ""), "cuda")
-            self.assertEqual(setup.select_backend(lambda _: "2"), "directml")
+            self.assertEqual(setup.select_backend("PyTorch", ("cuda", "cpu"), lambda _: ""), "cuda")
+            self.assertEqual(setup.select_backend("ONNX Runtime", ("cuda", "directml", "cpu"), lambda _: "2"), "directml")
             with self.assertRaises(RetouchingError):
-                setup.select_backend(lambda _: "invalid")
+                setup.select_backend("PyTorch", ("cuda", "cpu"), lambda _: "3")
+
+    def test_both_selections_required_before_invalidating_existing_environment(self):
+        path = self.fake_environment()
+        before = path.read_bytes()
+        choices = iter(("2", "3", "3", "3"))
+        with self.assertRaises(RetouchingError):
+            setup.prepare(self.root, self.log, input_fn=lambda _: next(choices), runner=lambda *a, **k: None)
+        self.assertEqual(path.read_bytes(), before)
+        choices = iter(("2", "2"))
+        calls = []
+        setup.prepare(self.root, self.log, input_fn=lambda _: next(choices), runner=lambda cmd, *a, **k: calls.append(cmd))
+        self.assertEqual(setup.read_ready_backends(self.root), ("directml", "cpu"))
+        self.assertTrue(any(str(self.root / "requirements/directml.lock") in cmd and
+                            str(self.root / "requirements/pytorch-cpu.lock") in cmd for cmd in calls))
 
 
     def test_check_only_preserves_all_environment_files(self):

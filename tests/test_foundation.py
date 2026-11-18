@@ -13,7 +13,7 @@ from retouching_tool.application.service import ApplicationService, DEFAULT_PIPE
 from retouching_tool.cli import LaunchOptions, parse_args
 from retouching_tool.config import LoggingSettings, load_config
 from retouching_tool.diagnostics.service import Diagnostics, redact
-from retouching_tool.environment import lock_identity, read_ready_backend, validate_packages
+from retouching_tool.environment import lock_identity, read_ready_backends
 from retouching_tool.errors import RetouchingError
 from retouching_tool.json_io import atomic_json, read_json
 
@@ -206,11 +206,11 @@ class FoundationTests(unittest.TestCase):
         python.touch()
         locks = self.root / "requirements"
         locks.mkdir()
-        for name in ("cpu.lock", "shared.lock"):
+        for name in ("cpu.lock", "shared.lock", "pytorch-common.lock", "pytorch-cpu.lock"):
             (locks / name).write_bytes((ROOT / "requirements" / name).read_bytes())
         from retouching_tool import __version__
-        path = self.write(".venv/retouching-backend.json", {"schema_version": 1, "ready": True, "backend": "cpu",
-                          "lock_sha256": lock_identity(self.root, "cpu"), "app_version": __version__})
+        path = self.write(".venv/retouching-backend.json", {"schema_version": 2, "ready": True, "onnx_backend": "cpu",
+                          "pytorch_backend": "cpu", "lock_sha256": lock_identity(self.root, "cpu", "cpu"), "app_version": __version__})
         return path
 
 
@@ -233,10 +233,10 @@ class FoundationTests(unittest.TestCase):
 
     def test_backend_metadata_detects_changed_locks(self):
         self.fake_environment()
-        self.assertEqual(read_ready_backend(self.root), "cpu")
-        (self.root / "requirements" / "shared.lock").write_text("changed")
+        self.assertEqual(read_ready_backends(self.root), ("cpu", "cpu"))
+        (self.root / "requirements" / "pytorch-cpu.lock").write_text("changed")
         with self.assertRaises(RetouchingError):
-            read_ready_backend(self.root)
+            read_ready_backends(self.root)
 
     def test_headless_import_boundary_in_fresh_interpreter(self):
         code = """

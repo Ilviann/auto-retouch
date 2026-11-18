@@ -1,0 +1,4 @@
+# CUDA 12.x and cuDNN 9 family for the ONNX Runtime 1.24.4 GPU profile.
+--extra-index-url https://download.pytorch.org/whl/cu126
+-r pytorch-common.lock
+torch==2.14.1+cu126 --hash=sha256:7297cd4c9cea15d93acb74cae927f5043705fb3570bad9e552adedc9ce2d6a77

@@ -1,5 +1,9 @@
 {
   "schema_version": 1,
+  "scaling": {
+    "downscale": "bilinear",
+    "upscale": "bilinear"
+  },
   "paths": {
     "checkpoints": "./models",
     "temporary": "./.work",

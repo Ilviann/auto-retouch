@@ -17,10 +17,11 @@ from ..storage.artifacts import fingerprint
 from ..storage.batch_paths import FileStamp
 
 
-def runtime_versions(backend):
+def runtime_versions(backend, pytorch_backend=None):
     return {"app": __version__, "python": sys.version.split()[0], "windows": platform.version(),
             "pillow": metadata.version("Pillow"), "numpy": metadata.version("numpy"),
-            "onnxruntime": metadata.version(RUNTIMES[backend]), "representation": "linear-srgb-float32"}
+            "onnxruntime": metadata.version(RUNTIMES[backend]), "representation": "linear-srgb-float32",
+            **({"pytorch": metadata.version("torch")} if pytorch_backend is not None else {})}
 
 
 def model_manifests(pipeline, catalog):
@@ -103,14 +104,24 @@ class JobSnapshot:
     skipped: tuple[StageSkip, ...]
     inputs: tuple[FrozenInput, ...]
     mode: str = "sequential"
+    pytorch_backend: str | None = None
+    resize_approvals: tuple[str, ...] = ()
 
     @property
     def pipeline_sha256(self):
         return fingerprint(self.pipeline.to_json())
 
+    def stage_backend(self, registry, stage):
+        descriptor = registry.descriptor(stage.operation, stage.operation_version)
+        return descriptor.execution_backend(self.backend, self.pytorch_backend)
+
     def encode(self):
         # Stage tuples must use the portable pipeline schema when persisted.
         data = asdict(self)
+        if self.pytorch_backend is None:
+            del data["pytorch_backend"]
+        if not self.resize_approvals:
+            del data["resize_approvals"]
         data["pipeline"] = self.pipeline.to_json()
         if self.mode == "sequential":
             for item in data["inputs"]:
@@ -120,7 +131,11 @@ class JobSnapshot:
     @classmethod
     def parse(cls, data, job_id, registry):
         fields(data, "schema_version mode job_id index_id recursive roots destination destination_identity scratch "
-                     "checkpoints backend pipeline settings versions models skipped inputs")
+                     "checkpoints backend pipeline settings versions models skipped inputs"
+                     + (" pytorch_backend" if "pytorch_backend" in data else "")
+                     + (" resize_approvals" if "resize_approvals" in data else ""))
+        pytorch_backend = data.get("pytorch_backend")
+        require(pytorch_backend in (None, "cpu", "cuda"), "Invalid frozen PyTorch device")
         require(type(data["schema_version"]) is int and data["schema_version"] == 1
                 and data["mode"] in ("sequential", "staged") and data["job_id"] == job_id
                 and data["backend"] in RUNTIMES and type(data["recursive"]) is bool
@@ -135,10 +150,16 @@ class JobSnapshot:
             require(any(root / item.relative_path == item.path for root, _ in roots),
                     "A frozen input path does not belong to its recorded source roots")
         pipeline = parse_pipeline(data["pipeline"], registry)
+        approvals = data.get("resize_approvals", [])
+        require(isinstance(approvals, list) and all(isinstance(key, str) for key in approvals)
+                and len(set(approvals)) == len(approvals) and set(approvals) <= {
+                    s.id for s in pipeline.stages if s.enabled and registry.descriptor(
+                        s.operation, s.operation_version).resize_limit}, "Invalid stage resize approvals")
         skipped = tuple(StageSkip(**skip) for skip in data["skipped"])
         require(tuple(skip.stage_id for skip in skipped) == tuple(stage.id for stage in pipeline.stages if not stage.enabled),
                 "Skipped stages differ from the saved pipeline")
         return cls(job_id, data["index_id"], data["recursive"], roots,
                    _absolute(data["destination"]), _identity(data["destination_identity"]),
                    _absolute(data["scratch"]), _absolute(data["checkpoints"]), data["backend"], pipeline,
-                   JpegSettings(**data["settings"]), data["versions"], tuple(data["models"]), skipped, inputs, data["mode"])
+                   JpegSettings(**data["settings"]), data["versions"], tuple(data["models"]), skipped, inputs, data["mode"],
+                   pytorch_backend, tuple(approvals))

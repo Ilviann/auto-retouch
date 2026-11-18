@@ -256,9 +256,9 @@ identity. A result tested on AMD or CPU does not establish CUDA correctness or
 resource use. Keep backend/device handling inside model adapters and services so
 UI, pipeline JSON, and schedulers can be tested without NVIDIA hardware. Runtime
 package sets and setup-only selection rules are defined in the
-[Runtime contract](runtime.md). Setup asks interactively with CUDA as default,
-installs only the selected backend support plus shared dependencies, and records
-its identity in `.venv`. Launch uses that recorded backend without a selection
+[Runtime contract](runtime.md). Setup asks for ONNX Runtime and PyTorch devices
+independently, with CUDA as the default at both prompts. It installs the selected
+builds and records both choices in `.venv`. Launch uses those devices without a selection
 flag, config override, autodetection, or automatic backend fallback.
 
 ## Pipeline and operation contracts

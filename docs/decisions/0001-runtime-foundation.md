@@ -38,6 +38,14 @@ probe and receive one call. No photos, portrait data, or checkpoints are used.
 
 ## Evidence and limits
 
+On 2026-11-18 the user confirmed Python 3.14 and independent setup selections for
+ONNX Runtime and PyTorch. The development pair is ONNX Runtime 1.24.4 DirectML
+and PyTorch 2.15.0 CPU. The CUDA PyTorch lock selects the Windows CPython 3.14
+CUDA 12.6 build of 2.14.1 for the CUDA 12 family used by the ONNX GPU package.
+CUDA execution and RTX 20-series support still require hardware validation.
+The [runtime contract](../runtime.md#backend-selection-during-setup) describes
+the two prompts, updated readiness metadata and per-stage device selection.
+
 [Milestone verification](../verification/runtime-foundation.md) records real CPU
 and DirectML probe execution, Qt imports/window behavior, clean/repeated setup,
 backend switches, and startup failures. Main application development on this

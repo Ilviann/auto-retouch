@@ -34,13 +34,14 @@ def retained(spec, descriptor):
     return True
 
 
-def validate_pipeline(definition, registry, catalog, checkpoints, backend):
+def validate_pipeline(definition, registry, catalog, checkpoints, backend, pytorch_backend=None):
     available, statuses, stages = {}, [], []
     for original in definition.stages:
         desc = registry.descriptor(original.operation, original.operation_version)
-        issues = catalog.check(original.model_ref, checkpoints, backend)
-        if backend not in desc.backends:
-            issues += (AssetIssue("OPERATION_BACKEND_UNSUPPORTED", f"{desc.title} does not support prepared backend {backend}"),)
+        device = desc.execution_backend(backend, pytorch_backend)
+        issues = catalog.check(original.model_ref, checkpoints, device)
+        if device not in desc.backends:
+            issues += (AssetIssue("OPERATION_BACKEND_UNSUPPORTED", f"{desc.title} does not support the prepared {desc.inference_runtime} device {device}"),)
         stage = replace(original, enabled=False) if issues else original
         errors = []
         if stage.enabled:

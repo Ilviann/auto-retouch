@@ -2,12 +2,14 @@
 
 from dataclasses import dataclass
 import math
+import re
 
 from ..errors import RetouchingError
 from .definition import ContextSpec
 
 RGB_FLOAT32_BYTES_PER_PIXEL = 3 * 4
 PERSON_FOREGROUND = ContextSpec("person.foreground", 1)
+FACE_REGIONS = ContextSpec("face.regions", 1, pixel_sensitive=False)
 MAX_FOREGROUND_GRID = 512
 
 
@@ -52,6 +54,39 @@ class PersonForegroundMask:
 
 
 @dataclass(frozen=True)
+class FaceRegion:
+    """Half-open oriented pixel bounds. Optional packed binary mask spans the rectangle, row-major MSB first."""
+
+    left: int
+    top: int
+    right: int
+    bottom: int
+    mask_width: int = 0
+    mask_height: int = 0
+    mask: bytes = b""
+
+    def __post_init__(self):
+        if (not all(type(v) is int for v in (self.left, self.top, self.right, self.bottom,
+                                            self.mask_width, self.mask_height))
+                or not 0 <= self.left < self.right or not 0 <= self.top < self.bottom
+                or type(self.mask) is not bytes or self.mask_width < 0 or self.mask_height < 0
+                or bool(self.mask_width) != bool(self.mask_height)
+                or len(self.mask) != (self.mask_width * self.mask_height + 7) // 8):
+            raise ValueError("Invalid face rectangle or packed mask dimensions")
+
+
+@dataclass(frozen=True)
+class FaceRegions:
+    regions: tuple[FaceRegion, ...]
+
+    def __post_init__(self):
+        if (type(self.regions) is not tuple or len(self.regions) > 256
+                or not all(isinstance(item, FaceRegion) for item in self.regions)
+                or sum(len(item.mask) for item in self.regions) > 512 * 1024):
+            raise ValueError("Face regions exceed the supported context budget")
+
+
+@dataclass(frozen=True)
 class ContextEntry:
     spec: ContextSpec
     producer_id: str
@@ -61,7 +96,7 @@ class ContextEntry:
     geometry_revision: int
     width: int
     height: int
-    value: ImageStatistics | PersonForegroundMask | tuple[float, ...]
+    value: ImageStatistics | PersonForegroundMask | FaceRegions | tuple[float, ...]
     source_id: str = ""
     producer_settings_hash: str = ""
     confidence: float | None = None
@@ -75,7 +110,18 @@ class ContextEntry:
         is_foreground = isinstance(self.value, PersonForegroundMask)
         if is_foreground != (self.spec == PERSON_FOREGROUND):
             raise ValueError("Person foreground context requires the versioned foreground mask payload")
-        if not isinstance(self.value, (ImageStatistics, PersonForegroundMask)) and not (
+        if isinstance(self.value, FaceRegions) != (self.spec.key == FACE_REGIONS.key):
+            raise ValueError("Face region context requires a typed payload")
+        if isinstance(self.value, FaceRegions) and (
+                self.spec != FACE_REGIONS or not all(isinstance(v, str) and v for v in
+                    (self.source_id, self.producer_id, self.producer_operation))
+                or type(self.producer_version) is not int or self.producer_version < 1
+                or not isinstance(self.producer_settings_hash, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", self.producer_settings_hash)
+                or not all(type(v) is int and v >= 0 for v in (self.geometry_revision, self.pixel_revision))
+                or any(face.right > self.width or face.bottom > self.height for face in self.value.regions)):
+            raise ValueError("Invalid face region provenance, version or bounds")
+        if not isinstance(self.value, (ImageStatistics, PersonForegroundMask, FaceRegions)) and not (
                 isinstance(self.value, tuple) and all(type(v) in (int, float) and math.isfinite(v) for v in self.value)):
             raise ValueError("Context payload must be immutable typed data")
 

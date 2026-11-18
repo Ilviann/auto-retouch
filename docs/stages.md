@@ -87,6 +87,86 @@ and bounded color correction. Eye whitening, denoising,
 and sharpening follow demonstrated need. Do not make every possible enhancement
 part of the default studio portrait pipeline.
 
+## Alibaba skin-retouching stage
+
+Choose **Alibaba skin retouching** in the operation list and add it to the
+pipeline. Version 1 of `retouch.alibaba_skin` runs on PyTorch CPU. Strength
+blends the result in linear RGB from 0 (pass through) to 1 (full edit).
+The initial value of 1 is for evaluation. Preview and both batch modes use the
+same implementation. Portrait quality and preset strengths await user review.
+
+For local evaluation, place the following two source checkpoints under
+`alibaba-skin-retouching/16c8351a/` in the configured checkpoint folder.
+Anonymous byte-range requests succeeded for both international publisher links
+on 2026-11-18. The publisher's file listing reports revision
+`16c8351a01c90746eb702e6e6c1e6a28d0e5ff74` for both files. Use the listed
+SHA-256 values to verify the downloads since the master links can change.
+The international listing did not expose the v1.0.4 tag.
+
+Both local source files matched the publisher checksums on 2026-11-18.
+With Python 3.14.7, PyTorch 2.15.0+cpu, ModelScope 1.40.3 and addict 2.4.0
+in the development environment, the original network definitions loaded these
+weights strictly and ran in float32. Generated inputs exercised the 512 × 512
+smoothing network, 768 × 768 blemish detector, and 576 × 576 repair window.
+The same process then ran PP-HumanSeg through ONNX Runtime DirectML 1.24.4.
+The runtime package pins still validated and `pip check` passed.
+Repeat the native CPU check with
+`.venv\Scripts\python.exe -B tools\verify_alibaba_pytorch.py`.
+The app includes the required Apache-2.0 network definitions from ModelScope
+1.40.3 and the associated license. It loads both local checkpoints with strict
+state-dictionary checks and weights-only loading. ModelScope sign-in and the
+ModelScope Python package are unnecessary for this stage. The publisher lists
+the model repository under Apache License 2.0 in its
+[repository metadata](https://www.modelscope.ai/api/v1/models/iic/cv_unet_skin_retouching_torch)
+and [README](https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/README.md).
+
+The node encodes linear pixels to sRGB for the networks, detects blemishes at
+768 × 768, and runs the repair network one 512-pixel tile at a time with a
+32-pixel halo. The 512 × 512 generator predicts a feathered tone adjustment
+for the repaired crop. Output returns to linear float32. The separate upstream
+RetinaFace and TensorFlow whitening models are outside this implementation.
+
+| Checkpoint | Bytes | SHA-256 |
+| --- | ---: | --- |
+| [pytorch_model.pt](https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/pytorch_model.pt) | 53,646,276 | `760d0c0b95c4e0a692165677fe2b82dbdf8fbbd4a3780ca966599c627b082993` |
+| [joint_20210926.pth](https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/joint_20210926.pth) | 227,618,450 | `c9e1388b19d9334c90db08308c86de208f535920ee381ae8a9cb63484a78351a` |
+
+Apply the 5000-pixel limit to each actual stage input. With upstream face
+rectangles, crop the current oriented image at those rectangles. With per-face
+masks, use their bounds and retain the masks for compositing. Validate the
+regions against the image and geometry revision. Process the crops individually
+and place each result back at its original coordinates. Pixels outside the
+selected regions retain their incoming values. Without upstream face context,
+the whole image is the stage input. A valid detector result with zero faces
+produces a warning and passes the image through. The optional `face.regions`
+v1 payload carries oriented half-open rectangles and optional packed binary mask
+grids. The staged artifact codec preserves these across passes and recovery.
+No face-region producer currently ships in the operation list.
+
+A 7200 × 4800 image with two 900 × 900 face crops needs no size warning.
+The same image used whole needs approval to run at 5000 × 3333 and return to
+7200 × 4800. An oversized face crop triggers the same rule for that crop.
+Exactly 5000 pixels on the longest side is within the limit. Restoring the
+dimensions cannot recover fine detail lost during downscaling.
+
+Preview asks for consent when an actual input exceeds the limit. Batch creation
+checks the selected JPEG headers and requests conditional permission once per
+stage when inputs could exceed the limit. The warning shows dimensions and
+detail loss. Declining stops creation. The job stores approved stage IDs and
+logs the source and processing dimensions for each actual size reduction.
+
+One 4000 × 6000 private study portrait ran through the desktop preview service
+at 3333 × 5000 and returned to its original geometry. Sequential and staged
+worker subprocesses produced matching decoded exports on a generated JPEG
+with the real checkpoints. Focused checks in `tests/test_alibaba_skin.py`
+also cover missing files, mask persistence, repair tile edges, stale targeting,
+and job-scoped resize consent. The local before-and-after comparison is in
+`.test-work/alibaba-portrait-comparison.jpg`, outside source control.
+Skin-texture retention, background effects on whole images, face-crop quality,
+and coverage of exposed skin beyond the face still need visual evaluation.
+See the [publisher model card](https://modelscope.cn/models/damo/cv_unet_skin_retouching_torch/summary)
+and [processing scale settings](pipeline.md#processing-scale-settings).
+
 ## Image state and stage effects
 
 A stage consumes an image state and returns a new image state plus diagnostics.

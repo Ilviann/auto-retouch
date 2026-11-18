@@ -139,6 +139,26 @@ schema. Branches, merges, and a node graph editor are outside the first version.
 The [Runtime and launch contract](runtime.md) defines the machine-local checkpoint
 and temporary folders, source launch options, and explicit-pipeline precedence.
 
+## Processing scale settings
+
+The Settings dialog has independent downscaling and upscaling defaults. Both
+offer bilinear and nearest-neighbor interpolation. Bilinear retains the
+original PP-HumanSeg sampler behavior. The Person foreground stage exposes
+both settings on its card and in stage preview, each with a **Use app setting**
+choice. When one axis shrinks and the other grows, each uses its own method.
+
+Portable pipelines store explicit overrides in the stage parameters and omit
+inherited filters. Existing pipeline files inherit both. Each preview resolves
+the current choices and new jobs store the effective values in their frozen
+pipelines. Existing job snapshots with omitted methods replay bilinear sampling.
+The choice of image filter is independent of the model's required tensor shape.
+Categorical masks need label-preserving sampling when mapped between grids.
+
+The Alibaba skin-retouching stage applies its effective filters when resizing
+RGB inputs and predicted smoothing maps. The blemish mask uses the publisher's
+nearest-neighbor mapping. Resize consent belongs to a preview or a frozen job
+stage and is independent of the portable pipeline.
+
 ## Stage controls and model availability
 
 Every editable stage has an on/off control. Off stages retain their order and

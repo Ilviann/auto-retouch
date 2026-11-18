@@ -53,7 +53,10 @@ class StagedRunner:
         if self._pending() and not self._stop_requested():
             self.service._validate_run(self.job)
             self._prepare_checkpoints()
-            self._environment = fingerprint({"backend": self.job.backend, "versions": self.job.versions})
+            environment = {"backend": self.job.backend, "versions": self.job.versions}
+            if self.job.pytorch_backend is not None:
+                environment["pytorch_backend"] = self.job.pytorch_backend
+            self._environment = fingerprint(environment)
             self._models = fingerprint(self.job.models)
             self._prefixes = self._prefix_digests()
             self.service._emit(self.job.job_id, "JOB_STARTED", "Running the saved staged job", mode="staged",
@@ -85,8 +88,9 @@ class StagedRunner:
     def _runtime(self, item, stage_index, attempt, log):
         if stage_index == len(self.stages):
             return JpegRuntime(log, item.image_id, self.job.job_id, attempt=attempt)
-        return StageRuntime(log, self.job.backend, self.job.checkpoints, self.job.job_id,
-                            self.stages[stage_index], image_id=item.image_id, attempt=attempt)
+        stage = self.stages[stage_index]
+        return StageRuntime(log, self.job.stage_backend(self.registry, stage), self.job.checkpoints, self.job.job_id,
+                            stage, image_id=item.image_id, attempt=attempt, resize_approved=stage.id in self.job.resize_approvals)
 
     def _store(self, item, row):
         store_id = row["store_id"]
@@ -151,7 +155,13 @@ class StagedRunner:
         for definition, stage in zip(definitions, self.job.pipeline.stages, strict=True):
             prefix.append(definition)
             if stage.enabled:
-                contracts.append(asdict(self.registry.descriptor(stage.operation, stage.operation_version)))
+                descriptor = asdict(self.registry.descriptor(stage.operation, stage.operation_version))
+                if descriptor["resize_limit"] is None:
+                    del descriptor["resize_limit"]
+                if self.job.pytorch_backend is None and descriptor["inference_runtime"] == "onnxruntime":
+                    # Preserve contract hashes in checkpoints created before per-runtime devices.
+                    del descriptor["inference_runtime"]
+                contracts.append(descriptor)
                 digests.append((fingerprint(prefix), fingerprint(contracts)))
         return digests
 
@@ -174,8 +184,9 @@ class StagedRunner:
             if stage_index == len(self.stages):
                 self._pass(candidates, stage_index, output)
             else:
-                runtime = StageRuntime(self.service.diagnostics, self.job.backend, self.job.checkpoints,
-                                       self.job.job_id, self.stages[stage_index])
+                stage = self.stages[stage_index]
+                runtime = StageRuntime(self.service.diagnostics, self.job.stage_backend(self.registry, stage),
+                                       self.job.checkpoints, self.job.job_id, stage, resize_approved=stage.id in self.job.resize_approvals)
                 with StageSession(self.registry, self.catalog, runtime) as session:
                     self._pass(candidates, stage_index, output, session=session)
 
