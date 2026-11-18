@@ -9,7 +9,8 @@ import sys
 
 from .. import __version__
 from ..environment import RUNTIMES
-from ..imaging.jpeg import JpegSettings, MAX_PIXELS
+from ..imaging.export_settings import ExportSettings, encode_settings, export_relative_path, output_reservation, parse_settings
+from ..imaging.jpeg import MAX_PIXELS
 from ..pipeline.definition import PipelineDefinition, parse_pipeline
 from ..pipeline.image_state import RGB_FLOAT32_BYTES_PER_PIXEL
 from ..storage.artifact_codec import digest, fields, integer, require
@@ -98,7 +99,7 @@ class JobSnapshot:
     checkpoints: Path
     backend: str
     pipeline: PipelineDefinition
-    settings: JpegSettings
+    settings: ExportSettings
     versions: dict[str, str]
     models: tuple[dict, ...]
     skipped: tuple[StageSkip, ...]
@@ -111,6 +112,12 @@ class JobSnapshot:
     def pipeline_sha256(self):
         return fingerprint(self.pipeline.to_json())
 
+    def output_relative(self, item):
+        return export_relative_path(item.relative_path, self.settings)
+
+    def output_bytes(self, item):
+        return output_reservation(self.settings, item.stamp.size, item.working_bytes)
+
     def stage_backend(self, registry, stage):
         descriptor = registry.descriptor(stage.operation, stage.operation_version)
         return descriptor.execution_backend(self.backend, self.pytorch_backend)
@@ -118,6 +125,7 @@ class JobSnapshot:
     def encode(self):
         # Stage tuples must use the portable pipeline schema when persisted.
         data = asdict(self)
+        data["settings"] = encode_settings(self.settings)
         if self.pytorch_backend is None:
             del data["pytorch_backend"]
         if not self.resize_approvals:
@@ -146,6 +154,9 @@ class JobSnapshot:
                 "Staged jobs require frozen JPEG header sizes")
         require(inputs and roots and len({item.image_id for item in inputs}) == len(inputs)
                 and len({item.relative_path for item in inputs}) == len(inputs), "Invalid frozen input list")
+        settings = parse_settings(data["settings"])
+        require(len({export_relative_path(item.relative_path, settings) for item in inputs}) == len(inputs),
+                "Conflicting frozen export paths")
         for item in inputs:
             require(any(root / item.relative_path == item.path for root, _ in roots),
                     "A frozen input path does not belong to its recorded source roots")
@@ -161,5 +172,5 @@ class JobSnapshot:
         return cls(job_id, data["index_id"], data["recursive"], roots,
                    _absolute(data["destination"]), _identity(data["destination_identity"]),
                    _absolute(data["scratch"]), _absolute(data["checkpoints"]), data["backend"], pipeline,
-                   JpegSettings(**data["settings"]), data["versions"], tuple(data["models"]), skipped, inputs, data["mode"],
+                   settings, data["versions"], tuple(data["models"]), skipped, inputs, data["mode"],
                    pytorch_backend, tuple(approvals))

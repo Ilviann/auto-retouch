@@ -42,8 +42,7 @@ diagnostics ZIP through the same log reader and reads job settings and outcomes
 from the saved journal. See
 [desktop diagnostics evidence](verification/desktop-diagnostics.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
-16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters
-will add WebP, JPEG XL, and AVIF.
+16 GB system RAM on Windows 11 only. Export supports JPEG, JPEG XL, PNG, TIFF and BMP. WebP and AVIF are planned.
 
 ## Runtime and candidate stack
 
@@ -52,7 +51,7 @@ will add WebP, JPEG XL, and AVIF.
 | Application and pipeline | Python 3.14 with project-local `.venv`, confirmed | Use the user's existing system-wide Python 3.14 installation. |
 | Desktop interface | PySide6 with Qt Widgets, confirmed | Keep Qt inside a replaceable GUI adapter; validate the pinned version, preview behavior, and distribution terms. |
 | Inference | CPU reference backend, DirectML candidate for AMD development, CUDA production; use ONNX Runtime or native model adapters as compatible | Python 3.14, model format/operator compatibility, visual equivalence, memory use, and redistribution. |
-| Job storage | Python standard-library SQLite | Per-image progress and verified JPEG receipts in both modes, with a lossless checkpoint cursor in staged mode. |
+| Job storage | Python standard-library SQLite | Per-image progress and verified export receipts in both modes, with a lossless checkpoint cursor in staged mode. |
 | JPEG decoding and color | Pillow 13.0.0 and LittleCMS, implemented | Synthetic color/orientation checks and seven local JPEG round trips; broader camera and gamut coverage pending. |
 | Verification | Automated pipeline/recovery checks and a human-reviewed image set | Functional correctness plus visual evidence. |
 
@@ -459,8 +458,9 @@ The initial budget uses 12 bytes per working pixel, the artifact TIFF and manife
 limits, source header bytes as an upper bound on retained metadata, and one
 transactional TIFF and manifest replacement. Callers can supply known extra
 scratch bytes. Preflight reports required and available space by filesystem
-device without allocating the estimated space. The pending JPEG is renamed at
-publication and contributes to the output estimate as one file.
+device without allocating the estimated space. The pending export is renamed at publication and counts as one file. For the new
+formats, preflight and the runner reserve at least four bytes per pixel plus the
+source file size and 256 KiB per image, subject to the existing compressed-size floor.
 
 Check free space after indexing/configuration changes and before a job; monitor it
 while running. Handle exhaustion without corrupting committed states, reducing
@@ -469,10 +469,11 @@ after precision and mode-equivalence validation, with CPU buffering bounded for
 16 GB RAM independently of the scratch disk estimate.
 
 Export settings and codec adapters are independent of pipeline operations and Qt.
-Implement JPEG first, passing explicit compression options and retaining the
-metadata/provenance contract. Later WebP, JPEG XL, and AVIF adapters must validate
-their own encoding options, Python 3.14 packages, metadata capabilities, and output
-validation; do not claim those codecs are implemented by a shared interface alone.
+The selected format determines the output suffix, collision checks, disk reservation,
+encoder controls and metadata verification. JPEG preserves the source filename. The
+other encoders use .jxl, .png, .tif and .bmp. Jobs freeze the format and its options.
+Legacy snapshots without a format use JPEG. BMP is a 24-bit metadata-free export.
+[Export verification](verification/export-formats.md).
 
 ## Resource management and recovery
 

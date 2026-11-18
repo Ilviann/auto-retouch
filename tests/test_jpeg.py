@@ -18,6 +18,8 @@ from PIL import Image, ImageCms, JpegImagePlugin, TiffImagePlugin
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
 from retouching_tool.imaging.exif import read_exif
+from retouching_tool.imaging.export import export_image
+from retouching_tool.imaging.export_settings import BmpSettings, JxlSettings, PngSettings, TiffSettings
 from retouching_tool.imaging.iptc import iptc_marker
 from retouching_tool.imaging.jpeg import JpegRuntime, JpegSettings, decode_jpeg, export_jpeg
 from retouching_tool.imaging.xmp import EVENT, RDF, TIFF, Xmp
@@ -195,6 +197,56 @@ class JpegTests(unittest.TestCase):
                         "previousXmpSoftware": ["Other XMP Tool"]})
                 self.assertEqual(self.source.read_bytes(), original)
                 self.output.unlink()
+
+    def test_new_formats_roundtrip_metadata_and_pixels(self):
+        outputs = [(PngSettings(0), ".png"), (TiffSettings("None"), ".tif"), (TiffSettings(), ".tif"),
+                   (JxlSettings(70), ".jxl"), (JxlSettings(lossless=True), ".jxl"), (BmpSettings(144), ".bmp")]
+        for order in ("<", ">"):
+            self.save(exif=add_thumbnail(camera_exif(order=order)), xmp=XMP, extra=iptc_marker(IPTC))
+            state = self.decode()
+            with Image.open(self.source) as source:
+                reference = source.transpose(Image.Transpose.ROTATE_270).tobytes()
+                before = source.getexif()
+                gps = before.get_ifd(34853)
+            for settings, suffix in outputs:
+                with self.subTest(order=order, settings=settings):
+                    destination = self.output.with_suffix(suffix)
+                    export_image(state, destination, settings=settings, pipeline_sha256=HASH, runtime=self.runtime)
+                    with Image.open(destination) as image:
+                        self.assertEqual(image.size, (24, 32))
+                        if not isinstance(settings, JxlSettings) or settings.lossless:
+                            self.assertEqual(image.tobytes(), reference)
+                        if isinstance(settings, BmpSettings):
+                            self.assertFalse(image.getexif())
+                            self.assertAlmostEqual(image.info["dpi"][0], 144, delta=.02)
+                        else:
+                            exif = image.getexif()
+                            self.assertEqual(exif[271], before[271])
+                            self.assertEqual(exif[33723], IPTC)
+                            self.assertEqual(exif[305], SOFTWARE)
+                            self.assertEqual(exif[274], 1)
+                            self.assertEqual(exif.get_ifd(34853), gps)
+                            self.assertEqual(exif.get_ifd(34665)[36867], "2024:11:08 10:05:03")
+                            if isinstance(settings, TiffSettings):
+                                self.assertEqual(exif[259], 1 if settings.compression == "None" else 8)
+                                self.assertIn(HASH.encode(), exif[700])
+                    destination.unlink()
+
+    def test_png_metadata_verification_blocks_publication(self):
+        self.save(exif=camera_exif())
+        state = self.decode()
+        save = Image.Image.save
+
+        def omit_profile(image, stream, **options):
+            options.pop("icc_profile")
+            save(image, stream, **options)
+
+        destination = self.output.with_suffix(".png")
+        with patch.object(Image.Image, "save", omit_profile):
+            record = self.failure("OUTPUT_VALIDATION_FAILED", lambda: export_image(
+                state, destination, settings=PngSettings(), pipeline_sha256=HASH, runtime=self.runtime))
+        self.assertIn("PNG ICC", record["exception"])
+        self.assertFalse(destination.exists())
 
     def test_xmp_only_orientation_and_missing_exif(self):
         self.save(xmp=XMP)

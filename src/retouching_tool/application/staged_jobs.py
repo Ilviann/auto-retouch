@@ -124,7 +124,7 @@ class StagedRunner:
         self._clean_finished()
         for item, row in self._pending():
             try:
-                output_path(self.job.destination, item.relative_path)
+                output_path(self.job.destination, self.job.output_relative(item))
             except (RetouchingError, OSError) as exc:
                 self.service._record_failure(self.journal, self.job, item, row["unit_attempts"], exc, row["warnings"])
                 self._retire(item, row, self._store(item, row))
@@ -175,7 +175,7 @@ class StagedRunner:
                 break
             stage_index = min(row["next_stage"] for _, row in pending)
             candidates = [(item, row) for item, row in pending if row["next_stage"] == stage_index]
-            output = 2 * sum(item.stamp.size for item, _ in pending)
+            output = sum(self.job.output_bytes(item) for item, _ in pending)
             missing = sum(item.working_bytes + CHECKPOINT_OVERHEAD_BYTES + item.header_bytes
                           for item, row in pending if row["next_stage"] == 0 and self.stages)
             replacing = max((item.working_bytes + CHECKPOINT_OVERHEAD_BYTES for item, row in pending
@@ -206,7 +206,7 @@ class StagedRunner:
             else:
                 self._unit(item, row, store, runtime, stage_index, output, session)
             if session is None:
-                output -= 2 * item.stamp.size
+                output -= self.job.output_bytes(item)
 
     def _unit(self, item, row, store, runtime, stage_index, output, session):
         log = runtime.diagnostics

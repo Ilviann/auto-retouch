@@ -1,4 +1,4 @@
-"""Recovery proof for a JPEG verified before its no-overwrite publication."""
+"""Recovery proof for an export verified before its no-overwrite publication."""
 
 from dataclasses import asdict, dataclass
 import json
@@ -38,7 +38,7 @@ class PreparedExport:
         except OSError as exc:
             raise RetouchingError("JOB_EXPORT_CONFLICT", f"File does not match this job's verified export: {path}. Inspect it before retrying.") from exc
         if actual != self.sha256:
-            raise RetouchingError("JOB_EXPORT_CONFLICT", f"JPEG checksum differs from this job's verified export: {path}. Inspect it before retrying.")
+            raise RetouchingError("JOB_EXPORT_CONFLICT", f"Export checksum differs from this job's verified export: {path}. Inspect it before retrying.")
 
 
 def check_destination(job):
@@ -53,11 +53,11 @@ def check_destination(job):
 
 def prepare_parent(job, item):
     check_destination(job)
-    output, existing = output_path(job.destination, item.relative_path)
+    output, existing = output_path(job.destination, job.output_relative(item))
     for part in output.parent.relative_to(existing).parts:
         existing /= part
         existing.mkdir(exist_ok=True)
-        output_path(job.destination, item.relative_path)
+        output_path(job.destination, job.output_relative(item))
     return output
 
 
@@ -72,7 +72,7 @@ def _exists(path):
 def recover_export(job, item, receipt):
     """Return a published file only if it matches the recorded verified artifact."""
     check_destination(job)
-    output, _ = output_path(job.destination, item.relative_path, allow_existing=True)
+    output, _ = output_path(job.destination, job.output_relative(item), allow_existing=True)
     if _exists(output):
         receipt.verify(output)
         return output

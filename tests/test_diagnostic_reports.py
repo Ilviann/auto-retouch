@@ -14,6 +14,7 @@ from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
+from retouching_tool.imaging.export_settings import PngSettings
 from retouching_tool.errors import RetouchingError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,10 +58,10 @@ class DiagnosticReportTests(unittest.TestCase):
         index = self.app.index_sources((source,))
         stage = self.app.pipeline_service.add_operation("core.exposure", 1).stages[0].stage
         self.app.pipeline_service.set_parameter(stage.id, "stops", 1)
-        job_id = self.app.job_service.create(index, destination)
+        job_id = self.app.job_service.create(index, destination, settings=PngSettings())
         self.app.pipeline_service.set_parameter(stage.id, "stops", 2)
         image_id = index.images[0].image_id
-        stderr = f'Driver fault reading "{photo.as_posix().upper()}"\nOperator {Path.home().name} on {photo.name}'
+        stderr = f'Driver fault reading "{photo.as_posix().upper()}"\nOperator {Path.home().name} on {photo.name}, writing {photo.stem}.png'
         try:
             raise OSError(f"Cannot read {photo}")
         except OSError:
@@ -72,6 +73,7 @@ class DiagnosticReportTests(unittest.TestCase):
 
         readme, settings, events = self.read_report(self.app.export_diagnostics(self.report, job_id=job_id))
         self.assertEqual(settings["pipeline"]["stages"][0]["parameters"]["stops"], 1)
+        self.assertEqual(settings["export"], {"format": "PNG", "compression": 6})
         self.assertEqual(settings["counts"], {"queued": 1})
         self.assertEqual(settings["backend"], "directml")
         self.assertEqual(settings["images"][0]["image_id"], image_id)
@@ -85,7 +87,7 @@ class DiagnosticReportTests(unittest.TestCase):
         self.assertIn("OSError", failure["exception"])
         self.assertEqual(failure["stage_instance_id"], stage.id)
         rendered = json.dumps([settings, events], ensure_ascii=False)
-        for secret in (photo.name, "Private Studio", Path.home().name, "DO NOT ARCHIVE CHECKPOINT BYTES"):
+        for secret in (photo.name, photo.with_suffix(".png").name, "Private Studio", Path.home().name, "DO NOT ARCHIVE CHECKPOINT BYTES"):
             self.assertNotIn(secret.casefold(), rendered.casefold())
         self.assertEqual(checkpoint.read_bytes(), b"DO NOT ARCHIVE CHECKPOINT BYTES")
 

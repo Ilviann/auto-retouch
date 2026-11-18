@@ -24,8 +24,8 @@ PATH_START = r"(?:\b[a-z]:[\\/]+|\\{2}|(?<!:)//(?=[^/\s]))"
 ABSOLUTE_PATH = re.compile(
     rf"""(?<="){PATH_START}[^"\r\n]+|(?<='){PATH_START}[^'\r\n]+(?:'(?=\w)[^'\r\n]+)*|"""
     rf"""{PATH_START}[^"<>|\r\n]*?(?=:\s|["<>|\r\n]|$)""", re.IGNORECASE)
-PHOTO_EXTENSION = re.compile(r"\.jpe?g\b", re.IGNORECASE)
-PHOTO_NAME = re.compile(r"(?<![\w.])[\w.%~()'’+\-]+(?:[ \t\\/]+[\w.%~()'’+\-]+)*\.jpe?g\b",
+PHOTO_EXTENSION = re.compile(r"\.(?:jpe?g|jxl|png|tiff?|bmp)\b", re.IGNORECASE)
+PHOTO_NAME = re.compile(r"(?<![\w.])[\w.%~()'’+\-]+(?:[ \t\\/]+[\w.%~()'’+\-]+)*\.(?:jpe?g|jxl|png|tiff?|bmp)\b",
                         re.IGNORECASE)
 PHOTO_DIRECTORY = re.compile(r"(?<![\w.])(?:[\w.%~()'’+ -]+[\\/])+(?=<photo-[0-9a-f]{16}>)")
 PATH_FIELDS = frozenset(("path", "paths", "sources", "checkpoints", "temporary", "logs", "executable", "bootstrap_log"))

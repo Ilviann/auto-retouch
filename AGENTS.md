@@ -12,7 +12,7 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
 - App name: Auto ReTouch. App author: Neyrome.
 - Stages may modify pixels, typed context, or both. Preserve immutable source EXIF;
   validate context provenance/coordinates and required/optional dependencies.
-- Exports preserve source capture metadata and add tool/version provenance. Update
+- Except for metadata-free BMP, exports preserve source capture metadata and add tool/version provenance. Update
   technical fields to match the output; verify transfer and never silently drop EXIF.
 - Initial GUI: PySide6 with Qt Widgets. Isolate toolkit code in `ui/qt/`; shared
   application services expose plain-Python commands/state/events and must run
@@ -30,7 +30,7 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
   a stage does not require changing the UI shell or schedulers.
 - Reference workload: approximately 500 JPEG studio portraits.
 - Retouch all exposed skin, with multiple people supported in a single photo.
-- Initial export: JPEG with compression controls. WebP, JPEG XL, and AVIF come later.
+- Support JPEG, JPEG XL, PNG, TIFF and BMP exports with format-specific controls. BMP omits EXIF. WebP and AVIF come later.
 - Minimum system RAM: 16 GB. Keep image/mask buffers and queues bounded.
 - Paid photography use requires commercial-use rights for selected checkpoints
   and dependencies; do not infer weights' terms from code licensing alone.
@@ -87,7 +87,7 @@ JPEG receipts. Staged jobs also recover lossless image-stage checkpoints. See
 `docs/verification/sequential-jobs.md` and `docs/verification/staged-jobs.md`.
 Toolkit-free worker transport now runs and controls saved jobs from the prepared
 interpreter. See `docs/verification/worker-transport.md`. The desktop batch workflow
-now supports source selection, preflight, JPEG settings, progress, pause, cancel,
+now supports source selection, preflight, export settings, progress, pause, cancel,
 and saved-job resume. See `docs/verification/desktop-batch.md`.
 No production neural stage or checkpoint has been selected. Synthetic reference
 tests do not establish portrait quality.
@@ -118,7 +118,7 @@ tests do not establish portrait quality.
   automatically. Expose logging failures rather than claiming records were saved.
 - Snapshot active jobs; editor changes must not mutate a running pipeline. Validate
   real path relationships, output collisions, JSON, and checkpoints before work.
-- Preserve intermediate precision and metadata; use final JPEG encoding only at
+- Preserve intermediate precision and metadata; encode the final output only at
   export. Limit temporary cleanup to application-owned job artifacts.
 - Test behavior and recovery appropriately. Model changes also require visual
   review; automated scores alone do not establish acceptable retouching.

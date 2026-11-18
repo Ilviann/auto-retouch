@@ -92,11 +92,13 @@ class Xmp:
         parent.appendChild(node)
         return node
 
-    def for_output(self, size, software, processed_at, pipeline_sha256, previous_software):
+    def for_output(self, size, software, processed_at, pipeline_sha256, previous_software, *, output_format="JPEG"):
         width, height = size
         previous_xmp_software = sorted({_value(node) for node in self.fields(TIFF, "Software")}
                                        - {"", previous_software})
         for namespace, name, value in (
+                ("http://purl.org/dc/elements/1.1/", "format", {"JPEG": "image/jpeg", "JPEG XL": "image/jxl",
+                 "TIFF": "image/tiff", "PNG": "image/png"}[output_format]),
                 (TIFF, "Orientation", 1), (TIFF, "ImageWidth", width), (TIFF, "ImageLength", height),
                 (TIFF, "Software", software), (EXIF, "PixelXDimension", width),
                 (EXIF, "PixelYDimension", height), (EXIF, "ColorSpace", 1), (PHOTOSHOP, "ICCProfile", "sRGB")):

@@ -21,6 +21,7 @@ from retouching_tool.application.service import ApplicationService
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
+from retouching_tool.imaging.export_settings import JxlSettings, PngSettings
 from retouching_tool.storage.artifacts import MANIFEST_LIMIT
 from retouching_tool.storage.tiff_pixels import TIFF_OVERHEAD_LIMIT
 
@@ -58,6 +59,21 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(event["code"], code)
         self.assertIn("Traceback", event["exception"])
         return event
+
+    def test_export_space_and_unavailable_jxl_codec(self):
+        self.jpeg("portrait.jpeg", (700, 900))
+        index = self.batch.index((self.source,))
+        jpeg = self.batch.estimate(index, mode="sequential")
+        plan = self.batch.preflight(index, self.output, mode="sequential", settings=PngSettings())
+        self.assertGreater(plan.budget.output_bytes, jpeg.output_bytes)
+        self.assertGreaterEqual(plan.budget.output_bytes, 700 * 900 * 3)
+        self.assertEqual(plan.images[0].output, self.output / "portrait.png")
+        with patch.dict(sys.modules, {"pillow_jxl": None}):
+            event = self.failure("JXL_CODEC_UNAVAILABLE", lambda: self.batch.preflight(
+                index, self.output, mode="sequential", settings=JxlSettings(), job_id="job"))
+        self.assertEqual((event["index_id"], event["job_id"], event["export_format"]),
+                         (index.index_id, "job", "JPEG XL"))
+        self.assertIn("requirements/export-jxl.lock", event["message"])
 
     def test_discovery_deduplicates_explicit_files_and_folders_without_decoding(self):
         flat = self.jpeg("z.JPG", mode="L")

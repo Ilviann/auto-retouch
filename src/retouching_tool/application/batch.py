@@ -8,6 +8,7 @@ import stat
 from uuid import uuid4
 
 from ..errors import RetouchingError
+from ..imaging.export_settings import ExportSettings, JpegSettings, JxlSettings, export_relative_path, output_reservation, require_jxl
 from ..imaging.jpeg import JpegHeader, inspect_jpeg_header
 from ..pipeline.image_state import RGB_FLOAT32_BYTES_PER_PIXEL
 from ..storage.artifacts import MANIFEST_LIMIT
@@ -100,9 +101,9 @@ def _jpeg_name(path):
     return path.suffix.lower() in JPEG_EXTENSIONS
 
 
-def _space_budget(images, mode, extra_scratch_bytes):
+def _space_budget(images, mode, extra_scratch_bytes, settings):
     largest = max(image.working_bytes for image in images)
-    output = 2 * sum(image.stamp.size for image in images)
+    output = sum(output_reservation(settings, image.stamp.size, image.working_bytes) for image in images)
     if mode == "sequential":
         return SpaceBudget(largest, BASE_SCRATCH_BYTES, 0, 0, 0, 0, extra_scratch_bytes, output)
     count = len(images)
@@ -133,14 +134,16 @@ class BatchService:
         self.scratch = scratch
         self.diagnostics = diagnostics
 
-    def estimate(self, index: SourceIndex, *, mode: str, selected_ids=None) -> SpaceBudget | None:
+    def estimate(self, index: SourceIndex, *, mode: str, selected_ids=None, settings=JpegSettings()) -> SpaceBudget | None:
         """Estimate from indexed headers alone, without needing a destination."""
         if mode not in ("sequential", "staged"):
             raise RetouchingError("BATCH_SETTINGS_INVALID", "Select sequential or staged mode.")
+        if not isinstance(settings, ExportSettings):
+            raise RetouchingError("BATCH_SETTINGS_INVALID", "Select a supported export format and settings.")
         images = self._select(index, selected_ids, allow_empty=True)
         if not images or any(image.header is None for image in images):
             return None
-        return _space_budget(images, mode, 0)
+        return _space_budget(images, mode, 0, settings)
 
     def index(self, sources, *, recursive: bool = False) -> SourceIndex:
         """Combine launch/UI sources. The first selected folder owning a file supplies its relative path."""
@@ -233,17 +236,22 @@ class BatchService:
 
     def preflight(self, index: SourceIndex, destination: Path, *, mode: str,
                   selected_ids=None, extra_scratch_bytes: int = 0, job_id: str | None = None,
-                  preview_request_id: str | None = None) -> BatchPlan:
+                  preview_request_id: str | None = None, settings=JpegSettings()) -> BatchPlan:
         """Revalidate a frozen selection and estimate initial space. Call again at job start."""
         context = {"index_id": index.index_id, "job_id": job_id, "mode": mode, "destination_path": destination,
                    "preview_request_id": preview_request_id}
         try:
             if mode not in ("sequential", "staged") or type(extra_scratch_bytes) is not int or extra_scratch_bytes < 0:
                 raise RetouchingError("BATCH_SETTINGS_INVALID", "Select sequential or staged mode and a nonnegative extra scratch budget.")
+            if not isinstance(settings, ExportSettings):
+                raise RetouchingError("BATCH_SETTINGS_INVALID", "Select a supported export format and settings.")
+            context["export_format"] = settings.format
+            if isinstance(settings, JxlSettings):
+                require_jxl()
             selected = self._select(index, selected_ids)
             destination, scratch, scratch_parent = self.validate_folders(index, destination)
-            planned, probes = self._plan_images(selected, destination, scratch, context)
-            budget = _space_budget(selected, mode, extra_scratch_bytes)
+            planned, probes = self._plan_images(selected, destination, scratch, context, settings)
+            budget = _space_budget(selected, mode, extra_scratch_bytes, settings)
             volumes = volume_budgets(((destination, destination, budget.output_bytes),
                                       (scratch, scratch_parent, budget.scratch_bytes)))
             plan = BatchPlan(index.index_id, mode, destination, scratch, planned, budget, volumes)
@@ -298,7 +306,7 @@ class BatchService:
         destination_chain = directory_chain(destination)
         scratch_chain = directory_chain(scratch_parent)
         if destination == scratch or (scratch == scratch_parent and destination_chain[0] == scratch_chain[0]):
-            raise RetouchingError("SCRATCH_IS_DESTINATION", "Choose distinct folders for temporary artifacts and JPEG exports.")
+            raise RetouchingError("SCRATCH_IS_DESTINATION", "Choose distinct folders for temporary artifacts and exports.")
         for root in index.roots:
             try:
                 unchanged = root.path.resolve(strict=True) == root.path and file_identity(root.path.stat()) == root.identity
@@ -317,7 +325,7 @@ class BatchService:
         return destination, scratch, scratch_parent
 
     @staticmethod
-    def _plan_images(selected, destination, scratch, context):
+    def _plan_images(selected, destination, scratch, context, settings):
         planned = []
         outputs = set()
         output_directories = set()
@@ -333,7 +341,7 @@ class BatchService:
                 raise RetouchingError("SOURCE_CHANGED", f"Cannot reopen {image.path}. Re-index the sources.") from exc
             if not unchanged:
                 raise RetouchingError("SOURCE_CHANGED", f"Source changed since indexing: {image.path}. Re-index the sources.")
-            output, existing_parent = output_path(destination, image.relative_path)
+            output, existing_parent = output_path(destination, export_relative_path(image.relative_path, settings))
             if (output in outputs or output in output_directories or any(parent in outputs for parent in output.parents)
                     or scratch.is_relative_to(output)):
                 raise RetouchingError("OUTPUT_COLLISION", f"Planned paths conflict at {output}. Change the source selection or folders.")

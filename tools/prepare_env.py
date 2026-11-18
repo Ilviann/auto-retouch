@@ -94,6 +94,7 @@ def prepare(root, log, *, check=False, input_fn=input, runner=run):
                  component="setup", backend=backend, pytorch_backend=pytorch_backend)
         runner([str(python), "-B", str(root / "tools" / "prepare_env.py"), "--internal-remove-conflicts", backend, pytorch_backend], log, timeout=120)
         runner([str(python), "-m", "pip", "install", "--require-hashes", "--only-binary=:all:", "--no-deps",
+                "-r", str(root / "requirements" / "export-jxl.lock"),
                 "-r", str(root / "requirements" / f"{backend}.lock"),
                 "-r", str(root / "requirements" / f"pytorch-{pytorch_backend}.lock")], log,
                timeout=14400 if pytorch_backend == "cuda" else 1800)

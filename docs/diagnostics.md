@@ -31,7 +31,9 @@ causes in the local logs.
 issues. Input metadata/decode errors, unsupported export metadata, write errors,
 collisions and `OUTPUT_VALIDATION_FAILED` carry causes or tracebacks.
 `OUTPUT_JPEG_VERIFIED` records the pipeline hash and compression options after
-publication. Failed cleanup has its own event. See
+publication. JPEG XL, PNG, TIFF and BMP use `OUTPUT_JXL_VERIFIED`,
+`OUTPUT_PNG_VERIFIED`, `OUTPUT_TIFF_VERIFIED` and `OUTPUT_BMP_VERIFIED`.
+These events record encoder options and the metadata policy. Failed cleanup has its own event. See
 [JPEG verification](verification/jpeg-boundary.md).
 
 Batch preparation records header and scan failures with the index ID, source path

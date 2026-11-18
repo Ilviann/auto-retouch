@@ -20,7 +20,7 @@ from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
-from retouching_tool.imaging.jpeg import JpegSettings
+from retouching_tool.imaging.export_settings import JpegSettings, PngSettings, TiffSettings, parse_settings
 from retouching_tool.jobs.journal import MAX_ATTEMPTS, JobJournal, JournalError, open_journal, runner_lock
 from retouching_tool.operations.reference import Exposure, ReferenceOperation
 from retouching_tool.pipeline.definition import OperationDescriptor
@@ -87,7 +87,7 @@ def die(*args, **kwargs):
 
 rename = Path.rename
 def fail_pending_rename(path, target):
-    if path.suffix == '.pending' and Path(target).suffix == '.jpg':
+    if path.suffix == '.pending':
         die()
     return rename(path, target)
 
@@ -146,6 +146,30 @@ with fault:
             scratch = Path(journal.snapshot()["scratch"])
             return {row["image_id"]: scratch / f"auto-retouch-job-{row['store_id']}"
                     for row in journal.images() if row["store_id"] is not None}
+
+    def test_new_format_recovery_uses_frozen_suffix(self):
+        source = self.jpeg("nested/a.jpeg")
+        for mode, settings, suffix in (("sequential", PngSettings(1), ".png"), ("staged", TiffSettings(), ".tif")):
+            with self.subTest(mode=mode):
+                job_id = self.create(mode=mode, settings=settings)
+                before = self.interrupted_worker(job_id, "before")
+                output = self.destination / source.relative_to(self.source).with_suffix(suffix)
+                self.assertEqual(before.images[0].output, output)
+                with patch(APP_JOBS + ".export_image", side_effect=AssertionError("Unexpected encode")):
+                    recovered = self.open_app().job_service.run(job_id)
+                self.assertEqual(recovered.settings, settings)
+                self.assertEqual(recovered.status, "completed")
+                with Image.open(output) as image:
+                    self.assertEqual(image.getexif()[271], "Generated Test Camera")
+
+    def test_converted_name_collisions_and_legacy_settings(self):
+        self.jpeg("same.jpg")
+        self.jpeg("same.jpeg")
+        with self.assertRaises(RetouchingError) as caught:
+            self.create(settings=PngSettings())
+        self.assertEqual(caught.exception.code, "OUTPUT_COLLISION")
+        self.assertEqual(parse_settings({"quality": 80, "progressive": True, "subsampling": "4:2:0"}),
+                         JpegSettings(80, "4:2:0", True))
 
     def test_staged_passes_match_sequential_and_restore_context(self):
         self.jpeg("a.jpg")
@@ -339,7 +363,7 @@ with fault:
         tiff.unlink()
         control = JobControl()
         control.cancel.set()
-        with patch(APP_JOBS + ".export_jpeg", side_effect=AssertionError("Unexpected JPEG encode")):
+        with patch(APP_JOBS + ".export_image", side_effect=AssertionError("Unexpected JPEG encode")):
             result = self.jobs.run(job_id, control=control)
         self.assertEqual((result.status, result.images[0].attempts), ("completed", 4))
         self.assertEqual(output.read_bytes(), original)

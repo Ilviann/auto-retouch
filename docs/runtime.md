@@ -25,6 +25,14 @@ selection were retained, and the prepared lock identity was refreshed after
 checking the installed pins and codec support. See
 [JPEG verification](verification/jpeg-boundary.md).
 
+Setup includes the Windows CPython 3.14 JPEG XL wheel from
+`requirements/export-jxl.lock`. JPEG XL preflight checks the codec and saved jobs
+record its version. An existing installation can add that codec alone with
+`.venv\Scripts\python -m pip install --require-hashes --no-deps -r requirements/export-jxl.lock`.
+The publisher declares GPL-3.0-or-later. The wheel is installed from PyPI.
+Review its license and bundled library notices when preparing a redistributable build.
+[Publisher release](https://pypi.org/project/pillow-jxl-plugin/1.3.8/).
+
 ## Python environment
 
 - Target Python 3.14.x. The proposed initial target is standard 64-bit CPython on
@@ -187,7 +195,7 @@ contract. A successfully loaded valid pipeline becomes the current pipeline and
 participates in normal last-used persistence.
 The desktop also remembers paths after a successful source scan. Scan the
 restored or command-line sources to build a fresh index. Recursion, destination,
-schedule and JPEG options start at their setup defaults, while reopened jobs
+schedule and export options start at their setup defaults, while reopened jobs
 use their frozen settings.
 
 Resolve relative CLI file/directory paths against the caller's working directory.

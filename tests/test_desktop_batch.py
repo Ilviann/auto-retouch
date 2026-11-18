@@ -317,6 +317,39 @@ class DesktopBatchTests(unittest.TestCase):
         finally:
             self.close_window(window)
 
+    def test_format_selection_rechecks_destination_and_starts_staged_png_worker(self):
+        _, panel = self.open_window((self.source,))
+        self.wait_for_scan(panel, 1)
+        panel.destination.setText(str(self.destination))
+        self.wait_for_space(panel)
+        panel.format.setCurrentText("JPEG XL")
+        self.assertTrue(panel.jxl_effort.isVisible())
+        panel.jxl_lossless.setChecked(True)
+        self.assertFalse(panel.jxl_quality.isEnabled())
+        panel.format.setCurrentText("TIFF")
+        self.assertTrue(panel.tiff_compression.isVisible())
+        self.assertFalse(panel.jxl_effort.isVisible())
+        panel.format.setCurrentText("BMP")
+        self.assertTrue(panel.bmp_dpi.isVisible())
+        self.assertTrue(any("EXIF" in label.text() and label.isVisible() for label in panel.export.findChildren(QLabel)))
+        collision = self.destination / "a.png"
+        collision.touch()
+        panel.format.setCurrentText("PNG")
+        self.assertFalse(panel.start.isEnabled())
+        self.wait_for_space(panel, ready=False)
+        self.assertIn("OUTPUT_COLLISION", panel.space.text())
+        collision.unlink()
+        panel.mode.setCurrentIndex(1)
+        panel.png_compression.setValue(2)
+        self.wait_for_space(panel)
+        panel.start.click()
+        self.until(lambda: panel.history.isEnabled() and panel.results.rowCount() == 1, "PNG worker did not finish")
+        self.assertIn("1 exported", panel.job_counts.text())
+        self.assertIn("PNG lossless, compression 2", panel.job_metadata.text())
+        with Image.open(collision) as output:
+            self.assertEqual(output.format, "PNG")
+            self.assertEqual(output.getexif()[271], "Desktop Test Camera")
+
     def test_auto_preflight_after_folder_selection_rescan_and_destination_edit(self):
         _, panel = self.open_window()
         self.assertIsNone(panel.findChild(QPushButton, "checkBatchSpace"))

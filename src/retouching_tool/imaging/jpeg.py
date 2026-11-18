@@ -2,21 +2,19 @@
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
 from io import BytesIO
 import os
 from pathlib import Path
-import re
-import tempfile
 from time import perf_counter
 
 from .. import PRODUCT_NAME, __version__
 from ..errors import RetouchingError
 from ..pipeline.image_state import ImageState, SourceMetadata
-from .exif import EXIF_HEADER, ORIENTATION, for_output, read_exif, write_exif
-from .iptc import PHOTOSHOP, iptc_marker, read_iptc
+from .export_settings import JpegSettings
+from .exif import EXIF_HEADER, ORIENTATION, read_exif
+from .iptc import PHOTOSHOP, read_iptc
 from .xmp import EXIF, EXTENDED_XMP_HEADER, TIFF, XMP_HEADER, Xmp
 
 MAX_PIXELS = 80_000_000
@@ -38,19 +36,6 @@ class JpegRuntime:
         self.diagnostics.emit(code, message, component="imaging", image_id=self.image_id,
                               job_id=self.job_id, attempt=self.attempt,
                               preview_request_id=self.preview_request_id, **details)
-
-
-@dataclass(frozen=True)
-class JpegSettings:
-    quality: int = 92
-    subsampling: str = "4:4:4"
-    progressive: bool = False
-
-    def __post_init__(self):
-        if (type(self.quality) is not int or not 1 <= self.quality <= 95
-                or self.subsampling not in ("4:4:4", "4:2:2", "4:2:0")
-                or type(self.progressive) is not bool):
-            raise ValueError("Set JPEG quality to 1–95, chroma to 4:4:4/4:2:2/4:2:0 and progressive to on/off")
 
 
 @dataclass(frozen=True)
@@ -273,12 +258,12 @@ def encode_rgb_samples(state):
             or pixels.shape[2] != 3 or pixels.flags.writeable
             or not 1 <= state.width <= 65500 or not 1 <= state.height <= 65500
             or state.width * state.height > MAX_PIXELS):
-        raise ValueError("Invalid working RGB layout/dimensions for JPEG export")
+        raise ValueError("Invalid working RGB layout/dimensions for RGB export")
     result = np.empty(pixels.shape, dtype=np.uint8)
     for start in range(0, state.height, STRIP_ROWS):
         strip = pixels[start:start + STRIP_ROWS]
         if not np.isfinite(strip).all() or strip.min() < 0 or strip.max() > 1:
-            raise ValueError("JPEG export requires finite linear samples in [0, 1]")
+            raise ValueError("RGB export requires finite linear samples in [0, 1]")
         encoded = np.where(strip <= .0031308, 12.92 * strip, 1.055 * strip ** (1 / 2.4) - .055)
         result[start:start + STRIP_ROWS] = np.rint(encoded * 255).astype(np.uint8)
     return result
@@ -304,74 +289,7 @@ def _verify(path, size, expected_exif, raw_exif, xmp, profile, iptc):
 
 def export_jpeg(state, destination, *, settings: JpegSettings, pipeline_sha256: str,
                 runtime: JpegRuntime, before_publish=None):
-    """Verify a pending JPEG, optionally journal it, then publish without replacing a file."""
-    pending = None
-    started = perf_counter()
-    try:
-        from PIL import Image
-
-        destination = Path(destination)
-        if destination.suffix.lower() not in (".jpg", ".jpeg") or os.path.isreserved(destination.name):
-            raise RetouchingError("OUTPUT_PATH_INVALID", "Choose a valid .jpg or .jpeg destination filename.")
-        destination = destination.parent.resolve(strict=True) / destination.name
-        if os.path.lexists(destination):
-            raise RetouchingError("OUTPUT_COLLISION", "JPEG destination already exists. Choose a different filename.")
-        if not isinstance(settings, JpegSettings) or not isinstance(pipeline_sha256, str) or not re.fullmatch(
-                r"[0-9a-f]{64}", pipeline_sha256):
-            raise RetouchingError("OUTPUT_SETTINGS_INVALID", "JPEG export requires compression settings and a pipeline SHA-256.")
-        try:
-            pixels = encode_rgb_samples(state)
-        except ValueError as exc:
-            raise RetouchingError("OUTPUT_STATE_INVALID", "The image state is invalid or exceeds the JPEG working limit.") from exc
-        size = (state.width, state.height)
-        try:
-            original = read_exif(state.metadata.exif)
-            expected, previous = for_output(original, size, SOFTWARE)
-            raw_exif = write_exif(expected)
-            xmp = Xmp(state.metadata.xmp).for_output(
-                size, SOFTWARE, datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-                pipeline_sha256, previous)
-            profile = _srgb().tobytes()
-            extra = iptc_marker(state.metadata.iptc)
-        except RetouchingError:
-            raise
-        except Exception as exc:
-            raise RetouchingError("OUTPUT_METADATA_INVALID",
-                                  "Cannot prepare verified EXIF, XMP and IPTC metadata for this export.") from exc
-        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".auto-retouch-", suffix=".pending",
-                                         delete=False) as stream:
-            pending = Path(stream.name)
-            with Image.fromarray(pixels) as image:
-                image.save(stream, format="JPEG", quality=settings.quality, subsampling=settings.subsampling,
-                           progressive=settings.progressive, exif=raw_exif, icc_profile=profile, xmp=xmp, extra=extra)
-            stream.flush()
-            os.fsync(stream.fileno())
-        del pixels
-        try:
-            _verify(pending, size, expected, raw_exif, xmp, profile, state.metadata.iptc)
-        except Exception as exc:
-            raise RetouchingError("OUTPUT_VALIDATION_FAILED",
-                                  "JPEG did not pass verification. Check technical details before retrying.") from exc
-        if before_publish is not None:
-            before_publish(pending, destination)
-        try:
-            pending.rename(destination)
-        except FileExistsError as exc:
-            raise RetouchingError("OUTPUT_COLLISION", "JPEG destination was created during export. Choose another filename.") from exc
-        pending = None
-        runtime.emit("OUTPUT_JPEG_VERIFIED", "Published JPEG with verified capture metadata and processing history",
-                     output_path=str(destination), width=size[0], height=size[1], pipeline_sha256=pipeline_sha256,
-                     quality=settings.quality, subsampling=settings.subsampling, progressive=settings.progressive,
-                     removed_exif_thumbnail=original.had_thumbnail, duration_ms=(perf_counter() - started) * 1000)
-        return destination
-    except Exception as exc:
-        _report_failure(runtime, exc, destination, "OUTPUT_WRITE_FAILED",
-                        "Cannot write JPEG export. Check the destination permissions and free space.", "output_path")
-        raise
-    finally:
-        if pending is not None:
-            try:
-                pending.unlink(missing_ok=True)
-            except OSError:
-                runtime.emit("OUTPUT_CLEANUP_FAILED", "Could not remove the incomplete JPEG export. Inspect the pending file.",
-                             output_path=str(destination), pending_path=str(pending), level="ERROR", exc_info=True)
+    from .export import export_image
+    jpeg_settings = settings if isinstance(settings, JpegSettings) else None
+    return export_image(state, destination, settings=jpeg_settings, pipeline_sha256=pipeline_sha256,
+                        runtime=runtime, before_publish=before_publish)

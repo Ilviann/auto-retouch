@@ -4,7 +4,7 @@ Author: Neyrome.
 
 A Windows 11 desktop project for fully local batch retouching of studio portraits.
 Stages can change pixels, produce reusable region/mask context, or do both.
-Exports preserve source capture EXIF and record processing by the tool.
+JPEG, JPEG XL, PNG and TIFF exports preserve supported capture EXIF and record processing by the tool. BMP exports omit photo metadata.
 The initial GUI uses PySide6 with Qt Widgets, isolated behind toolkit-independent
 application commands and events to keep a future GUI replacement localized.
 The application targets Python 3.14, already installed system-wide, with all
@@ -24,8 +24,17 @@ before sharing it.
 The reference workload is approximately 500 JPEG photos on a consumer NVIDIA RTX
 20-series GPU with at least 6 GB VRAM. Natural and Beauty presets are required.
 Minimum system RAM is 16 GB. Retouching covers all exposed skin and multiple people
-per image. Models must permit commercial use for paid photography work. Export
-settings initially support JPEG compression; WebP, JPEG XL, and AVIF follow later.
+per image. Models must permit commercial use for paid photography work.
+Choose an output format under **Batch and export settings**.
+
+| Format | Controls |
+| --- | --- |
+| JPEG | Quality, chroma subsampling, progressive encoding |
+| JPEG XL | Quality or lossless mode, encoding effort |
+| PNG | Lossless compression level |
+| TIFF | Uncompressed or lossless Deflate |
+| BMP | Print resolution in DPI, 24-bit RGB, no EXIF |
+
 Unattended processing for a couple of hours is acceptable; visual quality takes
 priority over a strict throughput deadline.
 
@@ -52,10 +61,10 @@ See [artifact evidence](docs/verification/lossless-artifacts.md).
 The headless JPEG adapter uses pinned Pillow to apply input orientation and color
 management, then verifies capture metadata, sRGB and processing history before
 publishing exports. Both headless schedules support restart recovery. Staged
-execution keeps a lossless checkpoint for each active image and encodes JPEG
+execution keeps a lossless checkpoint for each active image and encodes the selected format
 after the final stage releases its resources. Both modes run in a local worker
 process. The desktop workspace keeps the pipeline editor, source and destination
-paths, photo thumbnails, and JPEG settings on one screen. **Job progress and
+paths, photo thumbnails, and export settings on one screen. **Job progress and
 history** opens the monitor below the batch controls. See
 [JPEG verification](docs/verification/jpeg-boundary.md),
 [staged job verification](docs/verification/staged-jobs.md), and

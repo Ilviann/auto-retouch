@@ -308,7 +308,7 @@ Stage preparation normally occurs once per uninterrupted stage pass, with no
 promise that a crash/retry can avoid a reload. A stage may manage multiple local
 assets internally, but the manager must not preload every pipeline stage at once.
 
-The final export pass uses the verified JPEG receipt protocol shared with
+The final export pass uses the frozen export format and receipt protocol shared with
 sequential mode. An empty or all-disabled staged job goes directly to decode and
 export. Staged pause/cancel requests are checked before each image-stage or export
 unit. Pausing releases the current stage and keeps its committed checkpoints.

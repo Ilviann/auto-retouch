@@ -9,6 +9,7 @@ from ..config import AppConfig, FolderSettings, LoggingSettings, ScalingSettings
 from ..diagnostics.history import DiagnosticHistory
 from ..diagnostics.reports import DiagnosticReport, write_report
 from ..errors import RetouchingError
+from ..imaging.export_settings import encode_settings
 from ..jobs.journal import validate_job_id
 from ..jobs.snapshot import model_manifests, runtime_versions
 from ..json_io import atomic_json, read_json
@@ -166,7 +167,7 @@ class ApplicationService:
                     photo_names.update(image.output.name for image in status.images)
                     settings.update(mode=job.mode, recursive=job.recursive, backend=job.backend, pytorch_backend=job.pytorch_backend, versions=job.versions,
                                     pipeline=_report_pipeline(job.pipeline), pipeline_sha256=job.pipeline_sha256,
-                                    models=job.models, jpeg=asdict(job.settings), status=status.status,
+                                    models=job.models, export=encode_settings(job.settings), status=status.status,
                                     skipped_stages=[asdict(stage) for stage in status.skipped_stages],
                                     destination_path=str(job.destination), temporary=str(job.scratch),
                                     checkpoints=str(job.checkpoints),

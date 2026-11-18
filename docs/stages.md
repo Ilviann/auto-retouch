@@ -228,7 +228,8 @@ identities; retaining pixels alone is insufficient for recovery or mode equivale
 ## Metadata preservation and editing provenance
 
 Metadata handling is mandatory import/export infrastructure, outside the removable
-operation list. Read and retain source EXIF before processing. Transfer capture
+operation list. BMP explicitly omits embedded photo metadata. For the other formats,
+apply the following transfer rules. Read and retain source EXIF before processing. Transfer capture
 metadata to the final image, including camera/lens information, capture date/time,
 exposure, and GPS when present. Preserve author/copyright and existing descriptive
 metadata; the tool name is not a replacement photographer/author name.

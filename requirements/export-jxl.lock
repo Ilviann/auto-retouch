@@ -1,0 +1,2 @@
+# Local JPEG XL codec, Windows AMD64 CPython 3.14. The other formats use Pillow.
+pillow-jxl-plugin==1.3.8 --hash=sha256:6b23c83aabf4615b92ae609293d8597ca1a8d14d01ab16c703bb3a3df359796b

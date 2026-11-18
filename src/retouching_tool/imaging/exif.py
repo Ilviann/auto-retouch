@@ -185,7 +185,7 @@ def ascii_entry(value):
     return Entry(2, len(encoded), encoded)
 
 
-def write_exif(exif):
+def write_exif(exif, *, size_limit=MAX_APP_PAYLOAD):
     order = exif.order
     data = bytearray(b"II" if order == "<" else b"MM")
     data.extend(struct.pack(order + "HI", 42, 0))
@@ -195,8 +195,8 @@ def write_exif(exif):
             data.append(0)
         offset = len(data)
         data.extend(payload)
-        if len(data) + len(EXIF_HEADER) > MAX_APP_PAYLOAD:
-            raise ValueError("EXIF exceeds one JPEG APP1 segment after adding output fields")
+        if len(data) + len(EXIF_HEADER) > size_limit:
+            raise ValueError("EXIF exceeds the metadata size limit after adding output fields")
         return offset
 
     def pointer(offset):

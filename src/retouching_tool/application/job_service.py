@@ -8,7 +8,9 @@ from uuid import uuid4
 
 from ..errors import ResizeApprovalRequired, RetouchingError
 from ..imaging.scaling import fit_longest_side
-from ..imaging.jpeg import JpegRuntime, JpegSettings, decode_jpeg, export_jpeg
+from ..imaging.export import export_image
+from ..imaging.export_settings import ExportSettings, JpegSettings, JxlSettings, require_jxl
+from ..imaging.jpeg import JpegRuntime, decode_jpeg
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import (MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError,
                             open_journal, runner_lock, saved_job_files)
@@ -45,7 +47,7 @@ class JobStatus:
     stage_ids: tuple[str, ...] = ()
     pipeline_name: str = ""
     destination: Path | None = None
-    settings: JpegSettings = JpegSettings()
+    settings: ExportSettings = JpegSettings()
 
     @property
     def terminal(self) -> bool:
@@ -98,12 +100,12 @@ class JobService:
         job_id = uuid4().hex
         context = {"index_id": index.index_id, "destination_path": destination}
         try:
-            if not isinstance(settings, JpegSettings):
-                raise RetouchingError("JOB_SETTINGS_INVALID", "Provide validated JPEG compression settings.")
+            if not isinstance(settings, ExportSettings):
+                raise RetouchingError("JOB_SETTINGS_INVALID", "Provide validated export settings.")
             definition = self.pipeline.resolve_scaling(self.pipeline.preflight())
             skipped = tuple(StageSkip(item.stage.id, ", ".join(issue.code for issue in item.issues) or "disabled")
                             for item in self.pipeline.status.stages if not item.stage.enabled)
-            plan = self.batch.preflight(index, destination, mode=mode, selected_ids=selected_ids, job_id=job_id)
+            plan = self.batch.preflight(index, destination, mode=mode, selected_ids=selected_ids, job_id=job_id, settings=settings)
             if not plan.ready:
                 raise RetouchingError("JOB_SPACE_INSUFFICIENT", "Free the disk space reported by preflight before creating this job.")
             approvals = []
@@ -137,11 +139,14 @@ class JobService:
                                           image.header.width, image.header.height, image.header.header_bytes))
             context.pop("image_id")
             context.pop("source_path")
+            versions = runtime_versions(self.pipeline.backend, self.pipeline.pytorch_backend)
+            if isinstance(settings, JxlSettings):
+                versions["pillow-jxl-plugin"] = require_jxl()
             snapshot = JobSnapshot(job_id, index.index_id, index.recursive,
                                    tuple((root.path, root.identity) for root in index.roots), plan.destination,
                                    file_identity(plan.destination.stat()), plan.scratch, self.pipeline.checkpoints.resolve(),
                                    self.pipeline.backend, definition, settings,
-                                   runtime_versions(self.pipeline.backend, self.pipeline.pytorch_backend),
+                                   versions,
                                    model_manifests(definition, self.pipeline.catalog), skipped, tuple(inputs), plan.mode,
                                    self.pipeline.pytorch_backend, tuple(approvals))
             with open_journal(self.root, job_id, create=True) as journal:
@@ -212,7 +217,7 @@ class JobService:
     @staticmethod
     def _status(journal, job):
         status, rows = journal.accounting()
-        images = tuple(JobImageStatus(item.image_id, item.path, job.destination / item.relative_path,
+        images = tuple(JobImageStatus(item.image_id, item.path, job.destination / job.output_relative(item),
                                       row["status"], row["attempts"], row["warnings"], row["code"], row["message"],
                                       row["next_stage"] if job.mode == "staged" else None)
                        for item, row in zip(job.inputs, rows, strict=True))
@@ -230,6 +235,8 @@ class JobService:
                 job.pytorch_backend is not None and job.pytorch_backend != self.pipeline.pytorch_backend):
             raise RetouchingError("JOB_RUNTIME_CHANGED", "Restore the job's recorded prepared backend or create a new job.")
         current_versions = runtime_versions(job.backend, job.pytorch_backend)
+        if isinstance(job.settings, JxlSettings):
+            current_versions["pillow-jxl-plugin"] = require_jxl()
         if any(value != current_versions.get(key) for key, value in job.versions.items() if key != "windows"):
             raise RetouchingError("JOB_RUNTIME_CHANGED", "Restore the job's recorded runtime and prepared backend, or create a new job.")
         registry, catalog = self.pipeline.registry, self.pipeline.catalog
@@ -251,7 +258,7 @@ class JobService:
         pending = [(item, row) for item, row in zip(job.inputs, journal.images(), strict=True)
                    if row["status"] in ("queued", "running", "prepared")]
         largest = max((item.working_bytes for item, row in pending if row["attempts"] < MAX_ATTEMPTS), default=0)
-        remaining_output = 2 * sum(item.stamp.size for item, row in pending if row["attempts"] < MAX_ATTEMPTS)
+        remaining_output = sum(job.output_bytes(item) for item, row in pending if row["attempts"] < MAX_ATTEMPTS)
         started = False
         for item, row in pending:
             if control.cancel.is_set():
@@ -277,7 +284,7 @@ class JobService:
                 self._emit(job.job_id, "JOB_IMAGE_REPLAYED", "Replaying an uncommitted image after interruption",
                            image_id=item.image_id, attempt=attempt, source_path=item.path)
             self._process(journal, job, item, attempt)
-            remaining_output -= 2 * item.stamp.size
+            remaining_output -= job.output_bytes(item)
         else:
             failed = any(row["status"] == "failed" for row in journal.images())
             journal.set_status("completed_with_errors" if failed else "completed")
@@ -351,17 +358,17 @@ class JobService:
     def _publish(self, journal, job, item, runtime, load_state):
         def prepare_receipt(pending, destination):
             check_destination(job)
-            expected, _ = output_path(job.destination, item.relative_path)
+            expected, _ = output_path(job.destination, job.output_relative(item))
             if destination != expected or pending.parent != expected.parent:
-                raise RetouchingError("JOB_FOLDER_CHANGED", "Destination changed during JPEG export. Restore it before resuming.")
+                raise RetouchingError("JOB_FOLDER_CHANGED", "Destination changed during export. Restore it before resuming.")
             receipt = PreparedExport.capture(pending)
             journal.prepared(item.image_id, receipt.encode(), runtime.diagnostics.warnings)
 
         output = prepare_parent(job, item)
-        export_jpeg(load_state(), output, settings=job.settings, pipeline_sha256=job.pipeline_sha256,
+        export_image(load_state(), output, settings=job.settings, pipeline_sha256=job.pipeline_sha256,
                     runtime=runtime, before_publish=prepare_receipt)
         journal.complete(item.image_id)
-        self._emit(job.job_id, "JOB_IMAGE_COMPLETED", "Committed the verified JPEG result", image_id=item.image_id,
+        self._emit(job.job_id, "JOB_IMAGE_COMPLETED", "Committed the verified export", image_id=item.image_id,
                    attempt=runtime.attempt, output_path=output, warnings=runtime.diagnostics.warnings)
 
     def _decode(self, item, runtime):

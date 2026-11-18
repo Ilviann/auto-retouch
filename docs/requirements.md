@@ -43,14 +43,14 @@ presets rather than fixed processing paths.
 | U31 | Use PySide6 with Qt Widgets for the initial desktop GUI. |
 | U32 | Keep the GUI separate behind an application boundary so another toolkit can replace it if problems arise. |
 | U33 | Stages return image state: they may change pixels, add/update contextual analysis data, or do both. Later operations can use optional context such as face/eye/teeth/person regions. |
-| U34 | Transfer source EXIF metadata, including camera and capture information, to the final image, and add information identifying processing by this tool. |
+| U34 | Transfer source EXIF metadata, including camera and capture information, to the final image and identify processing by this tool. BMP exports omit EXIF. |
 | U35 | App name: Auto ReTouch (exact capitalization). |
 | U36 | Every editable pipeline stage can be skipped by turning it off. |
 | U37 | A stage missing a required AI model file must be turned off and show an error status on its own UI card. |
 | U38 | Ask the user to download required AI model files and place them in the configured model folder (`models/` by default). Provide the model version, publisher link, required filenames and destination paths. |
 | U39 | Retouch all exposed human skin, including multiple people in one photo. Face/neck-only coverage is insufficient for the first version. |
-| U40 | Provide export settings. Initial export support is JPEG with compression controls. |
-| U41 | Plan WebP, JPEG XL, and AVIF export support for later versions. |
+| U40 | Provide export settings. Support JPEG, JPEG XL, PNG, TIFF and BMP with format-specific controls. Omit EXIF when exporting BMP. |
+| U41 | Plan WebP and AVIF export support for later versions. |
 | U42 | The tool is intended for paid photography work; selected model/checkpoint licenses must permit that commercial use. |
 | U43 | Minimum system RAM is 16 GB. |
 | U44 | After source indexing, reserve temporary space of at least the largest uncompressed source image plus 200 MB in sequential mode, or all source images uncompressed plus 200 MB in staged mode. |
@@ -103,13 +103,13 @@ Representative coverage and visual acceptance remain unreviewed.
 | F08 | Show queued, running, completed, failed, and canceled work, with progress, estimated remaining time, and actionable errors. Review flags are separate from execution status. |
 | F09 | Pause after the current image-stage unit, resume, cancel remaining work, and recover interrupted jobs in either scheduling mode. |
 | F10 | Continue past an isolated corrupt image or processing failure and provide a batch summary. |
-| F11 | Initial export settings provide JPEG compression/quality controls, original pixel dimensions by default, destination, and names. Preserve originals and handle output-name collisions explicitly. Keep export adapters separate for later WebP, JPEG XL, and AVIF support. |
+| F11 | Export settings provide format and encoder controls, original pixel dimensions by default, destination, and names. Preserve originals and handle output-name collisions explicitly. Keep export adapters separate for later WebP and AVIF support. |
 | F12 | Preserve source capture EXIF in exports and add tool/version processing provenance. Normalize orientation, dimensions, and profile-related fields to match the actual output; keep original capture time and author/copyright information. |
 | F13 | Every editable stage has an on/off control. Turning it off preserves its position and parameters; allow multiple instances of the same operation with distinct parameters. |
 | F14 | Validate pipeline structure/parameters separately from asset availability. Load structurally valid pipelines with missing checkpoints, turn affected stages off, and show their errors. Unknown schema/operations and invalid parameters remain explicit import errors; enabled stages with unresolved required context block processing. |
 | F15 | Preserve relative source subdirectories in destination by default, preventing same-name inputs from different folders from colliding. Existing-output policy is explicit; no silent overwrite. |
 | F16 | Snapshot inputs and pipeline settings at batch start. Editing the pipeline affects previews and future jobs, not the running job. |
-| F17 | In staged mode, use lossless intermediate data with defined precision and color metadata, retaining required masks and other artifacts. Encode the final JPEG only at export. |
+| F17 | In staged mode, use lossless intermediate data with defined precision and color metadata, retaining required masks and other artifacts. Encode the selected output format only at export. |
 | F18 | Let the user configure the temporary root; create a dedicated job subdirectory, check free space, and provide safe cleanup of application-owned artifacts. Preserve required artifacts for resumable jobs. |
 | F19 | Proposed script names are `prepare_env.cmd` and `run.cmd`. Preparation creates or verifies a project-local `.venv` using Python 3.14 and installs reproducible application dependencies. A check-only mode does not create or modify the environment. |
 | F20 | The launcher invokes `.venv\Scripts\python.exe` explicitly. It forwards repeatable `--source` paths and optional `--pipeline` and `--config` paths. It opens the application without automatically starting photo processing. |
@@ -346,8 +346,8 @@ only faces cannot by themselves satisfy this scope.
     expected filenames/paths, activation prevention, recheck/recovery without
     auto-enabling, and dependency messages after a producer is disabled. Confirm
     manual model installation and no silent stage omission from an active job.
-18. **Export and resource planning:** verify JPEG settings reach the exporter,
-    metadata survives, and output size assumptions remain visible. Check disk
+18. **Export and resource planning:** verify format settings reach the exporter,
+    supported metadata survives in JPEG, JPEG XL, PNG and TIFF, BMP omits EXIF, and output size assumptions remain visible. Check disk
     formulas on empty/single/mixed-resolution batches, shared/separate volumes,
     unknown dimensions, pipeline changes, resume, and low-disk transitions. Measure
     CPU memory against 16 GB and include multi-person/full-body skin examples in

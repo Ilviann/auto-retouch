@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
-from ...imaging.jpeg import JpegSettings
+from ...imaging.export_settings import FORMATS, BmpSettings, JpegSettings, JxlSettings, PngSettings, TiffSettings
 from .photo_grid import PhotoGrid
 from .picture_window import PictureWindow
 from .stage_preview_window import StagePreviewWindow, confirm_resize
@@ -167,7 +167,7 @@ class BatchPanel(QWidget):
         self.images.itemActivated.connect(self._view_original)
         layout.addWidget(self.images, 1)
 
-        self.export = QGroupBox("Batch and JPEG settings")
+        self.export = QGroupBox("Batch and export settings")
         form = QFormLayout(self.export)
         self.mode = QComboBox()
         self.mode.setObjectName("batchMode")
@@ -175,18 +175,46 @@ class BatchPanel(QWidget):
         self.mode.addItem("Staged · one operation at a time", "staged")
         self.mode.currentIndexChanged.connect(self._invalidate_plan)
         form.addRow("Schedule", self.mode)
-        self.quality = QSpinBox(minimum=1, maximum=95)
+        self.format = QComboBox()
+        self.format.setObjectName("exportFormat")
+        self.format.addItems(FORMATS)
+        form.addRow("Export format", self.format)
+
+        self.quality = QSpinBox(minimum=1, maximum=95, value=JpegSettings().quality)
         self.quality.setObjectName("jpegQuality")
         self.chroma = QComboBox()
         self.chroma.setObjectName("jpegChroma")
         self.chroma.addItems(("4:4:4", "4:2:2", "4:2:0"))
         self.progressive = QCheckBox("Progressive")
         self.progressive.setObjectName("jpegProgressive")
-        defaults = JpegSettings()
-        self.quality.setValue(defaults.quality)
-        self.chroma.setCurrentText(defaults.subsampling)
-        self.progressive.setChecked(defaults.progressive)
-        form.addRow("JPEG quality and chroma", _row(self.quality, self.chroma, self.progressive))
+        self.jxl_quality = QSpinBox(minimum=1, maximum=99, value=JxlSettings().quality)
+        self.jxl_lossless = QCheckBox("Lossless")
+        self.jxl_lossless.toggled.connect(self.jxl_quality.setDisabled)
+        self.jxl_effort = QSpinBox(minimum=1, maximum=9, value=JxlSettings().effort)
+        self.png_compression = QSpinBox(minimum=0, maximum=9, value=PngSettings().compression)
+        self.tiff_compression = QComboBox()
+        self.tiff_compression.addItems(("Deflate", "None"))
+        self.bmp_dpi = QSpinBox(minimum=1, maximum=2400, value=BmpSettings().dpi, suffix=" DPI")
+        first_option = form.rowCount()
+        options = (
+            ("JPEG", "Quality and chroma", _row(self.quality, self.chroma, self.progressive)),
+            ("JPEG XL", "Quality", _row(self.jxl_quality, self.jxl_lossless)),
+            ("JPEG XL", "Encoding effort", self.jxl_effort),
+            ("PNG", "Compression level", self.png_compression),
+            ("TIFF", "Compression", self.tiff_compression),
+            ("BMP", "Print resolution", self.bmp_dpi),
+            ("BMP", "", QLabel("24-bit RGB. EXIF and other photo metadata are omitted.", wordWrap=True)),
+        )
+        for _, label, control in options:
+            form.addRow(label, control)
+
+        def show_options(fmt):
+            for row, (name, _, _) in enumerate(options, first_option):
+                form.setRowVisible(row, name == fmt)
+
+        show_options(self.format.currentText())
+        self.format.currentTextChanged.connect(show_options)
+        self.format.currentTextChanged.connect(self._invalidate_plan)
         layout.addWidget(self.export)
 
         self.pipeline_summary = _label("batchPipelineSummary")
@@ -302,9 +330,22 @@ class BatchPanel(QWidget):
         elif any(image.issue for image in index.images):
             self.setup_message.setText("Repair unreadable JPEGs and rescan, or uncheck them to exclude them from this batch.")
 
+    def _export_settings(self):
+        match self.format.currentText():
+            case "JPEG":
+                return JpegSettings(self.quality.value(), self.chroma.currentText(), self.progressive.isChecked())
+            case "JPEG XL":
+                return JxlSettings(self.jxl_quality.value(), self.jxl_lossless.isChecked(), self.jxl_effort.value())
+            case "PNG":
+                return PngSettings(self.png_compression.value())
+            case "TIFF":
+                return TiffSettings(self.tiff_compression.currentText())
+            case "BMP":
+                return BmpSettings(self.bmp_dpi.value())
+
     def _plan_args(self):
         return (self._index, Path(self.destination.text().strip())), {
-            "mode": self.mode.currentData(), "selected_ids": self._selected_ids(),
+            "mode": self.mode.currentData(), "selected_ids": self._selected_ids(), "settings": self._export_settings(),
         }
 
     def _update_space_check(self):
@@ -336,7 +377,7 @@ class BatchPanel(QWidget):
     def _show_estimate(self):
         selected = self._selected_ids()
         budget = None if self._index is None else self.application.batch_service.estimate(
-            self._index, mode=self.mode.currentData(), selected_ids=selected)
+            self._index, mode=self.mode.currentData(), selected_ids=selected, settings=self._export_settings())
         if budget is not None:
             self.space.setText(self._estimate_text(budget))
         elif selected:
@@ -344,9 +385,8 @@ class BatchPanel(QWidget):
         else:
             self.space.clear()
 
-    @staticmethod
-    def _estimate_text(budget):
-        return f"Estimated temporary space {_size(budget.scratch_bytes)} · JPEG exports {_size(budget.output_bytes)}"
+    def _estimate_text(self, budget):
+        return f"Estimated temporary space {_size(budget.scratch_bytes)} · {self.format.currentText()} exports {_size(budget.output_bytes)}"
 
     def _show_plan(self, plan):
         self._plan = plan
@@ -360,7 +400,7 @@ class BatchPanel(QWidget):
 
     def refresh_pipeline(self):
         status = self.application.pipeline_service.status
-        enabled = ", ".join(item.title for item in status.stages if item.stage.enabled) or "none (JPEG export only)"
+        enabled = ", ".join(item.title for item in status.stages if item.stage.enabled) or "none (export only)"
         skipped = ", ".join(item.title for item in status.stages if not item.stage.enabled) or "none"
         problem = "\nResolve the blocked operations before starting." if not status.executable else ""
         self.pipeline_summary.setText(f"{status.definition.name} · Enabled operations: {enabled} · Skipped: {skipped}{problem}")
@@ -481,12 +521,11 @@ class BatchPanel(QWidget):
     def _create(self, *, resize_approvals=()):
         args, options = self._plan_args()
         self._resize_approvals = resize_approvals
-        settings = JpegSettings(self.quality.value(), self.chroma.currentText(), self.progressive.isChecked())
         editor = self.application.pipeline_service
         reviewed = editor.status.definition
 
         def freeze():
-            job_id = self.application.job_service.create(*args, **options, settings=settings, resize_approvals=resize_approvals)
+            job_id = self.application.job_service.create(*args, **options, resize_approvals=resize_approvals)
             return job_id, editor.status.definition != reviewed
 
         self.pipeline_locked.emit(True)
@@ -555,9 +594,7 @@ class BatchPanel(QWidget):
         self._status, self._job_id = status, status.job_id
         settings = status.settings
         skipped = ", ".join(f"{stage.stage_id} ({stage.reason})" for stage in status.skipped_stages)
-        encoding = f"JPEG {settings.quality}, {settings.subsampling}"
-        if settings.progressive:
-            encoding += ", progressive"
+        encoding = settings.description()
         details = f"{status.mode.title()} · {status.pipeline_name} · {encoding}\n{status.destination}"
         if skipped:
             details += f"\nSkipped operations: {skipped}"
