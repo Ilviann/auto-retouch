@@ -69,7 +69,7 @@ also provides access to saved jobs, Settings and Diagnostics.
   with folder/file selection, recursion and rescan available on demand. Keep the
   included count, destination, export summary and primary action visible outside
   scrolling panels. Review shows enabled and skipped operations, schedule,
-  filename collisions and required/free space per volume. Keep temporary and
+  and required/free space per volume. Check output filenames at Start. Keep temporary and
   output estimates visible from indexing onward and sum them on shared volumes.
   Show a specific remedy for a blocker. Offer **Start processing** when preflight
   succeeds. Put JPEG compression controls in a format-specific Export section.

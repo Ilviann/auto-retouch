@@ -26,7 +26,7 @@ CREATE TABLE job (
 CREATE TABLE image (
     position INTEGER PRIMARY KEY,
     image_id TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL CHECK (status IN ('queued','running','prepared','completed','failed','canceled')),
+    status TEXT NOT NULL CHECK (status IN ('queued','running','prepared','completed','skipped','failed','canceled')),
     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     warnings INTEGER NOT NULL DEFAULT 0 CHECK (warnings >= 0),
     code TEXT,
@@ -130,7 +130,7 @@ class JobJournal:
         self.connection = connection
         self.version = version
 
-    def initialize(self, snapshot, image_ids):
+    def initialize(self, snapshot, image_ids, *, skipped_ids=frozenset()):
         encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False, default=os.fspath)
         staged = snapshot["mode"] == "staged"
         version = STAGED_SCHEMA_VERSION if staged else SCHEMA_VERSION
@@ -140,8 +140,9 @@ class JobJournal:
             with self.connection:
                 self.connection.execute("INSERT INTO job VALUES (1, ?, ?, 'queued')",
                                         (encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()))
-                self.connection.executemany("INSERT INTO image(position, image_id, status) VALUES (?, ?, 'queued')",
-                                            enumerate(image_ids))
+                self.connection.executemany("INSERT INTO image(position, image_id, status) VALUES (?, ?, ?)",
+                                            ((i, key, "skipped" if key in skipped_ids else "queued")
+                                             for i, key in enumerate(image_ids)))
                 self.connection.execute(f"PRAGMA user_version = {version}")
         except sqlite3.Error as exc:
             raise JournalError("Cannot commit the initial job snapshot. Check job storage and free space.") from exc

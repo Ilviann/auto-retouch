@@ -39,6 +39,30 @@ def current_file_stamp(path):
     return FileStamp.capture(path.stat())
 
 
+def existing_output_stamp(path):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if is_reparse(info) or not stat.S_ISREG(info.st_mode):
+        raise RetouchingError("OUTPUT_PATH_INVALID", f"An export requires a regular file at {path}. Choose another destination.")
+    return FileStamp.capture(info)
+
+
+def check_output_target(path, replace_stamp):
+    stamp = existing_output_stamp(path)
+    if stamp is not None and stamp != replace_stamp:
+        raise RetouchingError("OUTPUT_COLLISION", f"A file already exists at {path}. Review it before starting a new job.")
+    return stamp
+
+
+def publish_pending(pending, output, replace_stamp):
+    if check_output_target(output, replace_stamp) is not None:
+        pending.replace(output)
+    else:
+        pending.rename(output)  # Windows atomically refuses an occupied destination.
+
+
 def stamp_and_hash(path, expected=None):
     """Hash one stable regular file using a bounded read buffer."""
     stamp = current_file_stamp(path)

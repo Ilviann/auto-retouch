@@ -11,6 +11,7 @@ import tempfile
 from time import perf_counter
 
 from ..errors import RetouchingError
+from ..storage.batch_paths import check_output_target, publish_pending
 from .exif import EXIF_HEADER, MAX_APP_PAYLOAD, Entry, Exif, for_output, read_exif, write_exif
 from .export_settings import EXTENSIONS, ExportSettings, require_jxl
 from .iptc import iptc_marker
@@ -122,7 +123,7 @@ def _verify_export(path, settings, size, pixels, meta, tiff_header):
                 raise ValueError(f"Lossless {fmt} pixels differ at row {y}")
 
 
-def export_image(state, destination, *, settings, pipeline_sha256, runtime, before_publish=None):
+def export_image(state, destination, *, settings, pipeline_sha256, runtime, before_publish=None, replace_stamp=None):
     pending = None
     started = perf_counter()
     try:
@@ -134,8 +135,7 @@ def export_image(state, destination, *, settings, pipeline_sha256, runtime, befo
         if destination.suffix.lower() not in EXTENSIONS[fmt] or os.path.isreserved(destination.name):
             raise RetouchingError("OUTPUT_PATH_INVALID", f"Choose a valid {fmt} destination filename.")
         destination = destination.parent.resolve(strict=True) / destination.name
-        if os.path.lexists(destination):
-            raise RetouchingError("OUTPUT_COLLISION", "Destination already exists. Choose a different filename.")
+        check_output_target(destination, replace_stamp)
         try:
             pixels = encode_rgb_samples(state)
         except ValueError as exc:
@@ -163,7 +163,7 @@ def export_image(state, destination, *, settings, pipeline_sha256, runtime, befo
         if before_publish is not None:
             before_publish(pending, destination)
         try:
-            pending.rename(destination)
+            publish_pending(pending, destination, replace_stamp)
         except FileExistsError as exc:
             raise RetouchingError("OUTPUT_COLLISION", "Destination was created during export. Choose another filename.") from exc
         pending = None

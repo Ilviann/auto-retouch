@@ -69,6 +69,8 @@ presets rather than fixed processing paths.
 | U57 | **Start processing** opens a modal window showing progress, **Pause**, **Continue**, and **Break**. Ask for confirmation before breaking processing. |
 | U58 | Support zoom and pan in every image preview. Keep both comparison panes at the same zoom and position and preserve the view when Space switches between input and result. |
 | U59 | Provide a true 100% view in every photo and stage preview. Show one full-resolution image pixel per physical display pixel, with synchronized zoom and pan across input and result. |
+| U60 | Defer existing-output checks until **Start processing**. If planned filenames already exist, ask whether to stop, skip the affected photos, or overwrite those files. |
+| U61 | When first browsing for an output folder, open the picker in the selected source folder if one is available. |
 
 ### Feature priorities
 

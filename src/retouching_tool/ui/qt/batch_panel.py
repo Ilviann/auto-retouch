@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
                               QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+from ...application.batch import ExistingOutputDecision, ExistingOutputs
 from ...errors import ResizeApprovalRequired, RetouchingError
 from ...imaging.export_settings import FORMATS, BmpSettings, JpegSettings, JxlSettings, PngSettings, TiffSettings
 from .photo_grid import PhotoGrid
@@ -61,6 +62,26 @@ def _size(byte_count):
         if value < 1024 or unit == "TiB":
             return f"{value:,} B" if unit == "B" else f"{value:,.1f} {unit}"
         value /= 1024
+
+
+def confirm_existing_outputs(parent, collisions):
+    dialog = QMessageBox(parent)
+    dialog.setWindowTitle("Output files already exist")
+    dialog.setIcon(QMessageBox.Icon.Warning)
+    dialog.setText(str(collisions))
+    dialog.setInformativeText("Skip the affected photos, or overwrite the listed files with verified exports?")
+    dialog.setDetailedText("\n".join(str(path) for path, _ in collisions.files))
+    stop = dialog.addButton("Stop processing", QMessageBox.ButtonRole.RejectRole)
+    skip = dialog.addButton("Skip existing files", QMessageBox.ButtonRole.AcceptRole)
+    overwrite = dialog.addButton("Overwrite existing files", QMessageBox.ButtonRole.DestructiveRole)
+    dialog.setDefaultButton(stop)
+    dialog.setEscapeButton(stop)
+    dialog.exec()
+    if dialog.clickedButton() is skip:
+        return ExistingOutputDecision("skip", collisions.files)
+    if dialog.clickedButton() is overwrite:
+        return ExistingOutputDecision("overwrite", collisions.files)
+    return None
 
 
 class ProcessingDialog(QDialog):
@@ -283,7 +304,11 @@ class BatchPanel(QWidget):
             self._set_sources(paths)
 
     def _choose_destination(self):
-        path = QFileDialog.getExistingDirectory(self, "Choose destination folder", self.destination.text())
+        initial_folder = self.destination.text().strip()
+        if not initial_folder and self._sources:
+            source = self._sources[0]
+            initial_folder = str(source.parent if source.is_file() else source)
+        path = QFileDialog.getExistingDirectory(self, "Choose destination folder", initial_folder)
         if path:
             if path == self.destination.text():
                 self._invalidate_plan()
@@ -371,7 +396,7 @@ class BatchPanel(QWidget):
                 and self._task is None and self._run is None and self._stage_preview is None):
             self._space_check_after = None
             args, options = self._plan_args()
-            future = self._executor.submit(self.application.batch_service.preflight, *args, **options)
+            future = self._executor.submit(self.application.batch_service.preflight, *args, **options, check_outputs=False)
             self._space_check = self._plan_revision, future
 
     def _show_estimate(self):
@@ -395,7 +420,7 @@ class BatchPanel(QWidget):
             folders = ", ".join(map(str, volume.paths))
             lines.append(f"{_size(volume.required_bytes)} required · {_size(volume.available_bytes)} free on {folders}")
         if not plan.ready:
-            lines.append("Free disk space and rescan the source folder, or choose another destination.")
+            lines.append("The full selection exceeds available space. Start processing checks space again after any existing files are skipped.")
         self.space.setText("\n".join(lines))
 
     def refresh_pipeline(self):
@@ -518,14 +543,16 @@ class BatchPanel(QWidget):
     def _finish_picture(self):
         self._picture_window = None
 
-    def _create(self, *, resize_approvals=()):
+    def _create(self, *, resize_approvals=(), existing_decision=None):
         args, options = self._plan_args()
         self._resize_approvals = resize_approvals
+        self._existing_decision = existing_decision
         editor = self.application.pipeline_service
         reviewed = editor.status.definition
 
         def freeze():
-            job_id = self.application.job_service.create(*args, **options, resize_approvals=resize_approvals)
+            job_id = self.application.job_service.create(*args, **options, resize_approvals=resize_approvals,
+                                                         existing_decision=existing_decision)
             return job_id, editor.status.definition != reviewed
 
         self.pipeline_locked.emit(True)
@@ -607,11 +634,12 @@ class BatchPanel(QWidget):
         failed = sum(image.status == "failed" for image in images)
         canceled = sum(image.status == "canceled" for image in images)
         warning_count = sum(image.warnings > 0 for image in images)
-        waiting = len(images) - completed - failed - canceled
-        self.job_counts.setText(f"{completed} exported · {failed} failed · {canceled} canceled · "
+        skipped_images = sum(image.status == "skipped" for image in images)
+        waiting = len(images) - completed - failed - canceled - skipped_images
+        self.job_counts.setText(f"{completed} exported · {skipped_images} skipped · {failed} failed · {canceled} canceled · "
                                 f"{waiting} unfinished · {warning_count} with warnings")
         units = len(status.stage_ids) + 1 if status.mode == "staged" else 1
-        done = sum(units if image.status in ("completed", "failed", "canceled")
+        done = sum(units if image.status in ("completed", "failed", "canceled", "skipped")
                    else (image.completed_stages or 0) for image in images)
         self.job_progress.setRange(0, len(images) * units)
         self.job_progress.setValue(done)
@@ -645,7 +673,7 @@ class BatchPanel(QWidget):
         self._task = None
         picture = action in ("original", "preview")
         current = not picture or self._preview_still_current(action)
-        retrying_resize = False
+        retrying = False
         feedback = self.setup_message if action in ("scan", "create", "history", "open") or picture else self.job_message
         if action == "preview" and self._picture_window is not None:
             self._picture_window.render_dialog.accept()
@@ -661,13 +689,20 @@ class BatchPanel(QWidget):
                     level="ERROR", exc_info=True, action=action, job_id=self._job_id)
             code = getattr(exc, "code", "DESKTOP_BATCH_COMMAND_FAILED")
             feedback.setText(f"{code}: {exc}" if current else "")
-            if isinstance(exc, ResizeApprovalRequired) and current and not self._closing:
+            if isinstance(exc, ExistingOutputs) and action == "create" and not self._closing:
+                decision = confirm_existing_outputs(self.monitor, exc)
+                if decision is None:
+                    feedback.setText("Processing stopped before the job started.")
+                else:
+                    retrying = True
+                    self._create(resize_approvals=self._resize_approvals, existing_decision=decision)
+            elif isinstance(exc, ResizeApprovalRequired) and current and not self._closing:
                 prompt = str(exc) if action == "create" else f"{exc}\nAllow this for this preview?"
                 if confirm_resize(self.monitor if action == "create" else self._picture_window, prompt):
-                    retrying_resize = True
+                    retrying = True
                     approvals = (*self._resize_approvals, exc.stage_id)
                     if action == "create":
-                        self._create(resize_approvals=approvals)
+                        self._create(resize_approvals=approvals, existing_decision=self._existing_decision)
                     elif action == "preview":
                         index, image_id, _ = self._preview_target
                         self._request_picture(index, image_id, process=True, resize_approvals=approvals)
@@ -675,8 +710,8 @@ class BatchPanel(QWidget):
                 self._poll_failed = True
             if action == "break" and not self._closing:
                 self._submit("poll", partial(self.application.job_service.status, self._job_id))
-            if action == "create" and not retrying_resize:
-                if not isinstance(exc, ResizeApprovalRequired):
+            if action == "create" and not retrying:
+                if not isinstance(exc, (ResizeApprovalRequired, ExistingOutputs)):
                     self._plan = None
                     self._show_estimate()
                 self.monitor.done(QDialog.DialogCode.Rejected)
@@ -718,7 +753,7 @@ class BatchPanel(QWidget):
                 case "refresh" | "poll" | "break":
                     self._show_status(result)
         finally:
-            if action in ("create", "preview") and not retrying_resize:
+            if action in ("create", "preview") and not retrying:
                 self.pipeline_locked.emit(False)
 
     def _tick(self):
@@ -757,7 +792,7 @@ class BatchPanel(QWidget):
         self.images.setEnabled(idle or (not self._closing and choosing_preview))
         self.scan.setEnabled(idle and bool(self._sources))
         executable = self.application.pipeline_service.status.executable
-        self.start.setEnabled(idle and self._plan is not None and self._plan.ready and executable)
+        self.start.setEnabled(idle and self._plan is not None and executable)
         image = self._current_image()
         can_view = idle and image is not None and image.header is not None
         if self._picture_window is not None:

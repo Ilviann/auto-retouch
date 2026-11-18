@@ -14,13 +14,13 @@ from ..imaging.jpeg import JpegRuntime, decode_jpeg
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import (MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError,
                             open_journal, runner_lock, saved_job_files)
-from ..jobs.publication import PreparedExport, check_destination, prepare_parent, recover_export
+from ..jobs.publication import PreparedExport, check_destination, checked_output, prepare_parent, recover_export
 from ..jobs.snapshot import FrozenInput, JobSnapshot, StageSkip, model_manifests, runtime_versions
 from ..pipeline.executor import StageRuntime, StageSession
 from ..pipeline.validation import validate_pipeline
 from ..storage.artifacts import fingerprint
-from ..storage.batch_paths import current_file_stamp, file_identity, output_path, resolve_folder, stamp_and_hash
-from .batch import BASE_SCRATCH_BYTES, BatchService, SourceIndex, SourceRoot, volume_budgets
+from ..storage.batch_paths import current_file_stamp, file_identity, resolve_folder, stamp_and_hash
+from .batch import BASE_SCRATCH_BYTES, BatchService, ExistingOutputs, SourceIndex, SourceRoot, volume_budgets
 from .staged_jobs import StagedRunner, validate_staged_progress
 
 
@@ -95,17 +95,18 @@ class JobService:
         return tuple(sorted(result, key=lambda job: (job.modified, job.job_id), reverse=True))
 
     def create(self, index, destination, *, mode="sequential", settings=JpegSettings(), selected_ids=None,
-               resize_approvals=()) -> str:
+               resize_approvals=(), existing_decision=None) -> str:
         """Validate and persist a frozen job. No photos are decoded or exported here."""
         job_id = uuid4().hex
         context = {"index_id": index.index_id, "destination_path": destination}
         try:
             if not isinstance(settings, ExportSettings):
                 raise RetouchingError("JOB_SETTINGS_INVALID", "Provide validated export settings.")
+            plan = self.batch.preflight(index, destination, mode=mode, selected_ids=selected_ids, job_id=job_id,
+                                        settings=settings, existing_decision=existing_decision)
             definition = self.pipeline.resolve_scaling(self.pipeline.preflight())
             skipped = tuple(StageSkip(item.stage.id, ", ".join(issue.code for issue in item.issues) or "disabled")
                             for item in self.pipeline.status.stages if not item.stage.enabled)
-            plan = self.batch.preflight(index, destination, mode=mode, selected_ids=selected_ids, job_id=job_id, settings=settings)
             if not plan.ready:
                 raise RetouchingError("JOB_SPACE_INSUFFICIENT", "Free the disk space reported by preflight before creating this job.")
             approvals = []
@@ -114,7 +115,7 @@ class JobService:
                 limit = desc.resize_limit
                 if limit is None or not limit.applies(stage):
                     continue
-                oversized = [p.source.header for p in plan.images if
+                oversized = [p.source.header for p in plan.images if not p.skip and
                              max(p.source.header.width, p.source.header.height) > limit.longest_side]
                 if oversized:
                     if stage.id not in resize_approvals:
@@ -131,12 +132,15 @@ class JobService:
             for planned in plan.images:
                 image = planned.source
                 context.update(image_id=image.image_id, source_path=image.path)
-                try:
-                    stamp, checksum = stamp_and_hash(image.path, image.stamp)
-                except OSError as exc:
-                    raise RetouchingError("SOURCE_CHANGED", f"Cannot freeze {image.path}. Check the file and re-index the batch.") from exc
+                stamp, checksum = image.stamp, None
+                if not planned.skip:
+                    try:
+                        stamp, checksum = stamp_and_hash(image.path, image.stamp)
+                    except OSError as exc:
+                        raise RetouchingError("SOURCE_CHANGED", f"Cannot freeze {image.path}. Check the file and re-index the batch.") from exc
                 inputs.append(FrozenInput(image.image_id, image.path, image.relative_path, stamp, checksum,
-                                          image.header.width, image.header.height, image.header.header_bytes))
+                                          image.header.width, image.header.height, image.header.header_bytes,
+                                          planned.replace_stamp))
             context.pop("image_id")
             context.pop("source_path")
             versions = runtime_versions(self.pipeline.backend, self.pipeline.pytorch_backend)
@@ -150,7 +154,10 @@ class JobService:
                                    model_manifests(definition, self.pipeline.catalog), skipped, tuple(inputs), plan.mode,
                                    self.pipeline.pytorch_backend, tuple(approvals))
             with open_journal(self.root, job_id, create=True) as journal:
-                journal.initialize(snapshot.encode(), (item.image_id for item in inputs))
+                journal.initialize(snapshot.encode(), (item.image_id for item in inputs),
+                                   skipped_ids={p.source.image_id for p in plan.images if p.skip})
+        except ExistingOutputs:
+            raise  # Batch preflight already recorded the pending decision.
         except ResizeApprovalRequired as exc:
             self._emit(job_id, exc.code, str(exc), level="WARNING", stage_instance_id=exc.stage_id, **context)
             raise
@@ -162,6 +169,7 @@ class JobService:
             self._emit(job_id, "JOB_STAGE_SKIPPED", "Frozen pipeline skips this stage", stage_instance_id=stage.stage_id,
                        skip_reason=stage.reason)
         self._emit(job_id, "JOB_CREATED", "Saved the job snapshot", mode=snapshot.mode, image_count=len(snapshot.inputs),
+                   skipped_images=sum(p.skip for p in plan.images), approved_overwrites=sum(p.replace_stamp is not None for p in plan.images),
                    pipeline_sha256=snapshot.pipeline_sha256, backend=snapshot.backend,
                    pytorch_backend=snapshot.pytorch_backend, versions=snapshot.versions, **context)
         return job_id
@@ -206,6 +214,8 @@ class JobService:
             rows = journal.images()
             if tuple(row["image_id"] for row in rows) != tuple(item.image_id for item in job.inputs):
                 raise ValueError("Journal image list differs from the frozen inputs")
+            if any((item.sha256 is None) != (row["status"] == "skipped") for item, row in zip(job.inputs, rows)):
+                raise ValueError("Skipped photos differ from the frozen selection")
             if (journal.version == STAGED_SCHEMA_VERSION) != (job.mode == "staged"):
                 raise ValueError("Journal schema differs from the saved execution mode")
             if job.mode == "staged":
@@ -294,7 +304,7 @@ class JobService:
     def _emit_accounting(self, journal, job):
         result = self._status(journal, job)
         counts = {state: sum(image.status == state for image in result.images)
-                  for state in ("queued", "running", "prepared", "completed", "failed", "canceled")}
+                  for state in ("queued", "running", "prepared", "completed", "skipped", "failed", "canceled")}
         self._emit(job.job_id, "JOB_RUN_STOPPED", "Saved current job accounting", job_status=result.status,
                    counts=counts, images_with_warnings=sum(image.warnings > 0 for image in result.images))
 
@@ -358,7 +368,7 @@ class JobService:
     def _publish(self, journal, job, item, runtime, load_state):
         def prepare_receipt(pending, destination):
             check_destination(job)
-            expected, _ = output_path(job.destination, job.output_relative(item))
+            expected, _ = checked_output(job, item)
             if destination != expected or pending.parent != expected.parent:
                 raise RetouchingError("JOB_FOLDER_CHANGED", "Destination changed during export. Restore it before resuming.")
             receipt = PreparedExport.capture(pending)
@@ -366,7 +376,7 @@ class JobService:
 
         output = prepare_parent(job, item)
         export_image(load_state(), output, settings=job.settings, pipeline_sha256=job.pipeline_sha256,
-                    runtime=runtime, before_publish=prepare_receipt)
+                    runtime=runtime, before_publish=prepare_receipt, replace_stamp=item.replace_stamp)
         journal.complete(item.image_id)
         self._emit(job.job_id, "JOB_IMAGE_COMPLETED", "Committed the verified export", image_id=item.image_id,
                    attempt=runtime.attempt, output_path=output, warnings=runtime.diagnostics.warnings)

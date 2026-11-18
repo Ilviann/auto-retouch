@@ -337,8 +337,10 @@ runner lock. It freezes source hashes, pipeline, compression, backend/package
 versions and checkpoint manifests before processing. Each sequential image is a
 restart unit. The runner prepares and releases one stage at a time, checks free
 space before starting the next image, and records a receipt after JPEG verification
-and before the no-overwrite rename. Recovery validates a published or pending
-file against that receipt. Staged jobs journal a checked TIFF/context reference
+and before atomic publication. For an approved overwrite the snapshot records
+the existing file's identity, size and modification time. Recovery can distinguish
+the prior export from the newly published file and verify the pending or published
+export against its receipt. Staged jobs journal a checked TIFF/context reference
 and the next stage cursor after each image-stage unit. Each image has a dedicated
 checkpoint store, so a committed successor allows immediate reclamation of its
 predecessor's unreferenced files. An unavailable checkpoint can replay the
@@ -425,11 +427,14 @@ input manifest and skips directory links by default.
 Preserve relative input paths under destination. Validate each planned export
 against original inputs and output collisions. A writable destination is required
 for batch runs. Preview rendering uses the selected source and works in memory.
-Batch preflight requires an existing destination root. It validates nested export
-parents and blocks descendant reparse points, case-insensitive planned collisions
-and existing output names. Temporary write probes use the existing parent of each
-required directory. The execution layer creates export subdirectories and a
-missing scratch root as needed.
+Folder selection checks the destination root and available space. At batch start,
+preflight validates nested export parents, blocks descendant reparse points and
+rejects conflicts between planned paths. For existing regular output files it
+offers one decision covering the listed files. Stopping leaves the batch unstarted.
+Skipping records terminal skipped rows and budgets only the remaining photos.
+Overwrite approval applies to the reviewed targets in the frozen job. Start-time
+write probes use the existing parent of each required directory. The execution
+layer creates export subdirectories and a missing scratch root as needed.
 
 The temporary root holds dedicated application-owned job directories. Place job
 scratch outside the scanned source tree so it cannot become an input. Validate

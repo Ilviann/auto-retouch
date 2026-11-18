@@ -7,10 +7,10 @@ from ..errors import RetouchingError
 from ..imaging.jpeg import JpegRuntime
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import MAX_ATTEMPTS, TERMINAL, JournalError
+from ..jobs.publication import checked_output
 from ..pipeline.executor import StageRuntime, StageSession
 from ..storage.artifact_codec import require
 from ..storage.artifacts import ArtifactIdentity, ArtifactRef, ArtifactStore, fingerprint
-from ..storage.batch_paths import output_path
 from .batch import BASE_SCRATCH_BYTES, CHECKPOINT_OVERHEAD_BYTES
 
 ACTIVE = ("queued", "running", "prepared")
@@ -124,7 +124,7 @@ class StagedRunner:
         self._clean_finished()
         for item, row in self._pending():
             try:
-                output_path(self.job.destination, self.job.output_relative(item))
+                checked_output(self.job, item)
             except (RetouchingError, OSError) as exc:
                 self.service._record_failure(self.journal, self.job, item, row["unit_attempts"], exc, row["warnings"])
                 self._retire(item, row, self._store(item, row))

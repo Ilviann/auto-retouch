@@ -9,6 +9,7 @@ from random import Random
 import tempfile
 from threading import Event
 from time import monotonic, sleep
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
@@ -16,13 +17,14 @@ from zipfile import ZipFile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image, JpegImagePlugin
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QInputDialog, QLabel,
                                QMessageBox, QProgressBar, QPushButton, QSlider, QToolButton)
 
 from retouching_tool.application.service import ApplicationService
+from retouching_tool.application.batch import BASE_SCRATCH_BYTES
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
@@ -131,6 +133,19 @@ class DesktopBatchTests(unittest.TestCase):
     def wait_for_space(self, panel, *, ready=True):
         self.until(lambda: panel._space_check_after is None and panel._space_check is None, "disk check did not return")
         self.assertEqual(panel.start.isEnabled(), ready, panel.space.text())
+
+    def choose_existing(self, label, path):
+        execute = QMessageBox.exec
+
+        def respond(dialog):
+            self.assertIn(str(path), dialog.detailedText())
+            self.assertEqual(dialog.defaultButton().text(), "Stop processing")
+            self.assertIs(dialog.escapeButton(), dialog.defaultButton())
+            button = next(button for button in dialog.buttons() if button.text() == label)
+            QTimer.singleShot(0, button.click)
+            return execute(dialog)
+
+        return patch.object(QMessageBox, "exec", respond)
 
     def start_at_checkpoint(self, panel, action, button):
         worker = panel.application.job_worker
@@ -284,10 +299,11 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertIn("required", panel.space.text())
             collision = self.destination / "a.jpg"
             collision.write_bytes(b"occupied after preflight")
-            panel.start.click()
-            self.until(lambda: panel.scan.isEnabled(), "job creation did not return")
-            self.assertIn("OUTPUT_COLLISION", panel.setup_message.text())
-            self.assertFalse(panel.start.isEnabled())
+            with self.choose_existing("Stop processing", collision):
+                panel.start.click()
+                self.until(lambda: panel.scan.isEnabled(), "job creation did not return")
+            self.assertIn("stopped", panel.setup_message.text())
+            self.assertTrue(panel.start.isEnabled())
             self.assertFalse(panel.application.job_service.saved_jobs())
             self.assertEqual(collision.read_bytes(), b"occupied after preflight")
             collision.unlink()
@@ -336,19 +352,67 @@ class DesktopBatchTests(unittest.TestCase):
         collision.touch()
         panel.format.setCurrentText("PNG")
         self.assertFalse(panel.start.isEnabled())
-        self.wait_for_space(panel, ready=False)
-        self.assertIn("OUTPUT_COLLISION", panel.space.text())
-        collision.unlink()
+        self.wait_for_space(panel)
+        self.assertNotIn("OUTPUT_COLLISION", panel.space.text())
         panel.mode.setCurrentIndex(1)
         panel.png_compression.setValue(2)
         self.wait_for_space(panel)
-        panel.start.click()
-        self.until(lambda: panel.history.isEnabled() and panel.results.rowCount() == 1, "PNG worker did not finish")
+        with self.choose_existing("Overwrite existing files", collision):
+            panel.start.click()
+            self.until(lambda: panel.history.isEnabled() and panel.results.rowCount() == 1, "PNG worker did not finish")
         self.assertIn("1 exported", panel.job_counts.text())
         self.assertIn("PNG lossless, compression 2", panel.job_metadata.text())
         with Image.open(collision) as output:
             self.assertEqual(output.format, "PNG")
             self.assertEqual(output.getexif()[271], "Desktop Test Camera")
+
+    def test_skip_existing_files_runs_only_the_remaining_photos(self):
+        _, panel = self.open_window((self.source,))
+        self.wait_for_scan(panel, 1)
+        panel.recursive.setChecked(True)
+        self.wait_for_scan(panel, 2)
+        collision = self.destination / "a.jpg"
+        collision.write_bytes(b"previous export")
+        remaining = panel._index.images[1]
+        free = BASE_SCRATCH_BYTES + remaining.working_bytes + 2 * remaining.stamp.size
+        with patch("retouching_tool.application.batch.shutil.disk_usage", return_value=SimpleNamespace(free=free)):
+            panel.destination.setText(str(self.destination))
+            self.wait_for_space(panel)
+            self.assertFalse(panel._plan.ready)
+            with self.choose_existing("Skip existing files", collision):
+                panel.start.click()
+                self.until(lambda: panel.history.isEnabled() and "1 exported" in panel.job_counts.text(),
+                           "remaining photo was not exported")
+        self.assertIn("1 skipped", panel.job_counts.text())
+        self.assertEqual(collision.read_bytes(), b"previous export")
+        self.assertEqual(panel.results.item(0, 2).text(), "0")
+        self.assertEqual(panel.job_progress.value(), panel.job_progress.maximum())
+        self.assertTrue((self.destination / "nested" / "фото.jpg").is_file())
+
+    def test_destination_picker_starts_in_source_until_destination_is_chosen(self):
+        _, panel = self.open_window()
+        browse = panel.findChild(QPushButton, "chooseDestination")
+        with patch.object(QFileDialog, "getExistingDirectory", return_value="") as picker:
+            browse.click()
+            picker.assert_called_once_with(panel, "Choose destination folder", "")
+
+        with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.source)):
+            panel.findChild(QPushButton, "chooseSourceFolder").click()
+        self.wait_for_scan(panel, 1)
+        with patch.object(QFileDialog, "getExistingDirectory", return_value="") as picker:
+            browse.click()
+            picker.assert_called_once_with(panel, "Choose destination folder", str(self.source))
+            self.assertEqual(panel.destination.text(), "")
+
+        files = [str(self.nested / "фото.jpg"), str(self.source / "a.jpg")]
+        with patch.object(QFileDialog, "getOpenFileNames", return_value=(files, "")):
+            panel.findChild(QPushButton, "chooseSourceFiles").click()
+        self.wait_for_scan(panel, 2)
+        with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.destination)) as picker:
+            browse.click()
+            picker.assert_called_once_with(panel, "Choose destination folder", str(self.nested))
+            browse.click()
+            picker.assert_called_with(panel, "Choose destination folder", str(self.destination))
 
     def test_auto_preflight_after_folder_selection_rescan_and_destination_edit(self):
         _, panel = self.open_window()
@@ -365,7 +429,7 @@ class DesktopBatchTests(unittest.TestCase):
         collision.touch()
         panel.scan.click()
         self.assertFalse(panel.start.isEnabled())
-        self.until(lambda: "OUTPUT_COLLISION" in panel.space.text(), "rescan missed the new collision")
+        self.until(panel.start.isEnabled, "existing files blocked the rescan")
         collision.unlink()
 
         service = panel.application.batch_service

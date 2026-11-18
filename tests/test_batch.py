@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from PIL import Image, JpegImagePlugin
 
-from retouching_tool.application.batch import BASE_SCRATCH_BYTES, BatchService
+from retouching_tool.application.batch import BASE_SCRATCH_BYTES, BatchService, ExistingOutputs
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
@@ -210,8 +210,23 @@ class BatchTests(unittest.TestCase):
         self.assertFalse(target.parent.exists())
         target.parent.mkdir()
         target.write_bytes(b"prior export")
-        self.failure("OUTPUT_COLLISION", lambda: self.batch.preflight(index, self.output, mode="staged"))
+        with patch("retouching_tool.application.batch.output_path", side_effect=AssertionError("inspected output path")):
+            self.assertTrue(self.batch.preflight(index, self.output, mode="staged", check_outputs=False).ready)
+        with self.assertRaises(ExistingOutputs) as caught:
+            self.batch.preflight(index, self.output, mode="staged")
+        self.assertEqual([path for path, stamp in caught.exception.files], [target])
+        self.assertEqual(self.log.records[-1]["collision_count"], 1)
         self.assertEqual(target.read_bytes(), b"prior export")
+
+    def test_start_preserves_original_file_aliases_and_directories(self):
+        path = self.jpeg("shot.jpg")
+        index = self.batch.index((self.source,))
+        target = self.output / path.name
+        target.hardlink_to(path)
+        self.failure("OUTPUT_IS_SOURCE", lambda: self.batch.preflight(index, self.output, mode="sequential"))
+        target.unlink()
+        target.mkdir()
+        self.failure("OUTPUT_PATH_INVALID", lambda: self.batch.preflight(index, self.output, mode="sequential"))
 
     def test_case_insensitive_names_and_file_parent_collisions_across_roots(self):
         other = self.root / "second source"

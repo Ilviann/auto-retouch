@@ -9,8 +9,9 @@ decode locally one at a time, and the grid releases offscreen icons.
 The batch summary shows indexed temporary and JPEG output estimates before a
 destination is set. Changing inclusion or schedule recalculates the estimates.
 An unreadable included header makes the estimate incomplete. When a destination
-and included photos are available, the workspace automatically checks paths and
-output collisions and displays required and available space per volume. The
+and included photos are available, the workspace automatically checks folders and
+displays required and available space per volume. **Start processing** checks for
+existing outputs and offers to stop, skip the affected photos, or overwrite. The
 workspace uses binary units for both estimates and free space.
 
 Operation cards describe image and context inputs and effects from the operation

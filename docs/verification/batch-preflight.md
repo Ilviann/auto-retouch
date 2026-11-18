@@ -17,8 +17,10 @@ ran headlessly. No model, study photo or GPU inference was needed.
   re-index those inputs or explicitly deselect them to get a complete budget.
 - `preflight()` rechecks the selected inputs and source roots, validates the
   existing destination and configured scratch root, and maps outputs under the
-  destination. Existing target names, case-insensitive target conflicts,
-  conflicting parent components and descendant reparse points block the plan.
+  destination. Folder selection checks root access and disk space. At Start,
+  existing regular targets prompt for a decision. Case-insensitive conflicts
+  between planned targets, conflicting parent components and descendant reparse
+  points block the plan.
   A missing scratch root or output subdirectory is checked through a temporary
   write probe at its existing ancestor. Setup of actual job folders is deferred
   to execution.

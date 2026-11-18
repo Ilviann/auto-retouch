@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from PIL import Image, JpegImagePlugin
 
-from retouching_tool.application.batch import BASE_SCRATCH_BYTES
+from retouching_tool.application.batch import BASE_SCRATCH_BYTES, ExistingOutputDecision, ExistingOutputs
 from retouching_tool.application.job_service import JobControl
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
@@ -101,6 +101,7 @@ def stop_at_checkpoint(journal, image_id, stage, ref, warnings):
 
 faults = {
     'before': patch.object(Path, 'rename', fail_pending_rename),
+    'before_replace': patch.object(Path, 'replace', die),
     'after': patch.object(JobJournal, 'complete', die),
     'before_checkpoint': patch.object(JobJournal, 'commit_stage', stop_at_checkpoint),
     'after_checkpoint': patch.object(JobJournal, 'commit_stage', stop_at_checkpoint),
@@ -113,7 +114,7 @@ with fault:
                                 capture_output=True, encoding="utf-8", timeout=20, check=False)
         self.assertEqual(worker.returncode, 79, worker.stderr)
         before = self.jobs.status(job_id)
-        if boundary in ("before", "after"):
+        if boundary in ("before", "before_replace", "after"):
             attempts = len(before.stage_ids) + 1 if before.mode == "staged" else 1
             self.assertEqual((before.status, before.images[0].status, before.images[0].attempts),
                              ("running", "prepared", attempts))
@@ -170,6 +171,77 @@ with fault:
         self.assertEqual(caught.exception.code, "OUTPUT_COLLISION")
         self.assertEqual(parse_settings({"quality": 80, "progressive": True, "subsampling": "4:2:0"}),
                          JpegSettings(80, "4:2:0", True))
+
+    def review_existing(self, action, **options):
+        with self.assertRaises(ExistingOutputs) as caught:
+            self.create(**options)
+        return ExistingOutputDecision(action, caught.exception.files)
+
+    def test_all_skipped_outputs_remain_accounted_for_without_reading_photos(self):
+        self.jpeg("a.jpg")
+        self.jpeg("b.jpg")
+        for name in ("a.jpg", "b.jpg"):
+            (self.destination / name).write_bytes(b"keep")
+        for mode in ("sequential", "staged"):
+            with self.subTest(mode=mode):
+                decision = self.review_existing("skip", mode=mode)
+                self.assertEqual(len(decision.files), 2)
+                with patch(APP_JOBS + ".stamp_and_hash", side_effect=AssertionError("read skipped photo")):
+                    job_id = self.create(mode=mode, existing_decision=decision)
+                status = self.open_app().job_service.run(job_id)
+                self.assertEqual(status.status, "completed")
+                self.assertEqual([(i.status, i.attempts) for i in status.images], [("skipped", 0)] * 2)
+                self.assertTrue(all(i.output.read_bytes() == b"keep" for i in status.images))
+
+    def test_overwrite_requires_review_of_new_collisions_and_preserves_late_changes(self):
+        self.jpeg("a.jpeg")
+        self.jpeg("b.jpeg")
+        a, b = (self.destination / name for name in ("a.png", "b.png"))
+        a.write_bytes(b"old")
+        settings = PngSettings()
+        decision = self.review_existing("overwrite", settings=settings)
+        b.write_bytes(b"new collision")
+        with self.assertRaises(ExistingOutputs) as caught:
+            self.create(settings=settings, existing_decision=decision)
+        self.assertEqual({path for path, stamp in caught.exception.files}, {a, b})
+        decision = ExistingOutputDecision("overwrite", caught.exception.files)
+        job_id = self.create(settings=settings, existing_decision=decision)
+        a.write_bytes(b"edited after approval")
+        result = self.open_app().job_service.run(job_id)
+        self.assertEqual([(i.status, i.code) for i in result.images], [("failed", "OUTPUT_COLLISION"), ("completed", None)])
+        self.assertEqual(a.read_bytes(), b"edited after approval")
+        with Image.open(b) as image:
+            self.assertEqual(image.format, "PNG")
+
+    def test_verified_overwrite_recovers_before_and_after_replacement(self):
+        source = self.jpeg("portrait.jpg")
+        original = source.read_bytes()
+        output = self.destination / source.name
+        for mode, boundary in (("sequential", "before_replace"), ("staged", "after")):
+            with self.subTest(mode=mode):
+                output.write_bytes(b"previous export")
+                decision = self.review_existing("overwrite", mode=mode)
+                job_id = self.create(mode=mode, existing_decision=decision)
+                self.interrupted_worker(job_id, boundary)
+                if boundary == "before_replace":
+                    self.assertEqual(output.read_bytes(), b"previous export")
+                with patch(APP_JOBS + ".export_image", side_effect=AssertionError("unexpected encode")):
+                    result = self.open_app().job_service.run(job_id)
+                self.assertEqual(result.status, "completed")
+                self.assertEqual(source.read_bytes(), original)
+                with Image.open(output) as image:
+                    self.assertEqual(image.getexif()[271], "Generated Test Camera")
+
+    def test_failed_overwrite_verification_preserves_previous_export(self):
+        self.jpeg("portrait.jpg")
+        output = self.destination / "portrait.jpg"
+        output.write_bytes(b"previous export")
+        job_id = self.create(existing_decision=self.review_existing("overwrite"))
+        with patch("retouching_tool.imaging.export._verify_export", side_effect=ValueError("invalid metadata")):
+            result = self.jobs.run(job_id)
+        self.assertEqual(result.images[0].code, "OUTPUT_VALIDATION_FAILED")
+        self.assertEqual(output.read_bytes(), b"previous export")
+        self.assertEqual(list(self.destination.glob("*.pending")), [])
 
     def test_staged_passes_match_sequential_and_restore_context(self):
         self.jpeg("a.jpg")

@@ -12,7 +12,7 @@ from ..imaging.export_settings import ExportSettings, JpegSettings, JxlSettings,
 from ..imaging.jpeg import JpegHeader, inspect_jpeg_header
 from ..pipeline.image_state import RGB_FLOAT32_BYTES_PER_PIXEL
 from ..storage.artifacts import MANIFEST_LIMIT
-from ..storage.batch_paths import (FileStamp, current_file_stamp, directory_chain, file_identity,
+from ..storage.batch_paths import (FileStamp, current_file_stamp, directory_chain, existing_output_stamp, file_identity,
                                    is_reparse, output_path, probe_writable, resolve_folder)
 from ..storage.tiff_pixels import TIFF_OVERHEAD_LIMIT
 
@@ -55,6 +55,26 @@ class SourceIndex:
 class PlannedImage:
     source: IndexedImage
     output: Path
+    replace_stamp: FileStamp | None = None
+    skip: bool = False
+
+
+@dataclass(frozen=True)
+class ExistingOutputDecision:
+    action: str
+    files: tuple[tuple[Path, FileStamp], ...]
+
+    def __post_init__(self):
+        if self.action not in ("skip", "overwrite"):
+            raise ValueError("Choose skip or overwrite for existing outputs.")
+
+
+class ExistingOutputs(RetouchingError):
+    def __init__(self, files):
+        self.files = tuple(files)
+        count = len(self.files)
+        message = "1 planned output file already exists." if count == 1 else f"{count} planned output files already exist."
+        super().__init__("OUTPUT_COLLISION", message)
 
 
 @dataclass(frozen=True)
@@ -102,6 +122,8 @@ def _jpeg_name(path):
 
 
 def _space_budget(images, mode, extra_scratch_bytes, settings):
+    if not images:
+        return SpaceBudget(0, 0, 0, 0, 0, 0, 0, 0)
     largest = max(image.working_bytes for image in images)
     output = sum(output_reservation(settings, image.stamp.size, image.working_bytes) for image in images)
     if mode == "sequential":
@@ -236,8 +258,9 @@ class BatchService:
 
     def preflight(self, index: SourceIndex, destination: Path, *, mode: str,
                   selected_ids=None, extra_scratch_bytes: int = 0, job_id: str | None = None,
-                  preview_request_id: str | None = None, settings=JpegSettings()) -> BatchPlan:
-        """Revalidate a frozen selection and estimate initial space. Call again at job start."""
+                  preview_request_id: str | None = None, settings=JpegSettings(), check_outputs=True,
+                  existing_decision: ExistingOutputDecision | None = None) -> BatchPlan:
+        """Validate folders and space. Check individual output targets only for a start request."""
         context = {"index_id": index.index_id, "job_id": job_id, "mode": mode, "destination_path": destination,
                    "preview_request_id": preview_request_id}
         try:
@@ -250,19 +273,25 @@ class BatchService:
                 require_jxl()
             selected = self._select(index, selected_ids)
             destination, scratch, scratch_parent = self.validate_folders(index, destination)
-            planned, probes = self._plan_images(selected, destination, scratch, context, settings)
-            budget = _space_budget(selected, mode, extra_scratch_bytes, settings)
+            planned = self._plan_images(selected, destination, context, settings)
+            probes = {(destination, False): None}
+            if check_outputs:
+                planned, probes = self._check_outputs(planned, destination, scratch, index, existing_decision, context)
+            budget = _space_budget([p.source for p in planned if not p.skip], mode, extra_scratch_bytes, settings)
             volumes = volume_budgets(((destination, destination, budget.output_bytes),
                                       (scratch, scratch_parent, budget.scratch_bytes)))
             plan = BatchPlan(index.index_id, mode, destination, scratch, planned, budget, volumes)
-            if plan.ready:
-                probes[scratch_parent, True] = None  # A job always needs a child directory.
+            if plan.ready and budget.scratch_bytes:
+                probes[scratch_parent, True] = None  # Processing needs an application-owned child directory.
                 for directory, needs_subdirectory in probes:
                     try:
                         probe_writable(directory, needs_subdirectory=needs_subdirectory)
                     except OSError as exc:
                         raise RetouchingError("BATCH_FOLDER_UNWRITABLE",
                                               f"Cannot create and remove preflight files in {directory}. Check folder permissions.") from exc
+        except ExistingOutputs as exc:
+            self.diagnostics.emit(exc.code, str(exc), component="batch", collision_count=len(exc.files), **context)
+            raise
         except RetouchingError as exc:
             self._emit_failure(exc, **context)
             raise
@@ -325,11 +354,8 @@ class BatchService:
         return destination, scratch, scratch_parent
 
     @staticmethod
-    def _plan_images(selected, destination, scratch, context, settings):
+    def _plan_images(selected, destination, context, settings):
         planned = []
-        outputs = set()
-        output_directories = set()
-        probes = {}
         for image in selected:
             context.update(image_id=image.image_id, source_path=image.path)
             if image.header is None:
@@ -341,17 +367,44 @@ class BatchService:
                 raise RetouchingError("SOURCE_CHANGED", f"Cannot reopen {image.path}. Re-index the sources.") from exc
             if not unchanged:
                 raise RetouchingError("SOURCE_CHANGED", f"Source changed since indexing: {image.path}. Re-index the sources.")
-            output, existing_parent = output_path(destination, export_relative_path(image.relative_path, settings))
+            relative = export_relative_path(image.relative_path, settings)
+            planned.append(PlannedImage(image, destination / relative))
+        context.pop("image_id")
+        context.pop("source_path")
+        return tuple(planned)
+
+    @staticmethod
+    def _check_outputs(planned, destination, scratch, index, decision, context):
+        outputs = set()
+        output_directories = set()
+        probes = {}
+        collisions = {}
+        reviewed = dict(decision.files) if decision else {}
+        originals = {image.stamp.identity for image in index.images if image.stamp is not None}
+        checked = []
+        for item in planned:
+            image = item.source
+            context.update(image_id=image.image_id, source_path=image.path)
+            output, existing_parent = output_path(destination, item.output.relative_to(destination), allow_existing=True)
             if (output in outputs or output in output_directories or any(parent in outputs for parent in output.parents)
                     or scratch.is_relative_to(output)):
                 raise RetouchingError("OUTPUT_COLLISION", f"Planned paths conflict at {output}. Change the source selection or folders.")
             outputs.add(output)
             output_directories.update(output.parents)
-            planned.append(PlannedImage(image, output))
-            probes[existing_parent, output.parent != existing_parent] = None
+            stamp = existing_output_stamp(output)
+            if stamp is not None:
+                if stamp.identity in originals:
+                    raise RetouchingError("OUTPUT_IS_SOURCE", f"An export would replace an indexed source: {output}. Choose another destination.")
+                collisions[output] = stamp
+            skip = decision is not None and decision.action == "skip" and output in reviewed
+            checked.append(PlannedImage(image, output, None if skip else stamp, skip))
+            if not skip:
+                probes[existing_parent, output.parent != existing_parent] = None
         context.pop("image_id")
         context.pop("source_path")
-        return tuple(planned), probes
+        if any(reviewed.get(path) != stamp for path, stamp in collisions.items()):
+            raise ExistingOutputs(collisions.items())
+        return tuple(checked), probes
 
     def _emit_failure(self, error, **context):
         self.diagnostics.emit(error.code, str(error), level="ERROR", component="batch", exc_info=True, **context)

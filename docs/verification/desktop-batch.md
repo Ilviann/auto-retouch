@@ -13,12 +13,15 @@ batch preflight, saved jobs and worker process.
 - The destination must be an existing folder. Choosing folders, rescanning,
   changing included photos, or switching schedules automatically refreshes
   scratch and output estimates and required and available bytes per volume.
-  **Start processing** revalidates paths, free space and pipeline readiness, then
+  **Start processing** checks the planned output filenames. If files already exist,
+  it lists the affected paths and offers **Stop processing**, **Skip existing files**
+  and **Overwrite existing files**. Stop is the default and Escape action.
+  Start revalidates paths, free space and pipeline readiness, then
   freezes the pipeline and JPEG quality, chroma and progressive settings.
   If validation changes the pipeline definition, the job stays queued for review.
 - The processing modal shows frozen settings, skipped operations, per-photo attempts and
   warnings, and committed progress. Staged progress shows work units and per-photo
-  completed stages. Failed and canceled photos count toward units accounted for.
+  completed stages. Skipped, failed and canceled photos count toward units accounted for.
   Worker errors and incomplete diagnostic delivery have their own notice.
 - **Pause** and a confirmed **Break** apply to an active worker at its next
   scheduler boundary. Escape and the processing window's close control also
@@ -31,6 +34,13 @@ batch preflight, saved jobs and worker process.
   worker transport retain their plain-Python and local process boundaries.
 
 ## Focused verification
+
+The output-collision checks used generated photos and real local workers. Desktop
+tests exercised all three dialog choices, destination selection and rescan with
+occupied filenames, a mixed skip/export run with space for the remaining photo,
+and a staged PNG overwrite. Headless tests covered all-skipped batches in both
+modes, source hard links, late collisions, and export verification failure.
+Process interruptions before and after replacement recovered the verified export.
 
 On 2026-11-19, 12 focused Qt integration checks and two headless cancellation
 checks passed in the prepared environment. Generated JPEGs and local workers

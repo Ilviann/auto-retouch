@@ -54,10 +54,11 @@ class FrozenInput:
     path: Path
     relative_path: Path
     stamp: FileStamp
-    sha256: str
+    sha256: str | None  # Skipped photos have no content to verify on resume.
     width: int
     height: int
     header_bytes: int = 0
+    replace_stamp: FileStamp | None = None
 
     @property
     def working_bytes(self):
@@ -66,19 +67,22 @@ class FrozenInput:
     @classmethod
     def parse(cls, data):
         fields(data, "image_id path relative_path stamp sha256 width height" +
-               (" header_bytes" if "header_bytes" in data else ""))
+               (" header_bytes" if "header_bytes" in data else "") +
+               (" replace_stamp" if "replace_stamp" in data else ""))
         relative = Path(data["relative_path"])
         require(not relative.anchor and relative.parts and not any(part == ".." or os.path.isreserved(part)
                                                                  for part in relative.parts)
                 and relative.suffix.lower() in (".jpg", ".jpeg"), "Invalid job JPEG path")
-        require(isinstance(data["image_id"], str) and data["image_id"] and digest(data["sha256"])
+        require(isinstance(data["image_id"], str) and data["image_id"]
+                and (data["sha256"] is None or digest(data["sha256"]))
                 and integer(data["width"], 1) and integer(data["height"], 1)
                 and data["width"] * data["height"] <= MAX_PIXELS, "Invalid frozen JPEG identity or dimensions")
         stamp = parse_stamp(data["stamp"])
         header_bytes = data.get("header_bytes", 0)
         require(integer(header_bytes) and header_bytes <= stamp.size, "Invalid frozen JPEG header size")
         return cls(data["image_id"], _absolute(data["path"]), relative, stamp,
-                   data["sha256"], data["width"], data["height"], header_bytes)
+                   data["sha256"], data["width"], data["height"], header_bytes,
+                   parse_stamp(data["replace_stamp"]) if "replace_stamp" in data else None)
 
 
 @dataclass(frozen=True)
@@ -131,8 +135,10 @@ class JobSnapshot:
         if not self.resize_approvals:
             del data["resize_approvals"]
         data["pipeline"] = self.pipeline.to_json()
-        if self.mode == "sequential":
-            for item in data["inputs"]:
+        for item in data["inputs"]:
+            if item["replace_stamp"] is None:
+                del item["replace_stamp"]
+            if self.mode == "sequential":
                 del item["header_bytes"]
         return {"schema_version": 1, **data}
 

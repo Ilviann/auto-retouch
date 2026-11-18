@@ -1,4 +1,4 @@
-"""Recovery proof for an export verified before its no-overwrite publication."""
+"""Recovery proof for a verified export and its approved publication target."""
 
 from dataclasses import asdict, dataclass
 import json
@@ -6,7 +6,8 @@ import re
 
 from ..errors import RetouchingError
 from ..storage.artifact_codec import digest, fields, require
-from ..storage.batch_paths import FileStamp, file_identity, output_path, stamp_and_hash
+from ..storage.batch_paths import (FileStamp, check_output_target, existing_output_stamp, file_identity,
+                                   output_path, publish_pending, stamp_and_hash)
 from .snapshot import parse_stamp
 
 
@@ -51,13 +52,19 @@ def check_destination(job):
         raise RetouchingError("JOB_FOLDER_CHANGED", f"Frozen destination changed at {path}. Restore the original folder before resuming.")
 
 
+def checked_output(job, item):
+    output, existing = output_path(job.destination, job.output_relative(item), allow_existing=True)
+    check_output_target(output, item.replace_stamp)
+    return output, existing
+
+
 def prepare_parent(job, item):
     check_destination(job)
-    output, existing = output_path(job.destination, job.output_relative(item))
+    output, existing = checked_output(job, item)
     for part in output.parent.relative_to(existing).parts:
         existing /= part
         existing.mkdir(exist_ok=True)
-        output_path(job.destination, job.output_relative(item))
+        checked_output(job, item)
     return output
 
 
@@ -73,7 +80,8 @@ def recover_export(job, item, receipt):
     """Return a published file only if it matches the recorded verified artifact."""
     check_destination(job)
     output, _ = output_path(job.destination, job.output_relative(item), allow_existing=True)
-    if _exists(output):
+    current = existing_output_stamp(output)
+    if current is not None and current != item.replace_stamp:
         receipt.verify(output)
         return output
     pending = output.with_name(receipt.pending_name)
@@ -81,7 +89,7 @@ def recover_export(job, item, receipt):
         return None
     receipt.verify(pending)
     try:
-        pending.rename(output)  # On Windows this refuses an existing target atomically.
+        publish_pending(pending, output, item.replace_stamp)
     except FileExistsError as exc:
         raise RetouchingError("OUTPUT_COLLISION", f"An export appeared during recovery: {output}. Existing file was preserved.") from exc
     return output
