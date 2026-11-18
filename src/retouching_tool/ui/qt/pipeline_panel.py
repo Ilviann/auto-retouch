@@ -116,6 +116,15 @@ class PipelinePanel(QWidget):
         for card in self.stage_cards.values():
             card.set_preview_available(available)
 
+    def show_diagnostic_operation(self, event):
+        card = self.stage_cards.get(event.stage_id)
+        if (card is None or (event.operation and card.descriptor.operation != event.operation)
+                or (event.operation_version is not None and card.descriptor.version != event.operation_version)):
+            return False
+        self.scroll.ensureWidgetVisible(card)
+        card.toggle.setFocus()
+        return True
+
     def _refresh_cards(self):
         pipeline = self.service.status
         stages = pipeline.stages

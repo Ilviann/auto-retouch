@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..cli import LaunchOptions
 from ..config import AppConfig, FolderSettings, LoggingSettings, parse_config
+from ..diagnostics.history import DiagnosticHistory
 from ..errors import RetouchingError
 from ..json_io import atomic_json, read_json
 from ..storage.batch_paths import probe_writable, resolve_folder
@@ -22,6 +23,7 @@ class ApplicationService:
     def __init__(self, root: Path, config: AppConfig, diagnostics):
         self.root, self.config, self.diagnostics = root, config, diagnostics
         self.batch_service = BatchService(config.temporary, diagnostics)
+        self.diagnostic_history = DiagnosticHistory(diagnostics, root / "logs")
 
     def startup(self, options: LaunchOptions, backend: str) -> StartupSnapshot:
         notices = []

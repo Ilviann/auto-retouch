@@ -65,6 +65,7 @@ class BatchPanel(QWidget):
     pipeline_locked = Signal(bool)
     settings_available = Signal(bool)
     operation_preview_available = Signal(bool)
+    diagnostics_requested = Signal(str)
     ready_to_close = Signal()
 
     def __init__(self, sources, application, pipeline):
@@ -203,6 +204,11 @@ class BatchPanel(QWidget):
         layout.addLayout(_row(self.history, self.refresh, self.resume, self.pause, self.cancel))
         self.job_heading = _label("jobHeading")
         self.job_heading.setText("No job selected.")
+        self.job_diagnostics = _button("Job diagnostics…", "openJobDiagnostics",
+                                       lambda: self.diagnostics_requested.emit(self._job_id))
+        heading = _row(self.job_heading, self.job_diagnostics)
+        heading.setStretch(0, 1)
+        layout.addLayout(heading)
         self.job_metadata = _label("jobMetadata")
         self.job_counts = _label("jobCounts")
         self.worker_warning = _label("jobWorkerWarning")
@@ -210,7 +216,7 @@ class BatchPanel(QWidget):
         self.job_progress = QProgressBar()
         self.job_progress.setObjectName("jobProgress")
         self.job_progress.hide()
-        for widget in (self.job_heading, self.job_metadata, self.job_progress, self.job_counts,
+        for widget in (self.job_metadata, self.job_progress, self.job_counts,
                        self.worker_warning, self.job_message):
             layout.addWidget(widget)
         self.results = _table("jobImages", ("Source JPEG", "Result", "Attempts", "Warnings", "Stages"), 0)
@@ -334,6 +340,24 @@ class BatchPanel(QWidget):
     def _current_image(self):
         row = self.images.currentRow()
         return self._index.images[row] if self._index is not None and 0 <= row < len(self._index.images) else None
+
+    def show_diagnostic_photo(self, event):
+        if self._index is not None:
+            for row, image in enumerate(self._index.images):
+                if image.image_id == event.image_id:
+                    self.images.setCurrentRow(row)
+                    self.images.scrollToItem(self.images.item(row))
+                    self.setup_scroll.ensureWidgetVisible(self.images)
+                    return True
+        if self._status is not None and self._status.job_id == event.job_id:
+            for row, image in enumerate(self._status.images):
+                if image.image_id == event.image_id:
+                    self.job_details.setChecked(True)
+                    self.results.selectRow(row)
+                    self.results.scrollToItem(self.results.item(row, 0))
+                    self.setup_scroll.ensureWidgetVisible(self.results)
+                    return True
+        return False
 
     def _view_original(self):
         if self.original.isEnabled():
@@ -592,6 +616,7 @@ class BatchPanel(QWidget):
             self.source_summary.setText(f"{total} JPEGs found · {selected} selected · {total - selected} excluded · {unreadable} unreadable")
 
         self.history.setEnabled(idle)
+        self.job_diagnostics.setEnabled(not self._closing and bool(self._job_id))
         self.refresh.setEnabled(idle and bool(self._job_id))
         self.resume.setEnabled(idle and bool(self._job_id) and (self._status is None or not self._status.terminal))
         self.resume.setText("Start saved job" if self._status is None or self._status.status == "queued" else "Resume")

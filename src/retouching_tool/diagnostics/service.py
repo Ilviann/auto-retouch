@@ -16,6 +16,7 @@ import uuid
 from ..config import LoggingSettings
 
 MAX_EVENT_BYTES = 65536
+LOG_FILENAME = re.compile(r"auto-retouch-[0-9a-f]{32}\.jsonl(?:\.[0-9]+)?")
 
 def redact(text: str) -> str:
     # Package-manager errors may include authenticated index URLs.
@@ -87,6 +88,7 @@ class Diagnostics(EventLogger):
         self.records = deque(maxlen=100)
         self.failure = None
         self.path = directory / f"auto-retouch-{self.session_id}.jsonl"
+        self._directories = {directory: None}
         self.stream = None
         self._size = 0
         self._part = 0
@@ -112,7 +114,7 @@ class Diagnostics(EventLogger):
 
     def _retain(self):
         owned = sorted((p for p in self.path.parent.glob("auto-retouch-*.jsonl*")
-                        if re.fullmatch(r"auto-retouch-[0-9a-f]{32}\.jsonl(?:\.[0-9]+)?", p.name)
+                        if LOG_FILENAME.fullmatch(p.name)
                         and p.is_file() and not p.is_symlink()), key=lambda p: p.stat().st_mtime)
         cutoff = time.time() - self.settings.retention_days * 86400
         total = sum(p.stat().st_size for p in owned)
@@ -145,6 +147,11 @@ class Diagnostics(EventLogger):
         with self._handler.lock:
             self._store(event, encoded)
 
+    def search_sources(self):
+        """Snapshot the log locations and recent events without locking during disk reads."""
+        with self._handler.lock:
+            return self.path.parent, tuple(self._directories), tuple(self.records), self.failure
+
     @contextmanager
     def changing_settings(self, directory, settings):
         """Prepare the new writer and switch only after configuration persistence succeeds."""
@@ -161,6 +168,7 @@ class Diagnostics(EventLogger):
                     self.failure = None
                     self.close()
                     self.path, self.stream, self._size = path, stream, size
+                    self._directories[directory] = None
                     stream = None
                 if settings.level != self.settings.level:
                     self._set_level(settings.level)

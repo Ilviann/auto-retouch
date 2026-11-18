@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QPushButton, QVB
 from ... import APP_AUTHOR, PRODUCT_NAME, __version__
 from ...application.contracts import StartupSnapshot
 from .batch_panel import BatchPanel
+from .diagnostics_dialog import DiagnosticsDialog
 from .pipeline_panel import PipelinePanel
 from .settings_dialog import SettingsDialog
 
@@ -26,6 +27,10 @@ class MainWindow(QMainWindow):
             layout.addWidget(self.pipeline_page)
         else:
             self.batch_panel = BatchPanel(snapshot.sources, application, self.pipeline_page)
+            diagnostics = QPushButton("Diagnostics…", objectName="openDiagnostics")
+            diagnostics.clicked.connect(lambda: self._diagnostics())
+            heading.addWidget(diagnostics)
+            self.batch_panel.diagnostics_requested.connect(self._diagnostics)
             settings = QPushButton("Settings…", objectName="openSettings")
             settings.clicked.connect(self._settings)
             self.batch_panel.settings_available.connect(settings.setEnabled)
@@ -48,6 +53,13 @@ class MainWindow(QMainWindow):
             warning.setText(application.diagnostics.failure or "")
         self.setCentralWidget(content)
 
+    def _diagnostics(self, job_id=""):
+        dialog = DiagnosticsDialog(self, self.batch_panel.application.diagnostic_history,
+                                   self.batch_panel.show_diagnostic_photo, self.pipeline_page.show_diagnostic_operation,
+                                   job_id=job_id)
+        dialog.finished.connect(dialog.deleteLater)
+        dialog.open()
+
     def _settings(self):
         application = self.batch_panel.application
         previous = application.config
@@ -64,4 +76,6 @@ class MainWindow(QMainWindow):
         if self.batch_panel is not None and not self.batch_panel.request_close():
             event.ignore()
             return
+        for dialog in self.findChildren(DiagnosticsDialog):
+            dialog.reject()
         super().closeEvent(event)

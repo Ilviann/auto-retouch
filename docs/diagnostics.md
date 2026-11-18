@@ -1,9 +1,9 @@
 # Logging and diagnostics contract
 
 Logging must make warnings, failures, and unexpected processing results useful
-for product improvement and bug investigation. Bootstrap logging and batch worker
-delivery are implemented. The full diagnostics panel, batch summaries, and report
-export remain planned.
+for product improvement and bug investigation. Bootstrap logging, batch worker
+delivery, and desktop log search are implemented. Grouped batch summaries and
+report export remain planned.
 
 Milestone 3a emits pipeline command failures, asset-unavailable/recovered and
 context-blocked events. Stage sessions emit preparation, completion, release and
@@ -12,7 +12,7 @@ with job/image/stage instance, operation/version, backend and attempt. Technical
 exceptions retain tracebacks and chained causes at INFO settings; unreadable model
 issues include their captured technical cause. The initial Qt cards expose
 readiness and command errors and retain a diagnostics-storage warning after a
-command. Full diagnostic search and export remain pending.
+command.
 
 The 3b artifact store adds `ARTIFACT_COMMITTED`, `ARTIFACT_VALIDATED`,
 `ARTIFACT_WRITE_FAILED`, `ARTIFACT_INVALID`, `ARTIFACT_STORE_FAILED` and explicit
@@ -69,8 +69,27 @@ progress and worker errors. It surfaces incomplete worker diagnostic delivery
 and keeps session log-storage failures visible across tabs. Saved-job discovery
 reports unreadable journal entries with `JOB_DISCOVERY_SKIPPED`, the job ID, and
 the technical cause. An unexpected desktop command exception is recorded as
-`DESKTOP_BATCH_COMMAND_FAILED`. Full log search and redacted reports are pending.
+`DESKTOP_BATCH_COMMAND_FAILED`.
 See [desktop batch evidence](verification/desktop-batch.md).
+
+**Diagnostics…** searches retained structured events on a background thread.
+**Job diagnostics…** starts the same view with the selected job and minimum
+severity Warning. Users can filter by minimum severity and exact job, photo, and
+stage IDs. Free-text search is case-insensitive across messages, codes, technical
+details, and context. The view shows the latest 200 matching events in local time
+and displays copyable context and tracebacks for the selected event. Photo and
+operation actions reveal matching IDs in the indexed grid, the current job's
+result table, or the current pipeline. The view also opens the effective log
+folder.
+
+Search includes active and rotated JSONL in the effective and bootstrap log
+folders, folders used earlier in the current session, and recent in-memory events.
+Settings changes from previous launches can leave logs in folders outside that
+search. Results reflect the available files at search time. Refresh to pick up
+new records. Missing or invalid records and storage failures have visible status.
+`DIAGNOSTIC_LOG_READ_FAILED` and `DIAGNOSTIC_RECORD_INVALID` record the affected
+path, relevant filters, count, and first technical cause. See
+[desktop diagnostics verification](verification/desktop-diagnostics.md).
 
 Milestone 1a writes schema-version-1 UTF-8 JSONL and console messages through
 `diagnostics/service.py`, with UTC millisecond times, session/process identity,

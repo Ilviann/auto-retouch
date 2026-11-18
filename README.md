@@ -15,8 +15,9 @@ options. Configuration specifies checkpoint and temporary-artifact folders.
 Setup asks for CUDA (default), DirectML, or CPU and installs only the selected
 backend support plus shared dependencies. Launch always uses the recorded backend.
 NVIDIA acceptance requires testing on actual NVIDIA hardware.
-Diagnostics will include contextual warning/error logs, in-app filtering, batch
-summaries, and local bug-report export, with bounded storage outside scratch data.
+Open **Diagnostics…** to search retained local logs and copy technical details.
+**Job diagnostics…** in the monitor opens the selected job's warnings and errors.
+Local bug-report export and grouped batch summaries remain planned.
 
 The reference workload is approximately 500 JPEG photos on a consumer NVIDIA RTX
 20-series GPU with at least 6 GB VRAM. Natural and Beauty presets are required.

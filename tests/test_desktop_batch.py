@@ -14,13 +14,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image, JpegImagePlugin
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QFileDialog, QInputDialog, QLabel, QPushButton
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
+from retouching_tool.ui.qt.diagnostics_dialog import DiagnosticsDialog
 from retouching_tool.ui.qt.main_window import MainWindow
 from retouching_tool.ui.qt.settings_dialog import SettingsDialog
 
@@ -265,6 +266,74 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertIn("Traceback", error["exception"])
         finally:
             self.close_window(window)
+
+    def test_diagnostics_search_copy_and_workspace_links(self):
+        with Image.new("RGB", (40, 30), (240, 160, 80)) as image:
+            image.save(self.source / "bright.jpg")
+        window, panel = self.open_window((self.source,))
+        self.wait_for_scan(panel, 2)
+        editor = panel.application.pipeline_service
+        stage_id = editor.add_operation("core.exposure", 1).stages[-1].stage.id
+        editor.set_parameter(stage_id, "stops", 3)
+        window.pipeline_page._refresh_cards()
+        panel.refresh_pipeline()
+        panel.destination.setText(str(self.destination))
+        self.check_space(panel)
+        panel.start.click()
+        self.until(lambda: panel.history.isEnabled() and panel.results.rowCount() == 2,
+                   "finished job did not become available")
+        job_id = panel._status.job_id
+        image_id = next(image.image_id for image in panel._status.images if image.source.name == "bright.jpg")
+
+        def open_diagnostics(button):
+            button.click()
+            dialog = next(dialog for dialog in window.findChildren(DiagnosticsDialog) if dialog.isVisible())
+            self.until(lambda: dialog.pending is None, "diagnostic search did not finish")
+            return dialog
+
+        dialog = open_diagnostics(panel.job_diagnostics)
+        self.assertEqual(dialog.job_id.text(), job_id)
+        self.assertEqual(dialog.severity.currentData(), "WARNING")
+        self.assertTrue(all(event.job_id == job_id for event in dialog.events))
+        dialog.text.setText("clipped channel samples")
+        dialog.stage_id.setText(stage_id)
+        dialog.image_id.setText(image_id)
+        dialog.findChild(QPushButton, "refreshDiagnostics").click()
+        self.until(lambda: dialog.pending is None, "filtered diagnostics did not finish")
+        self.assertEqual([event.code for event in dialog.events], ["EXPOSURE_CLIPPED"])
+        self.assertIn("clipped_samples", dialog.details.toPlainText())
+        self.assertIn("worker_run_id", dialog.details.toPlainText())
+        dialog.copy.click()
+        self.assertEqual(self.qt.clipboard().text(), dialog.details.toPlainText())
+        with patch.object(QDesktopServices, "openUrl", return_value=True) as opener:
+            dialog.open_folder.click()
+            self.assertEqual(Path(opener.call_args.args[0].toLocalFile()), self.log.path.parent)
+        with patch.object(QDesktopServices, "openUrl", return_value=False):
+            dialog.open_folder.click()
+            self.assertIn("Check the Logs folder", dialog.feedback.text())
+            self.assertEqual(self.log.records[-1]["code"], "DIAGNOSTIC_FOLDER_OPEN_FAILED")
+            self.assertEqual(self.log.records[-1]["job_id"], job_id)
+        dialog.photo.click()
+        self.assertFalse(dialog.isVisible())
+        self.assertEqual(panel.images.currentItem().text(), "bright.jpg")
+
+        # A fresh index assigns new image IDs. The same event still links to its saved job row.
+        panel.scan.click()
+        self.wait_for_scan(panel, 2)
+        dialog = open_diagnostics(panel.job_diagnostics)
+        row = next(row for row, event in enumerate(dialog.events) if event.code == "EXPOSURE_CLIPPED")
+        dialog.table.selectRow(row)
+        dialog.photo.click()
+        self.assertEqual(Path(panel.results.item(panel.results.currentRow(), 0).text()).name, "bright.jpg")
+
+        dialog = open_diagnostics(window.findChild(QPushButton, "openDiagnostics"))
+        self.assertEqual(dialog.job_id.text(), "")
+        row = next(row for row, event in enumerate(dialog.events) if event.code == "EXPOSURE_CLIPPED")
+        dialog.table.selectRow(row)
+        with patch.object(window.pipeline_page.scroll, "ensureWidgetVisible") as reveal:
+            dialog.operation.click()
+            reveal.assert_called_once_with(window.pipeline_page.stage_cards[stage_id])
+        self.assertFalse(dialog.isVisible())
 
     def test_staged_pause_reopen_resume_and_cancel(self):
         pipeline = ROOT / "examples/pipelines/reference.json"
