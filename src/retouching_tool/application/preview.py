@@ -16,7 +16,7 @@ from ..storage.batch_paths import current_file_stamp
 from .batch import IndexedImage, SourceIndex
 
 THUMBNAIL_SIZE = 160
-PICTURE_SIZE = 1600
+OVERVIEW_SIZE = 1600
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class DisplayImage:
     width: int
     height: int
     rgb: bytes
+    overview: DisplayImage | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,13 @@ def _display(rgb, limit):
     return DisplayImage(rgb.width, rgb.height, rgb.tobytes())
 
 
+def _full_display(rgb):
+    full = DisplayImage(rgb.width, rgb.height, rgb.tobytes())
+    if max(rgb.size) <= OVERVIEW_SIZE:
+        return full
+    return replace(full, overview=_display(rgb, OVERVIEW_SIZE))
+
+
 def _foreground_overlay(display, foreground):
     from PIL import Image
 
@@ -67,7 +75,7 @@ def _foreground_overlay(display, foreground):
           Image.frombytes("L", (foreground.width, foreground.height), opacity) as labels,
           labels.resize(size, Image.Resampling.NEAREST) as matte):
         image.paste((0, 224, 160), mask=matte)
-        return DisplayImage(*size, image.tobytes())
+        return _full_display(image)
 
 
 def _check_source(image):
@@ -85,11 +93,11 @@ class PreviewService:
     def __init__(self, root, editor, diagnostics):
         self.root, self.editor, self.diagnostics = root, editor, diagnostics
 
-    def _source_display(self, image, runtime, limit):
+    def _source_display(self, image, runtime, limit=None):
         _check_source(image)
         with read_srgb_jpeg(image.path, source_id=image.image_id, runtime=runtime, draft_size=limit) as (
                 rgb, _, _, _):
-            display = _display(rgb, limit)
+            display = _full_display(rgb) if limit is None else _display(rgb, limit)
         _check_source(image)
         return display
 
@@ -119,7 +127,7 @@ class PreviewService:
             if stage_id is None and (through_stage or parameters is not None):
                 raise RetouchingError("PREVIEW_STAGE_REQUIRED", "Select a stage to preview with these settings.")
             if not process and stage_id is None:
-                original = self._source_display(image, runtime, PICTURE_SIZE)
+                original = self._source_display(image, runtime)
                 return PicturePreview(request_id, f"Original · {image.path.name}", original)
             title, stages = self._stages(stage_id, through_stage, parameters)
             lock = runner_lock(self.root) if any(stage.model_ref is not None for stage in stages) else nullcontext()
@@ -151,7 +159,7 @@ class PreviewService:
             _check_source(image)
             for stage in prefix:
                 state = self._process_stage(state, stage, runtime, resize_approvals)
-            original = _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE)
+            original = _full_display(Image.fromarray(encode_rgb_samples(state)))
             if comparison is not None:
                 comparison._baseline = (baseline_key, state, original)
         initial_revision = state.pixel_revision
@@ -159,7 +167,7 @@ class PreviewService:
             state = self._process_stage(state, stage, runtime, resize_approvals)
         _check_source(image)
         result = (original if state.pixel_revision == initial_revision else
-                  _display(Image.fromarray(encode_rgb_samples(state)), PICTURE_SIZE))
+                  _full_display(Image.fromarray(encode_rgb_samples(state))))
         caption = None
         foreground = state.entry(PERSON_FOREGROUND.key)
         if foreground is not None and foreground.producer_id == stage_id:

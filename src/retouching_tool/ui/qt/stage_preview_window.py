@@ -1,12 +1,11 @@
 """Modal stage comparison, including local draft settings and preview scheduling."""
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
                                QProgressBar, QPushButton, QVBoxLayout)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
-from .photo_grid import pixmap
-from .picture_window import FittedPicture, statistics_text
+from .picture_window import PictureComparison, RenderProgressDialog, statistics_text
 from .stage_card import ScalingControl, parameter_control
 
 
@@ -14,27 +13,6 @@ def confirm_resize(parent, message):
     buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
     return QMessageBox.question(parent, "Allow temporary resizing?", message, buttons,
                                 QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
-
-
-class RenderProgressDialog(QDialog):
-    def __init__(self, preview):
-        super().__init__(preview)
-        self.setWindowTitle(preview.windowTitle())
-        self.setWindowModality(Qt.WindowModality.WindowModal)
-        layout = QVBoxLayout(self)
-        self.message = QLabel()
-        layout.addWidget(self.message)
-        progress = QProgressBar(accessibleName="Stage preview progress")
-        progress.setRange(0, 0)
-        progress.setMinimumWidth(260)
-        layout.addWidget(progress)
-        self.close_preview = QPushButton("Close preview", autoDefault=False)
-        self.close_preview.clicked.connect(self.reject)
-        layout.addWidget(self.close_preview, alignment=Qt.AlignmentFlag.AlignRight)
-
-    def reject(self):
-        # Closing the preview waits for its render before resolving the draft.
-        self.parentWidget().reject()
 
 
 class StagePreviewWindow(QDialog):
@@ -58,18 +36,8 @@ class StagePreviewWindow(QDialog):
         self._poll_timer.timeout.connect(self._finish_preview)
 
         layout = QVBoxLayout(self)
-        pictures = QHBoxLayout()
-        self.before = FittedPicture("stagePreviewBefore")
-        self.after = FittedPicture("stagePreviewAfter")
-        before_caption = QLabel("Before this stage" if through_stage else "Source photo",
-                                alignment=Qt.AlignmentFlag.AlignCenter)
-        self.after_caption = QLabel("After this stage", alignment=Qt.AlignmentFlag.AlignCenter)
-        for picture, caption in ((self.before, before_caption), (self.after, self.after_caption)):
-            column = QVBoxLayout()
-            column.addWidget(caption)
-            column.addWidget(picture, 1)
-            pictures.addLayout(column, 1)
-        layout.addLayout(pictures, 1)
+        self.comparison = PictureComparison("Before this stage" if through_stage else "Source", "After this stage")
+        layout.addWidget(self.comparison, 1)
         self.statistics = QLabel(objectName="previewStatistics", wordWrap=True)
         self.statistics.hide()
         layout.addWidget(self.statistics)
@@ -80,6 +48,9 @@ class StagePreviewWindow(QDialog):
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
             for parameter in descriptor.editable_parameters:
                 control = parameter_control(parameter)
+                if isinstance(control, QDoubleSpinBox):
+                    control.installEventFilter(self)
+                    control.lineEdit().installEventFilter(self)
                 control.setValue(self._original[parameter.name])
                 control.setMinimumWidth(110)
                 hint = ("Updates the preview automatically." if parameter.preview_on_change
@@ -113,11 +84,15 @@ class StagePreviewWindow(QDialog):
         actions.addWidget(self.close_button)
         layout.addLayout(actions)
         self._update_actions()
-        self.finished.connect(self._discard_images)
+        self.finished.connect(self.comparison.clear)
 
-    def _discard_images(self):
-        self.before.show_pixels(None)
-        self.after.show_pixels(None)
+    def eventFilter(self, watched, event):
+        # Numeric editors normally claim printable keys before window shortcuts.
+        if (event.type() == QEvent.Type.ShortcutOverride and event.key() == Qt.Key.Key_Space
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
 
     def _change(self, parameter, value, initial):
         name = parameter.name
@@ -166,9 +141,7 @@ class StagePreviewWindow(QDialog):
                     self._submitted = None
         else:
             if current:
-                self.before.show_pixels(pixmap(preview.original))
-                self.after.show_pixels(pixmap(preview.result))
-                self.after_caption.setText(preview.result_caption or "After this stage")
+                self.comparison.display(preview)
                 measurements = statistics_text(preview.context)
                 self.statistics.setText(measurements)
                 self.statistics.setVisible(bool(measurements))

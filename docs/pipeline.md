@@ -235,8 +235,17 @@ and place them at the paths shown on the card under the configured model folder
 | Stage card **Preview in pipeline** | Compare the result of the preceding enabled stages against the result after applying the selected stage | Inspect the operation with its upstream changes and analysis context. |
 | Context analysis | Run selected analysis and display region/mask overlays or measurements | Inspect output even when pixels are unchanged. |
 
-Original, whole-pipeline, and stage previews open as modal dialogs. Stage
-comparisons display the input and result side by side.
+Double-clicking a thumbnail opens its source in a modal window. **Run pipeline**
+opens a window-modal progress dialog immediately and displays the completed
+comparison in the same photo window. If a stage needs resize approval, progress
+yields to the prompt and reopens for the approved retry. Whole-pipeline
+and stage comparisons start side by side. Space alternates between input and
+result in a single pane. The view selector restores the side-by-side layout.
+All photo and stage previews support wheel zoom around the pointer and drag
+to pan. The panes share magnification and image center across mode changes
+and stage refreshes. **100%** preserves the inspected center and maps an oriented
+input or result pixel to one physical screen pixel. **Fit** recenters the image
+and fits the visible panes.
 The stage parameters are a local draft. Parameters marked `preview_on_change`
 refresh after a short debounce. Other parameters enter the preview when the
 user selects **Preview changes**. Automatic renders use a fixed-size footer bar
@@ -251,8 +260,9 @@ Originals and thumbnails use local orientation and color conversion. Processing
 previews run at full working resolution on the desktop command thread while the
 batch worker is idle. Neural previews also take the batch runner lock across
 processes. The stage comparison retains one validated input in memory
-for the duration of the dialog. Display RGB has a longest edge of at most 1,600
-pixels and available luminance measurements accompany the result. The person
+for the duration of the dialog. The service supplies full-resolution sRGB bytes
+for inspection and a 1,600-pixel overview for large images. Available luminance
+measurements accompany the result. The person
 foreground stage comparison tints the detected region in its result pane. See
 [desktop workspace evidence](verification/desktop-workspace.md).
 
@@ -268,8 +278,7 @@ image merely because their dimensions match.
 
 Previews run without a destination. Preview images and cached stage inputs live
 in memory and are discarded when their window closes. Saving stage settings
-persists parameters. A future full-resolution detail view will distinguish zoomed
-inspection from the fitted preview. GPU preview queuing remains planned and must
+persists parameters. GPU preview queuing remains planned and must
 serialize model work with active sequential images or staged passes.
 
 ## Equivalent schedules

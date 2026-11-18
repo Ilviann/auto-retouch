@@ -5,6 +5,7 @@ from io import StringIO
 import json
 import os
 from pathlib import Path
+from random import Random
 import tempfile
 from threading import Event
 from time import monotonic, sleep
@@ -15,11 +16,11 @@ from zipfile import ZipFile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image, JpegImagePlugin
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QInputDialog, QLabel,
-                               QMessageBox, QProgressBar, QPushButton, QSlider)
+                               QMessageBox, QProgressBar, QPushButton, QSlider, QToolButton)
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
@@ -101,6 +102,31 @@ class DesktopBatchTests(unittest.TestCase):
     def wait_for_scan(self, panel, expected):
         self.until(lambda: panel.images.count() == expected and panel.scan.isEnabled(),
                    "automatic source scan did not finish")
+
+    def double_click_thumbnail(self, panel):
+        grid = panel.images
+        position = grid.visualItemRect(grid.currentItem()).center()
+        QTest.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=position)
+        QTest.mouseDClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=position)
+
+    def check_comparison_views(self, window, focus_widget):
+        view = window.comparison
+        self.assertEqual(view.mode.currentText(), "Side by side")
+        self.assertTrue(view.before.isVisible() and view.after.isVisible())
+        split_width = view.before.width()
+        focus_widget.setFocus()
+        QTest.keyClick(focus_widget, Qt.Key.Key_Space)
+        self.qt.processEvents()
+        self.assertTrue(view.before.isVisible())
+        self.assertFalse(view.after.isVisible())
+        self.assertGreater(view.before.width(), split_width)
+        QTest.keyClick(focus_widget, Qt.Key.Key_Space)
+        self.qt.processEvents()
+        self.assertFalse(view.before.isVisible())
+        self.assertTrue(view.after.isVisible())
+        self.assertGreater(view.after.width(), split_width)
+        view.mode.setCurrentIndex(0)
+        self.assertTrue(view.before.isVisible() and view.after.isVisible())
 
     def wait_for_space(self, panel, *, ready=True):
         self.until(lambda: panel._space_check_after is None and panel._space_check is None, "disk check did not return")
@@ -568,7 +594,8 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertTrue(panel.destination.isVisible())
         self.assertTrue(panel.export.isVisible())
         self.assertFalse(panel.destination.text())
-        self.assertTrue(panel.preview.isEnabled())
+        self.assertIsNone(panel.findChild(QPushButton, "viewOriginal"))
+        self.assertIsNone(panel.findChild(QPushButton, "previewPipeline"))
         self.assertIn("Estimated temporary space", panel.space.text())
         self.assertIn("MiB", panel.space.text())
         initial = panel.space.text()
@@ -592,40 +619,203 @@ class DesktopBatchTests(unittest.TestCase):
             return picture(*args, **kwargs)
 
         with patch.object(service, "picture", delayed):
-            panel.original.click()
+            self.double_click_thumbnail(panel)
+            self.assertIsNotNone(panel._task)
             panel.images.setCurrentRow(0)
             release.set()
-            self.until(panel.original.isEnabled, "obsolete original request did not finish")
+            self.until(lambda: panel._task is None, "obsolete original request did not finish")
             self.assertIsNone(panel._picture_window)
 
-        panel.original.click()
+        QTest.keyClick(panel.images, Qt.Key.Key_Return)
         self.until(lambda: panel._picture_window is not None, "original window did not open")
         original = panel._picture_window
         self.assertTrue(original.isWindow())
         self.assertIs(self.qt.activeModalWidget(), original)
         self.assertTrue(original.windowTitle().startswith("Original"))
-        self.assertIsNotNone(original.picture.pixmap())
-        self.assertFalse(original.original_toggle.isVisible())
-        original.close()
-        self.assertIsNone(self.qt.activeModalWidget())
-        panel.destination.setText(str(self.source))
+        view = original.comparison
+        self.assertFalse(view.before.pixmap().isNull())
+        self.assertFalse(view.controls.isVisible())
+        self.assertFalse(view.after.isVisible())
+        opened_filename = panel.images.currentItem().text()
+        panel.images.setCurrentRow(1)
         with patch.object(QFileDialog, "getExistingDirectory") as choose:
-            panel.preview.click()
+            original.run_pipeline.click()
+            self.assertIs(self.qt.activeModalWidget(), original.render_dialog)
+            self.assertIs(original.render_dialog.parentWidget(), original)
+            bar = original.render_dialog.findChild(QProgressBar)
+            self.assertEqual((bar.minimum(), bar.maximum()), (0, 0))
+            self.assertFalse(original.run_pipeline.isEnabled())
+            self.until(view.controls.isVisible, "pipeline result did not render")
             choose.assert_not_called()
-        self.until(lambda: panel._picture_window is not None, "whole pipeline window did not open")
-        whole = panel._picture_window
-        self.assertIs(self.qt.activeModalWidget(), whole)
-        self.assertTrue(whole.original_toggle.isVisible())
-        self.assertIsNotNone(whole.findChild(QLabel, "previewStatistics"))
-        self.assertFalse(whole.picture.pixmap().isNull())
-        whole.close()
+        self.assertIs(self.qt.activeModalWidget(), original)
+        self.assertTrue(original.windowTitle().endswith(opened_filename))
+        self.assertTrue(original.statistics.isVisible())
+        self.assertFalse(view.after.pixmap().isNull())
+        self.check_comparison_views(original, original.run_pipeline)
+        release.clear()
+        with patch.object(service, "picture", delayed):
+            original.run_pipeline.click()
+            self.assertIs(self.qt.activeModalWidget(), original.render_dialog)
+            original.render_dialog.close_preview.click()
+            self.assertIsNone(self.qt.activeModalWidget())
+            self.assertTrue(view.before.pixmap().isNull())
+            self.assertTrue(view.after.pixmap().isNull())
+            release.set()
+            self.until(lambda: panel._task is None, "closed preview did not finish")
         self.assertIsNone(self.qt.activeModalWidget())
         self.assertIsNone(panel._picture_window)
-        self.assertIsNone(whole.original)
-        self.assertIsNone(whole.result)
-        self.assertTrue(whole.picture.pixmap().isNull())
         self.assertEqual(list(self.destination.iterdir()), [])
         self.assertFalse(panel.application.job_service.saved_jobs())
+
+    def test_preview_zoom_pan_and_space_preserve_displayed_detail(self):
+        path = self.source / "detail.jpg"
+        gradient = Image.linear_gradient("L")
+        Image.merge("RGB", (gradient.rotate(90), gradient, gradient)).resize((1200, 800)).save(path)
+        window, panel = self.open_window((path,), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 1)
+        self.double_click_thumbnail(panel)
+        self.until(lambda: panel._picture_window is not None, "source did not open")
+        photo = panel._picture_window
+        view = photo.comparison
+
+        def samples(pane, *offsets):
+            self.qt.processEvents()
+            image = pane.grab().toImage()
+            middle = image.rect().center()
+            return [image.pixelColor(middle + offset * image.devicePixelRatio()).getRgb()[:2] for offset in offsets]
+
+        def check_samples(actual, expected):
+            for measured, reference in zip(actual, expected, strict=True):
+                for value, target in zip(measured, reference, strict=True):
+                    self.assertAlmostEqual(value, target, delta=2)
+
+        def wheel(pane, offset, delta):
+            position = pane.rect().center() + offset
+            event = QWheelEvent(position, pane.mapToGlobal(position), QPoint(), QPoint(0, delta),
+                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                                Qt.ScrollPhase.ScrollUpdate, False)
+            self.qt.sendEvent(pane, event)
+
+        origin, anchor = QPoint(), QPoint(120, 40)
+        offsets = (origin, QPoint(90, 60), QPoint(-80, -40))
+        at_fit = samples(view.before, *offsets)
+        under_cursor = samples(view.before, anchor)
+        wheel(view.before, anchor, 480)
+        check_samples(samples(view.before, anchor), under_cursor)
+        zoomed = samples(view.before, *offsets)
+        self.assertLess(abs(zoomed[1][0] - zoomed[0][0]), abs(at_fit[1][0] - at_fit[0][0]))
+        self.assertGreater(abs(zoomed[0][0] - at_fit[0][0]), 6)
+
+        photo.run_pipeline.click()
+        self.until(view.controls.isVisible, "pipeline result did not render")
+        check_samples(samples(view.before, *offsets), zoomed)
+        check_samples(samples(view.after, *offsets), zoomed)
+        middle = view.after.rect().center()
+        drag = QPoint(70, 50)
+        QTest.mousePress(view.after, Qt.MouseButton.LeftButton, pos=middle)
+        QTest.mouseMove(view.after, middle + drag)
+        QTest.mouseRelease(view.after, Qt.MouseButton.LeftButton, pos=middle + drag)
+        check_samples(samples(view.after, drag), [zoomed[0]])
+        panned = samples(view.after, *offsets)
+        check_samples(samples(view.before, *offsets), panned)
+        QTest.keyClick(photo, Qt.Key.Key_Space)
+        check_samples(samples(view.before, *offsets), panned)
+        QTest.keyClick(photo, Qt.Key.Key_Space)
+        check_samples(samples(view.after, *offsets), panned)
+        buttons = {button.text(): button for button in view.zoom_controls.findChildren(QToolButton)}
+        previous_scale = view.scale()
+        buttons["+"].click()
+        self.assertGreater(view.scale(), previous_scale)
+        buttons["−"].click()
+        check_samples(samples(view.after, *offsets), panned)
+        buttons["Fit"].click()
+        check_samples(samples(view.after, origin), [at_fit[0]])
+        self.assertAlmostEqual(view.scale(), min(view.after.width() / 1200, view.after.height() / 800, 1))
+        view.mode.setCurrentIndex(view.SIDE_BY_SIDE)
+        buttons["Fit"].click()
+        fitted_pair = samples(view.after, *offsets)
+        QTest.keyClick(photo, Qt.Key.Key_Space)
+        check_samples(samples(view.before, *offsets), fitted_pair)
+        photo.close()
+
+        window.pipeline_page.stage_cards["exposure-reference"].preview_pipeline.click()
+        dialog = panel._stage_preview
+        view = dialog.comparison
+        self.until(lambda: not view.after.pixmap().isNull(), "stage comparison did not render")
+        wheel(view.after, anchor, 480)
+        stage_detail = samples(view.before, *offsets)
+        dialog.findChild(QDoubleSpinBox, "parameter-stops").setValue(1)
+        self.until(lambda: samples(view.after, origin)[0][0] > stage_detail[0][0] + 5, "stage did not refresh")
+        check_samples(samples(view.before, *offsets), stage_detail)
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
+            dialog.close()
+
+    def test_preview_100_percent_shows_native_pixels_after_pan_and_space(self):
+        path = self.source / "grain.jpg"
+        size = (2179, 521)
+        Image.frombytes("L", size, Random(37).randbytes(size[0] * size[1])).save(path, quality=95)
+        with Image.open(path) as jpeg:
+            source = jpeg.convert("RGB")
+        window, panel = self.open_window((path,), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 1)
+        editor = panel.application.pipeline_service
+        editor.set_parameter("exposure-reference", "stops", 1)
+        editor.set_enabled("exposure-reference", True)
+        index = panel._index
+        result = panel.application.preview_service.picture(index, index.images[0].image_id, "expected", process=True).result
+        expected_result = Image.frombytes("RGB", size, result.rgb)
+        self.double_click_thumbnail(panel)
+        self.until(lambda: panel._picture_window is not None, "source did not open")
+        photo = panel._picture_window
+
+        def actual_size(view):
+            button = next(b for b in view.findChildren(QToolButton) if b.text() == "100%")
+            center = view.center
+            button.click()
+            self.assertEqual(view.center, center)
+            self.assertAlmostEqual(view.scale() * view.devicePixelRatioF(), 1)
+
+        def check_pixels(pane, expected):
+            self.qt.processEvents()
+            screen = pane.grab().toImage()
+            dpr = screen.devicePixelRatio()
+            x, y = int(pane.width() * dpr / 2), int(pane.height() * dpr / 2)
+            center = pane.comparison.center
+            u, v = int(center.x() * expected.width), int(center.y() * expected.height)
+            self.assertEqual([screen.pixelColor(x + dx, y + dy).red() for dy in range(3) for dx in range(9)],
+                             [expected.getpixel((u + dx, v + dy))[0] for dy in range(3) for dx in range(9)])
+
+        view = photo.comparison
+        actual_size(view)
+        check_pixels(view.before, source)
+        middle = view.before.rect().center()
+        QTest.mousePress(view.before, Qt.MouseButton.LeftButton, pos=middle)
+        QTest.mouseMove(view.before, middle + QPoint(93, 26))
+        QTest.mouseRelease(view.before, Qt.MouseButton.LeftButton, pos=middle + QPoint(93, 26))
+        center = view.center
+        self.assertLess(center.x(), .5)
+        photo.run_pipeline.click()
+        self.until(view.controls.isVisible, "pipeline result did not render")
+        check_pixels(view.before, source)
+        check_pixels(view.after, expected_result)
+        QTest.keyClick(photo, Qt.Key.Key_Space)
+        check_pixels(view.before, source)
+        QTest.keyClick(photo, Qt.Key.Key_Space)
+        check_pixels(view.after, expected_result)
+        self.assertEqual(view.center, center)
+        photo.close()
+        self.assertTrue(view.before._native.isNull() and view.after._native.isNull())
+
+        card = window.pipeline_page.stage_cards["exposure-reference"]
+        for action in (card.preview, card.preview_pipeline):
+            action.click()
+            dialog = panel._stage_preview
+            view = dialog.comparison
+            self.until(view.zoom_controls.isEnabled, "stage comparison did not render")
+            actual_size(view)
+            check_pixels(view.before, source)
+            check_pixels(view.after, expected_result)
+            dialog.close()
 
     def test_modal_stage_comparison_uses_selection_and_saves_or_discards_draft(self):
         window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
@@ -672,12 +862,13 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIs(self.qt.activeModalWidget(), operation)
         self.assertEqual(operation.windowModality(), Qt.WindowModality.WindowModal)
         self.assertIn("фото.jpg", operation.windowTitle())
-        self.until(lambda: red(operation.after) > 0, "stage preview did not render")
+        self.until(lambda: red(operation.comparison.after) > 0, "stage preview did not render")
         self.assertIsNotNone(comparisons[0]._baseline)
-        source = red(operation.before)
-        self.assertEqual(source, red(operation.after))
+        source = red(operation.comparison.before)
+        self.assertEqual(source, red(operation.comparison.after))
+        self.check_comparison_views(operation, operation.findChild(QDoubleSpinBox, "parameter-stops"))
         operation.findChild(QDoubleSpinBox, "parameter-stops").setValue(1)
-        self.until(lambda: red(operation.after) > source, "exposure did not refresh automatically")
+        self.until(lambda: red(operation.comparison.after) > source, "exposure did not refresh automatically")
         self.assertEqual(editor.status.definition.stages[2].parameter("stops"), 0)
         self.assertEqual(editor.autosave.read_bytes(), persisted)
 
@@ -689,25 +880,26 @@ class DesktopBatchTests(unittest.TestCase):
             operation.close_button.click()
         self.assertIsNone(panel._stage_preview)
         self.assertIsNone(comparisons[0]._baseline)
-        self.assertTrue(operation.before.pixmap().isNull())
-        self.assertTrue(operation.after.pixmap().isNull())
+        self.assertTrue(operation.comparison.before.pixmap().isNull())
+        self.assertTrue(operation.comparison.after.pixmap().isNull())
         self.assertEqual(editor.autosave.read_bytes(), persisted)
 
         with patch.object(QFileDialog, "getExistingDirectory") as choose:
             exposure.preview_pipeline.click()
             choose.assert_not_called()
         cumulative = panel._stage_preview
-        self.until(lambda: red(cumulative.after) > 0, "stage prefix did not render")
-        baseline = red(cumulative.before)
+        self.until(lambda: red(cumulative.comparison.after) > 0, "stage prefix did not render")
+        baseline = red(cumulative.comparison.before)
+        self.check_comparison_views(cumulative, cumulative.close_button)
         self.assertGreater(baseline, source)
-        self.assertEqual(baseline, red(cumulative.after))
+        self.assertEqual(baseline, red(cumulative.comparison.after))
         cumulative.findChild(QDoubleSpinBox, "parameter-stops").setValue(1)
-        self.until(lambda: red(cumulative.after) > baseline, "stage prefix did not refresh")
-        self.assertEqual(red(cumulative.before), baseline)
-        full_effect = red(cumulative.after)
+        self.until(lambda: red(cumulative.comparison.after) > baseline, "stage prefix did not refresh")
+        self.assertEqual(red(cumulative.comparison.before), baseline)
+        full_effect = red(cumulative.comparison.after)
         cumulative.findChild(QSlider, "blendSlider").setValue(50)
-        self.until(lambda: baseline < red(cumulative.after) < full_effect, "blended preview did not refresh")
-        self.assertEqual(red(cumulative.before), baseline)
+        self.until(lambda: baseline < red(cumulative.comparison.after) < full_effect, "blended preview did not refresh")
+        self.assertEqual(red(cumulative.comparison.before), baseline)
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Save):
             with patch("retouching_tool.application.pipeline_service.atomic_json", side_effect=OSError("fixture write failure")):
                 cumulative.close_button.click()
@@ -744,15 +936,16 @@ class DesktopBatchTests(unittest.TestCase):
         approvals = []
 
         def render(*args, **kwargs):
+            if not kwargs.get("process") and kwargs.get("stage_id") is None:
+                return picture(*args, **kwargs)
             approvals.append(kwargs["resize_approvals"])
             if stage.id not in approvals[-1]:
                 raise ResizeApprovalRequired(stage.id, "Approve the test resize?")
             return picture(*args, **kwargs)
 
         def approve_resize(parent, *args):
-            if parent is panel._stage_preview:
-                self.assertIs(self.qt.activeModalWidget(), parent)
-                self.assertFalse(parent.render_dialog.isVisible())
+            self.assertIs(self.qt.activeModalWidget(), parent)
+            self.assertFalse(parent.render_dialog.isVisible())
             return QMessageBox.StandardButton.Yes
 
         with patch.object(preview, "picture", side_effect=render), patch.object(
@@ -760,12 +953,24 @@ class DesktopBatchTests(unittest.TestCase):
             window.pipeline_page.stage_cards[stage.id].preview.click()
             dialog = panel._stage_preview
             self.assertIs(self.qt.activeModalWidget(), dialog.render_dialog)
-            self.until(lambda: not dialog.after.pixmap().isNull(), "stage resize was not retried")
+            self.until(lambda: not dialog.comparison.after.pixmap().isNull(), "stage resize was not retried")
             dialog.close()
-            panel.preview.click()
-            self.until(lambda: panel._picture_window is not None, "pipeline resize was not retried")
-            panel._picture_window.close()
-        self.assertEqual(approvals, [(), (stage.id,), (), (stage.id,)])
+            self.double_click_thumbnail(panel)
+            self.until(lambda: panel._picture_window is not None, "photo preview did not open")
+            photo = panel._picture_window
+            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No):
+                photo.run_pipeline.click()
+                self.until(photo.run_pipeline.isEnabled, "declined resize kept the preview busy")
+                self.assertIs(self.qt.activeModalWidget(), photo)
+                self.assertIn("Approve the test resize?", photo.feedback.text())
+                self.assertFalse(photo.comparison.after.isVisible())
+            with patch.object(photo.render_dialog, "open", wraps=photo.render_dialog.open) as show_progress:
+                photo.run_pipeline.click()
+                self.until(lambda: photo.comparison.after.isVisible(), "pipeline resize was not retried")
+                self.assertEqual(show_progress.call_count, 2)
+            self.assertIs(self.qt.activeModalWidget(), photo)
+            photo.close()
+        self.assertEqual(approvals, [(), (stage.id,), (), (), (stage.id,)])
 
         panel.destination.setText(str(self.destination))
         self.wait_for_space(panel)
@@ -810,18 +1015,19 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertIs(self.qt.activeModalWidget(), dialog.render_dialog)
             modal_bar = dialog.render_dialog.findChild(QProgressBar)
             self.assertEqual((modal_bar.minimum(), modal_bar.maximum()), (0, 0))
-            self.until(lambda: not dialog.after.pixmap().isNull(), "initial preview did not render")
+            view = dialog.comparison
+            self.until(lambda: not view.after.pixmap().isNull(), "initial preview did not render")
             live = dialog.findChild(QDoubleSpinBox, "parameter-stops")
 
             def layout_rects():
                 return [widget.geometry() for widget in
-                        (dialog.before, dialog.after, live, dialog.live_progress, dialog.apply_preview, dialog.close_button)]
+                        (view.before, view.after, live, dialog.live_progress, dialog.apply_preview, dialog.close_button)]
 
             idle_rects = layout_rects()
             self.assertIs(self.qt.activeModalWidget(), dialog)
             self.assertTrue(dialog.live_progress.isVisible())
             self.assertGreater(dialog.live_progress.maximum(), 0)
-            with patch.object(dialog.after, "show_pixels", wraps=dialog.after.show_pixels) as paint:
+            with patch.object(view.after, "show_pixels", wraps=view.after.show_pixels) as paint:
                 dialog.findChild(QDoubleSpinBox, "parameter-manual").setValue(2)
                 self.assertTrue(dialog.apply_preview.isEnabled())
                 live.setValue(1)
@@ -838,7 +1044,7 @@ class DesktopBatchTests(unittest.TestCase):
                 self.until(lambda: len(requests) == 3 and dialog._future is None, "latest live preview did not render")
                 self.assertEqual(requests[-1], {"stops": 2, "manual": 0, "blend": 1})
                 paint.assert_called_once()
-            live_red = dialog.after.pixmap().toImage().pixelColor(0, 0).red()
+            live_red = view.after.pixmap().toImage().pixelColor(0, 0).red()
             dialog.apply_preview.click()
             self.assertIs(self.qt.activeModalWidget(), dialog.render_dialog)
             self.assertEqual(layout_rects(), idle_rects)
@@ -848,7 +1054,7 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertGreater(dialog.live_progress.maximum(), 0)
             self.assertEqual(layout_rects(), idle_rects)
             self.assertEqual(requests[-1], {"stops": 2, "manual": 2, "blend": 1})
-            self.assertGreater(dialog.after.pixmap().toImage().pixelColor(0, 0).red(), live_red)
+            self.assertGreater(view.after.pixmap().toImage().pixelColor(0, 0).red(), live_red)
             dialog.findChild(QDoubleSpinBox, "parameter-manual").setValue(1)
             dialog.apply_preview.click()
             with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard) as prompt:

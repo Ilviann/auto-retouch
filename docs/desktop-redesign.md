@@ -31,9 +31,12 @@ also provides access to saved jobs, Settings and Diagnostics.
   be viewed while excluded, or exported successfully and still flagged for
   visual review. Track each of those states independently. Keep thumbnail
   decoding and caching bounded for a shoot of approximately 500 JPEGs.
-- **Inspect.** Double-click a tile to inspect it, step through photos with the
-  arrow keys, and hold Space to compare the original at the same zoom and pan.
-  Keep Fit and 100% beside the image. Choose preview scope independently of the
+- **Inspect.** Double-click a tile to inspect it and run its pipeline in the
+  preview window. Compare side by side or press Space to switch between
+  input and result at the same zoom and position. Scroll to zoom, drag to pan
+  both panes, use **100%** for full-resolution detail or **Fit** to recenter.
+  Proposed navigation adds arrow keys to step through photos.
+  Choose preview scope independently of the
   comparison and overlays. Whole pipeline uses enabled stages in order.
   Operation only runs the selected available stage on the original, including a
   manually skipped stage. The stage card's **Preview in pipeline** comparison runs
@@ -45,10 +48,9 @@ also provides access to saved jobs, Settings and Diagnostics.
   to the selected stage's outputs. For a group portrait, show skin coverage on
   hands, arms and legs as well as faces, preserving each person's association.
   A valid empty detection and a missing dependency need different feedback.
-  Align overlays to the oriented image at both Fit and 100%. The current
-  display copy is capped at 1,600 pixels on its longest edge. True 100%
-  inspection needs corresponding full-resolution original and processed detail
-  at one image pixel per physical display pixel. [Stage catalog](stages.md)
+  Align overlays to the oriented image at both Fit and 100%. Previews use a
+  small overview for reduced views and draw full-resolution input and result
+  detail at one image pixel per physical display pixel at 100%. [Stage catalog](stages.md)
 - **Pipeline inspector.** Show ordered, compact rows with an enable control,
   stage name, state and a useful parameter value. Expand the selected row to
   edit parameters or inspect inputs and outputs. Keep add, remove, reorder,
@@ -104,8 +106,8 @@ Settings. Keep warnings that require action beside the affected control.
    switch views and own the image canvas. Keep stable photo, stage-instance,
    preview-request and job identities in plain Python. Discard stale preview
    results after a photo or settings change. Generate controls from descriptors
-   and render outputs by type so new operations fit the same shell. Add true
-   100% inspection when the preview service supplies full-resolution detail.
+   and render outputs by type so new operations fit the same shell. Reuse
+   the preview service's full-resolution input and result for 100% inspection.
    [GUI boundary](architecture.md#gui-boundary)
 3. Connect the dedicated Jobs, Settings and Diagnostics views to their
    application services. Add analysis overlays, per-photo overrides, queued

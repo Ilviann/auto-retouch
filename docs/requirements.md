@@ -25,8 +25,8 @@ presets rather than fixed processing paths.
 | U13 | Select a source folder and optionally search for photos recursively. |
 | U14 | Require a destination folder before batch processing and reject a destination equal to the source folder. |
 | U15 | When recursive search is enabled, also reject a destination inside the source folder. |
-| U16 | Display discovered source files in a thumbnail grid and allow preview of any image. |
-| U17 | Select one thumbnail for preview. Preview the entire pipeline, or use a stage card's **Preview** or **Preview in pipeline** action to compare the selected stage's input and output side by side in a modal window. The input is the source for **Preview** and the result of preceding enabled stages for **Preview in pipeline**. Edit that stage's parameters in the window, with automatic refresh or **Preview changes** as appropriate. Ask whether to save changed parameters when the window closes. |
+| U16 | Display discovered source files in a thumbnail grid. Double-click a thumbnail to open its source preview. The preview window offers **Run pipeline** for that photo. Omit separate preview buttons above the photo list. |
+| U17 | Compare input and result side by side or switch between them with Space in every image comparison. Use a stage card's **Preview** or **Preview in pipeline** action to compare the selected stage's input and output in a modal window. The input is the source for **Preview** and the result of preceding enabled stages for **Preview in pipeline**. Edit that stage's parameters in the window, with automatic refresh or **Preview changes** as appropriate. Ask whether to save changed parameters when the window closes. |
 | U18 | Support a temporary folder for processing artifacts. |
 | U19 | Sequential mode processes one image through every stage, exports it, then moves to the next image. |
 | U20 | Staged mode processes every image through one stage, persists intermediate results, releases that stage's model resources, then advances to the next stage. |
@@ -64,9 +64,11 @@ presets rather than fixed processing paths.
 | U52 | Application settings provide independent methods for downscaling and upscaling. Every stage that scales images can override either method on its own stage card. |
 | U53 | Each stage card shows the algorithm name, implementation version, enable checkbox, tagged In and Out rows, stage-specific controls, both stage previews, and move, remove and settings actions. Required and optional inputs are visually distinct. The Alibaba settings menu opens the publisher page and checks required model files. |
 | U54 | Stages that return changed pixels offer a blending slider from 0.0 to 1.0 to mix their input pixels with their result. |
-| U55 | Automatic stage preview updates use a fixed-size progress bar that stays visible while idle. Explicit updates use a modal or overlay progress panel. Showing progress keeps the comparison panes and settings in place. |
+| U55 | Every **Run pipeline** in the main photo preview shows a modal progress dialog while processing. Automatic stage preview updates use a fixed-size progress bar that stays visible while idle. Explicit stage updates use a modal or overlay progress panel. Showing progress keeps the comparison panes and settings in place. |
 | U56 | Update batch disk status automatically when the user chooses a source folder, chooses a destination folder, or rescans the source. |
 | U57 | **Start processing** opens a modal window showing progress, **Pause**, **Continue**, and **Break**. Ask for confirmation before breaking processing. |
+| U58 | Support zoom and pan in every image preview. Keep both comparison panes at the same zoom and position and preserve the view when Space switches between input and result. |
+| U59 | Provide a true 100% view in every photo and stage preview. Show one full-resolution image pixel per physical display pixel, with synchronized zoom and pan across input and result. |
 
 ### Feature priorities
 
@@ -95,7 +97,7 @@ Representative coverage and visual acceptance remain unreviewed.
 | F02 | Supply editable Natural and Beauty pipeline presets. Stage parameters, including color and skin intensity where applicable, belong to the individual operations. |
 | F03 | Correct exposure, white balance, tonal balance, and unwanted color casts conservatively. Allow color correction to be disabled for intentional lighting or grading. |
 | F04 | Reduce temporary blemishes and uneven skin tone, with adjustable smoothing and protection of skin detail. Exact operations depend on the engine evaluation. |
-| F05 | Provide before/after previews for the whole pipeline and the stage comparisons in U17. Full-resolution detail inspection is proposed. |
+| F05 | Provide before/after previews for the whole pipeline and the stage comparisons in U17, with full-resolution detail inspection as specified in U59. |
 | F06 | Allow per-image settings and selected-image reprocessing. |
 | F07 | Reuse a common preset for a studio setup while estimating corrections per image. Avoid normalizing distinct natural skin tones to one target tone. |
 | F08 | Show queued, running, completed, failed, and canceled work, with progress, estimated remaining time, and actionable errors. Review flags are separate from execution status. |
@@ -170,7 +172,7 @@ now include implemented runtime scripts and startup modules; processing contract
 remain partly planned. Pipeline/reference contracts, headless JPEG decode/export,
 source indexing, disk preflight and both batch schedules are implemented. Both
 schedules run through a toolkit-independent worker service. The Qt desktop
-workspace supports source discovery, thumbnails, pipeline editing, fit-to-window
+workspace supports source discovery, thumbnails, pipeline editing, synchronized zoom and pan in
 previews, batch controls, and saved-job monitoring. See
 [desktop workspace evidence](verification/desktop-workspace.md),
 [runtime evidence](verification/runtime-foundation.md),

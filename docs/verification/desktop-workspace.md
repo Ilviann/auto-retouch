@@ -14,18 +14,20 @@ output collisions and displays required and available space per volume. The
 workspace uses binary units for both estimates and free space.
 
 Operation cards describe image and context inputs and effects from the operation
-descriptor. **View original** can open an indexed image without a destination.
-The thumbnail toolbar's **Preview pipeline** runs enabled stages in order.
+descriptor. Double-clicking a thumbnail or pressing Enter on it opens its source
+without a destination. **Run pipeline** runs enabled stages in order and updates
+the same window. Whole-pipeline and stage comparisons open side by side. The
+view selector and Space shortcut support single-pane input and result views.
+Zoom and pan work from either pane and carry over when switching views.
 Stage cards offer the two modal comparisons described below.
 Processing previews run without a destination and use the shared JPEG decoder
 and stage executor at full working resolution. The picture window
-displays a fitted original/result comparison and available luminance measures.
+offers Fit and 100% views and displays available luminance measures.
 Preview images are held in memory and discarded on close. Previews produce no
 exported files, scratch artifacts, or saved jobs.
 
-Processing previews are available while the batch worker is idle. Full-resolution
-detail inspection, queued GPU previews, and neural-stage
-visual acceptance are pending.
+Processing previews are available while the batch worker is idle. Queued GPU
+previews and neural-stage visual acceptance are pending.
 
 ## Focused verification
 
@@ -78,3 +80,29 @@ resize approval, and closed a running preview through its progress panel.
 .venv\Scripts\python.exe -m unittest discover -s tests -p test_preview.py -v
 .venv\Scripts\python.exe -m unittest discover -s tests -p test_desktop_batch.py -v -k preview -k modal_stage_comparison
 ```
+
+On 2026-11-19, all four focused Qt preview checks in the second command passed
+with generated JPEGs. Double-click and Enter opened the source. **Run pipeline**
+processed the opened photo in the same dialog, including after the grid selection
+changed. Tests verified side-by-side and full-width views in the photo preview
+and both stage previews, including Space with a numeric stage control focused.
+They also exercised declining and retrying a resize and closing a photo preview
+while a render was outstanding.
+
+A focused offscreen Qt test uses a generated two-axis gradient JPEG to check
+the pixels shown at the center and at several offsets. It covers wheel zoom at
+the pointer, dragging the result pane, synchronized crops after a pipeline run,
+Space switching from split and single views, zoom buttons, Fit, and retaining
+the inspected detail when a stage parameter changes.
+
+The **100%** checks used JPEGs larger than the 1,600-pixel overview. A headless
+test verified the rotated source pixel bytes, native dimensions for both stage
+scopes and the pipeline, and the thumbnail bound. An offscreen Qt test compared
+a patch of adjacent physical screen pixels against the source and processed
+samples in all four preview paths, including after a drag and Space switching.
+It passed with `QT_SCALE_FACTOR` set to 1, 1.25, 1.5, and 2.
+
+The main photo preview tests verified that **Run pipeline** immediately opens
+a window-modal busy indicator on the first run and on a repeat run. They
+covered returning keyboard focus to the comparison, closing the preview while
+processing, and dismissing progress for resize approval and reopening it on retry.

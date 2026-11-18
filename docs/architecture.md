@@ -377,8 +377,11 @@ hide texture or blending artifacts.
 The first desktop implementation runs one processing preview at a time, while
 the batch worker is idle. It uses the shared JPEG decoder and prepared stage
 lifecycle on a background thread. Full-resolution processing produces
-fit-to-window display data for an original/result comparison. Full-resolution
-detail inspection and worker-process scheduling remain pending.
+packed full-resolution sRGB for the open comparison, bounded by the JPEG
+input pixel limit. Large images also supply a reduced overview. The Qt panes
+draw the visible region from native pixels for detail inspection and share a
+physical magnification and a center in normalized image coordinates.
+Worker-process preview scheduling remains pending.
 
 Whole-pipeline and stage comparisons use the shared operation registry. The Qt
 stage dialog manages draft parameters and saves them with the headless editor

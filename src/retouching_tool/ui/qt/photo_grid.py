@@ -12,10 +12,14 @@ from ...errors import RetouchingError
 SRGB = QColorSpace(QColorSpace.NamedColorSpace.SRgb)
 
 
-def pixmap(display):
+def display_image(display):
     image = QImage(display.rgb, display.width, display.height, display.width * 3, QImage.Format.Format_RGB888)
     image.setColorSpace(SRGB)
-    return QPixmap.fromImage(image.copy())
+    return image
+
+
+def pixmap(display):
+    return QPixmap.fromImage(display_image(display).copy())
 
 
 class PhotoGrid(QListWidget):
@@ -32,7 +36,7 @@ class PhotoGrid(QListWidget):
         self.setGridSize(QSize(150, 130))
         self.setIconSize(QSize(108, 88))
         self.setMinimumHeight(150)
-        self.setAccessibleName("Source photos. Select one photo to preview. Check photos to include them in the batch.")
+        self.setAccessibleName("Source photos. Double-click or press Enter to preview. Check photos to include them in the batch.")
         self._placeholder = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
         self._warning = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)
         self._index = None
@@ -59,7 +63,7 @@ class PhotoGrid(QListWidget):
                     item.setData(Qt.ItemDataRole.UserRole, image.image_id)
                     item.setCheckState(Qt.CheckState.Checked)
                     details = image.issue or f"{image.header.width} × {image.header.height}"
-                    item.setToolTip(f"{image.path}\n{details}")
+                    item.setToolTip(f"{image.path}\n{details}" + ("" if image.issue else "\nDouble-click to preview"))
             if self.count():
                 self.setCurrentRow(0)
         self._schedule()

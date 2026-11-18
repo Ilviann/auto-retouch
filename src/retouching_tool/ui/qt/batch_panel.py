@@ -160,15 +160,11 @@ class BatchPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.source_summary = _label("batchSourceSummary")
-        self.original = _button("View original", "viewOriginal", self._view_original)
-        self.preview = _button("Preview pipeline", "previewPipeline", self._preview_pipeline)
-        preview_row = _row(self.source_summary, self.original, self.preview)
-        preview_row.setStretch(0, 1)
-        layout.addLayout(preview_row)
+        layout.addWidget(self.source_summary)
         self.images = PhotoGrid(self.application.preview_service)
         self.images.itemChanged.connect(self._invalidate_plan)
         self.images.itemSelectionChanged.connect(self._update_controls)
-        self.images.itemDoubleClicked.connect(self._view_original)
+        self.images.itemActivated.connect(self._view_original)
         layout.addWidget(self.images, 1)
 
         self.export = QGroupBox("Batch and JPEG settings")
@@ -405,12 +401,8 @@ class BatchPanel(QWidget):
         return False
 
     def _view_original(self):
-        if self.original.isEnabled():
-            self._request_picture(process=False)
-
-    def _preview_pipeline(self):
-        if self.preview.isEnabled():
-            self._request_picture(process=True)
+        if self._preview_available and self._picture_window is None:
+            self._request_picture(self._index, self._current_image().image_id, process=False)
 
     def preview_stage(self, stage_id, through_stage):
         if not self._preview_available:
@@ -445,29 +437,40 @@ class BatchPanel(QWidget):
         self.pipeline_locked.emit(False)
         self._update_controls()
 
-    def _request_picture(self, *, process, resize_approvals=()):
-        image = self._current_image()
+    def _request_picture(self, index, image_id, *, process, resize_approvals=()):
         request_id = uuid4().hex
-        self._preview_target = self._index, image.image_id, request_id
+        self._preview_target = index, image_id, request_id
         self._resize_approvals = resize_approvals
         if process:
             self.pipeline_locked.emit(True)
-        self.setup_message.setText("Processing preview…" if process else "Opening original…")
+            self._picture_window.feedback.clear()
+            self._picture_window.render_dialog.open()
+        else:
+            self.setup_message.setText("Opening original…")
         self._submit("preview" if process else "original", partial(
-            self.application.preview_service.picture, self._index, image.image_id, request_id, process=process,
+            self.application.preview_service.picture, index, image_id, request_id, process=process,
             resize_approvals=resize_approvals))
 
-    def _preview_still_current(self):
+    def _preview_still_current(self, action):
+        if self._closing:
+            return False
+        if action == "preview":
+            return self._picture_window is not None
         index, image_id, _ = self._preview_target
         image = self._current_image()
-        return not self._closing and self._index is index and image is not None and image.image_id == image_id
+        return self._index is index and image is not None and image.image_id == image_id
 
     def _show_picture(self, preview):
         if preview.request_id != self._preview_target[2]:
             return
         if self._picture_window is not None:
-            self._picture_window.close()
+            self._picture_window.display(preview)
+            return
         self._picture_window = window = PictureWindow(self.window(), preview)
+        index, image_id, _ = self._preview_target
+        window.run_pipeline.clicked.connect(partial(self._request_picture, index, image_id, process=True))
+        if not self.application.pipeline_service.status.executable:
+            window.feedback.setText("Resolve blocked operations in the pipeline to preview its result.")
         window.finished.connect(self._finish_picture)
         window.finished.connect(window.deleteLater)
         window.open()
@@ -604,9 +607,14 @@ class BatchPanel(QWidget):
         action, future = self._task
         self._task = None
         picture = action in ("original", "preview")
-        current = not picture or self._preview_still_current()
+        current = not picture or self._preview_still_current(action)
         retrying_resize = False
         feedback = self.setup_message if action in ("scan", "create", "history", "open") or picture else self.job_message
+        if action == "preview" and self._picture_window is not None:
+            self._picture_window.render_dialog.accept()
+            if current:
+                self._picture_window.activateWindow()
+            feedback = self._picture_window.feedback
         try:
             result = future.result()
         except Exception as exc:
@@ -618,13 +626,14 @@ class BatchPanel(QWidget):
             feedback.setText(f"{code}: {exc}" if current else "")
             if isinstance(exc, ResizeApprovalRequired) and current and not self._closing:
                 prompt = str(exc) if action == "create" else f"{exc}\nAllow this for this preview?"
-                if confirm_resize(self.monitor if action == "create" else self, prompt):
+                if confirm_resize(self.monitor if action == "create" else self._picture_window, prompt):
                     retrying_resize = True
                     approvals = (*self._resize_approvals, exc.stage_id)
                     if action == "create":
                         self._create(resize_approvals=approvals)
                     elif action == "preview":
-                        self._request_picture(process=True, resize_approvals=approvals)
+                        index, image_id, _ = self._preview_target
+                        self._request_picture(index, image_id, process=True, resize_approvals=approvals)
             if action == "poll":
                 self._poll_failed = True
             if action == "break" and not self._closing:
@@ -714,8 +723,8 @@ class BatchPanel(QWidget):
         self.start.setEnabled(idle and self._plan is not None and self._plan.ready and executable)
         image = self._current_image()
         can_view = idle and image is not None and image.header is not None
-        self.original.setEnabled(can_view)
-        self.preview.setEnabled(can_view and executable)
+        if self._picture_window is not None:
+            self._picture_window.run_pipeline.setEnabled(idle and executable)
         if can_view != self._preview_available:
             self._preview_available = can_view
             self.operation_preview_available.emit(can_view)

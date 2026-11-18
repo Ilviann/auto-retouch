@@ -90,8 +90,17 @@ Valid explicit settings replace last-used selection; corrupt restored state
 produces a visible warning.
 
 Choosing sources starts a scan and shows thumbnails and disk estimates. Use the
-thumbnail checkboxes to include photos in a batch. Select a photo to **View
-original** or **Preview pipeline**. On a stage card, **Preview** compares the
+thumbnail checkboxes to include photos in a batch. Double-click a thumbnail or
+press Enter on the selected photo to open the source. Choose **Run pipeline** in
+that window to see the result. All comparisons start side by side. Press Space
+to switch between input and result at the full pane width, or choose **Side by
+side** in the view selector to see both again. Scroll over a detail to zoom there,
+or use **+** and **−** to zoom around the center. Drag either image to pan both.
+Select **100%** to inspect the current detail at one image pixel per physical
+screen pixel. Space keeps the same magnification and center. **Fit** shows the
+whole photo again.
+
+On a stage card, **Preview** compares the
 source with the stage result. **Preview in pipeline** includes earlier enabled
 stages in the comparison input. Both stage previews let you adjust and save
 settings. Pixel stages have a **Blending** slider for mixing the stage input

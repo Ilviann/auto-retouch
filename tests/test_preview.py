@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
@@ -77,6 +77,32 @@ class PreviewTests(unittest.TestCase):
         completed = [event for event in self.log.records if event["code"] == "STAGE_COMPLETED"]
         self.assertEqual([event["stage_instance_id"] for event in completed
                           if event["preview_request_id"] == "operation"], ["exposure-reference"])
+
+    def test_full_resolution_previews_keep_oriented_detail_and_bounded_overviews(self):
+        exif = Image.Exif()
+        exif[274] = 6
+        row = bytes([40, 120]) * 1200
+        Image.frombytes("L", (2400, 96), row * 96).save(self.path, quality=100, exif=exif)
+        with Image.open(self.path) as jpeg:
+            expected = ImageOps.exif_transpose(jpeg).convert("RGB").tobytes()
+        index = self.app.index_sources((self.source,))
+        args = index, index.images[0].image_id
+        self.editor.set_parameter("exposure-reference", "stops", 1)
+        self.editor.set_enabled("exposure-reference", True)
+        source = self.service.picture(*args, "source").original
+        self.assertEqual(source.rgb, expected)
+        self.assertEqual((source.width, source.height), (96, 2400))
+        self.assertEqual((source.overview.width, source.overview.height), (64, 1600))
+        whole = self.service.picture(*args, "pipeline", process=True)
+        for through in (False, True):
+            stage = self.service.picture(*args, "stage", stage_id="exposure-reference", through_stage=through)
+            self.assertEqual(stage.original, source)
+            self.assertEqual(stage.result, whole.result)
+        self.assertEqual((whole.result.width, whole.result.height), (96, 2400))
+        self.assertGreater(whole.result.rgb[0], source.rgb[0])
+        thumbnail = self.service.thumbnail(index.images[0])
+        self.assertEqual(thumbnail.height, 160)
+        self.assertIsNone(thumbnail.overview)
 
     def test_preview_rejects_missing_dependencies_and_changed_source(self):
         self.editor.registry.register(OperationDescriptor("test.consumer", 1, "Context consumer",
