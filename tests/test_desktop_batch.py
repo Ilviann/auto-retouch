@@ -19,7 +19,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QInputDialog, QLabel,
-                               QMessageBox, QPushButton)
+                               QMessageBox, QPushButton, QSlider)
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
@@ -621,6 +621,10 @@ class DesktopBatchTests(unittest.TestCase):
         cumulative.findChild(QDoubleSpinBox, "parameter-stops").setValue(1)
         self.until(lambda: red(cumulative.after) > baseline, "stage prefix did not refresh")
         self.assertEqual(red(cumulative.before), baseline)
+        full_effect = red(cumulative.after)
+        cumulative.findChild(QSlider, "blendSlider").setValue(50)
+        self.until(lambda: baseline < red(cumulative.after) < full_effect, "blended preview did not refresh")
+        self.assertEqual(red(cumulative.before), baseline)
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Save):
             with patch("retouching_tool.application.pipeline_service.atomic_json", side_effect=OSError("fixture write failure")):
                 cumulative.close_button.click()
@@ -636,7 +640,7 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertFalse(exposure.toggle.isChecked())
         self.assertEqual(exposure.parameters["stops"].value(), 1)
         payload = json.loads(editor.autosave.read_bytes())
-        self.assertEqual(payload["stages"][2]["parameters"], {"stops": 1})
+        self.assertEqual(payload["stages"][2]["parameters"], {"stops": 1, "blend": .5})
         self.assertEqual(payload["stages"][0]["parameters"], {"stops": 1})
         self.assertEqual(list(self.destination.iterdir()), [])
         self.assertFalse(panel.application.job_service.saved_jobs())
@@ -718,17 +722,17 @@ class DesktopBatchTests(unittest.TestCase):
                 live.setValue(1)
                 try:
                     self.until(started.is_set, "first live preview did not start")
-                    self.assertEqual(requests, [{"stops": 0, "manual": 0}, {"stops": 1, "manual": 0}])
+                    self.assertEqual(requests, [{"stops": 0, "manual": 0, "blend": 1}, {"stops": 1, "manual": 0, "blend": 1}])
                     live.setValue(2)
                 finally:
                     release.set()
                 self.until(lambda: len(requests) == 3 and not dialog.feedback.text(), "latest live preview did not render")
-                self.assertEqual(requests[-1], {"stops": 2, "manual": 0})
+                self.assertEqual(requests[-1], {"stops": 2, "manual": 0, "blend": 1})
                 paint.assert_called_once()
             live_red = dialog.after.pixmap().toImage().pixelColor(0, 0).red()
             dialog.apply_preview.click()
             self.until(lambda: len(requests) == 4 and not dialog.feedback.text(), "manual preview did not render")
-            self.assertEqual(requests[-1], {"stops": 2, "manual": 2})
+            self.assertEqual(requests[-1], {"stops": 2, "manual": 2, "blend": 1})
             self.assertGreater(dialog.after.pixmap().toImage().pixelColor(0, 0).red(), live_red)
             with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
                 dialog.close()

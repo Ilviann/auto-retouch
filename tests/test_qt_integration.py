@@ -13,15 +13,16 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QPlainTextEdit, QPushButton,
+    QAbstractButton, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QPlainTextEdit, QSlider,
 )
-from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics
+from PySide6.QtGui import QAction, QFont, QFontDatabase, QFontMetrics
 from retouching_tool.application.contracts import StartupSnapshot
 from retouching_tool.application.pipeline_service import PipelineService
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
+from retouching_tool.operations.alibaba_skin import DESCRIPTOR as ALIBABA_SKIN, MODEL as ALIBABA_MODEL
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
 from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS
 from retouching_tool.ui.qt.main_window import MainWindow
@@ -79,7 +80,7 @@ class QtIntegrationTests(unittest.TestCase):
             panel = window.pipeline_page
 
             def click(name, container=panel):
-                container.findChild(QPushButton, name).click()
+                container.findChild(QAbstractButton, name).click()
                 self.app.processEvents()
 
             def stages():
@@ -107,13 +108,19 @@ class QtIntegrationTests(unittest.TestCase):
                 first, second = stages()
                 self.assertEqual(first.operation, "core.exposure")
                 self.assertNotEqual(first.id, second.id)
-                self.assertFalse(card(first).findChild(QPushButton, "moveStageUp").isEnabled())
-                self.assertFalse(card(second).findChild(QPushButton, "moveStageDown").isEnabled())
+                self.assertFalse(card(first).findChild(QAbstractButton, "moveStageUp").isEnabled())
+                self.assertFalse(card(second).findChild(QAbstractButton, "moveStageDown").isEnabled())
                 self.assertIn("Exposure (reference)", window.batch_panel.pipeline_summary.text())
-                contract = card(first).findChild(QLabel, "stageDataContract").text()
-                self.assertIn("May change pixels", contract)
-                self.assertIn("preserves source metadata", contract)
-                self.assertIn("invalidates image.luminance", contract)
+                self.assertEqual(card(first).toggle.text(), "Exposure (reference)")
+                self.assertEqual(card(first).findChild(QLabel, "stageVersion").text(), "v1")
+                for label in ("In", "Out"):
+                    self.assertEqual(card(first).findChild(QLabel, f"tag-{label}-pixels").text(), "pixels")
+                self.assertEqual(card(first).preview_pipeline.text(), "Preview in pipeline")
+                slider = card(second).findChild(QSlider, "blendSlider")
+                self.assertEqual((slider.minimum(), slider.maximum(), slider.value()), (0, 100, 100))
+                slider.setValue(35)
+                self.app.processEvents()
+                self.assertEqual(stages()[1].parameter("blend"), .35)
 
                 exposure = card(second).findChild(QDoubleSpinBox, "parameter-stops")
                 exposure.setValue(1.25)
@@ -218,9 +225,10 @@ class QtIntegrationTests(unittest.TestCase):
                 self.assertFalse(toggle.isEnabled())
                 self.assertFalse(card.preview.isEnabled())
                 self.assertFalse(card.preview_pipeline.isEnabled())
-                self.assertIn("produces test.skin v1", card.findChild(QLabel, "stageDataContract").text())
+                self.assertEqual(card.findChild(QLabel, "tag-Out-test.skin").text(), "test.skin")
+                self.assertIsNone(card.findChild(QSlider, "blendSlider"))
                 consumer = window.findChild(StageCard, "stage-consumer")
-                self.assertIn("test.skin v1 (required)", consumer.findChild(QLabel, "stageDataContract").text())
+                self.assertIn("Required input", consumer.findChild(QLabel, "tag-In-test.skin").accessibleName())
                 self.assertIn("MODEL_MISSING", card.findChild(QLabel, "stageStatus").text())
                 control = card.findChild(QDoubleSpinBox, "parameter-strength")
                 self.assertTrue(control.isEnabled())
@@ -239,7 +247,7 @@ class QtIntegrationTests(unittest.TestCase):
                 self.assertEqual(editor.status.definition.stages[0].parameter("downscale"), "nearest")
                 # Explicit navigation alone opens a publisher page; rechecks never do.
                 with patch("retouching_tool.ui.qt.stage_card.QDesktopServices.openUrl", return_value=True) as open_url:
-                    card.findChild(QPushButton, "modelPage").click()
+                    card.findChild(QAction, "modelPage").trigger()
                     open_url.assert_called_once()
                     self.assertEqual(open_url.call_args.args[0].toString(), "https://example.test/model")
                 self.app.processEvents()
@@ -249,7 +257,7 @@ class QtIntegrationTests(unittest.TestCase):
                 path = root / "models" / "fixture.bin"
                 path.parent.mkdir()
                 path.write_bytes(content)
-                card.findChild(QPushButton, "recheckStage").click()
+                card.findChild(QAction, "recheckStage").trigger()
                 self.app.processEvents()
                 card = window.findChild(StageCard, "stage-model")
                 toggle = card.findChild(QCheckBox, "stageEnabled")
@@ -261,14 +269,14 @@ class QtIntegrationTests(unittest.TestCase):
                 toggle.click()
                 self.app.processEvents()
                 self.assertEqual(editor.status.stages[1].state, "ready")
-                card.findChild(QPushButton, "moveStageDown").click()
+                card.findChild(QAbstractButton, "moveStageDown").click()
                 self.app.processEvents()
                 self.assertEqual(editor.status.stages[0].state, "blocked")
-                card.findChild(QPushButton, "moveStageUp").click()
+                card.findChild(QAbstractButton, "moveStageUp").click()
                 self.app.processEvents()
                 self.assertEqual(editor.status.stages[1].state, "ready")
                 path.unlink()
-                window.findChild(StageCard, "stage-model").findChild(QPushButton, "recheckStage").click()
+                window.findChild(StageCard, "stage-model").findChild(QAction, "recheckStage").trigger()
                 self.app.processEvents()
                 self.assertFalse(editor.status.definition.stages[0].enabled)
                 self.assertFalse(window.findChild(StageCard, "stage-model").findChild(QCheckBox, "stageEnabled").isEnabled())
@@ -282,6 +290,32 @@ class QtIntegrationTests(unittest.TestCase):
                 self.app.processEvents()
                 log.close()
             self.app.processEvents()
+
+    def test_alibaba_inputs_and_model_menu_in_compact_card(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as resources:
+            root = Path(temporary)
+            log = Diagnostics(root / "logs", console=io.StringIO())
+            resources.callback(log.close)
+            editor = PipelineService(root / "models", "directml", log, pytorch_backend="cpu")
+            stage = editor.add_operation(ALIBABA_SKIN.operation, 1, model_ref=ALIBABA_MODEL.ref).stages[0].stage
+            snapshot = StartupSnapshot((), "Pipeline", "test", "directml", root, root, root, ())
+            window = MainWindow(snapshot, editor)
+            resources.callback(window.close)
+            window.resize(460, 760)
+            window.show()
+            self.app.processEvents()
+            card = window.pipeline_page.stage_cards[stage.id]
+            required = card.findChild(QLabel, "tag-In-pixels")
+            optional = card.findChild(QLabel, "tag-In-face.regions")
+            self.assertIn("solid", required.styleSheet())
+            self.assertIn("dashed", optional.styleSheet())
+            self.assertEqual(optional.text(), "areas:face · optional")
+            self.assertEqual(card.findChild(QLabel, "tag-Out-pixels").text(), "pixels")
+            for item in ALIBABA_MODEL.files:
+                self.assertIn(str(editor.checkpoints / item.relative_path), card.status_label.text())
+            self.assertEqual([a.text() for a in card.settings.menu().actions()],
+                             ["Open model page in browser", "Check required model files"])
+            self.assertLessEqual(card.minimumSizeHint().width(), 420)
 
 
 if __name__ == "__main__":

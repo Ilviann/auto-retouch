@@ -35,3 +35,18 @@ checks verify the Qt import boundary.
 
 Qt checks used offscreen rendering and simulated the filenames returned by the
 OS file dialogs. Portrait-model acceptance and CUDA hardware coverage remain pending.
+
+## Stage cards and blending
+
+On 2026-11-19, focused checks in the prepared environment covered the card
+header, required and optional tags, model menu, editable parameters, and both
+preview actions. Offscreen renders of the Alibaba card were inspected at 450
+pixels wide with the installed local checkpoints and with an empty model folder.
+The recovery test used a synthetic checkpoint and verified that the recovered
+stage stays off until enabled.
+
+The processing checks covered exact input and full-effect endpoints, a partial
+linear-RGB blend, immutable pixel storage, JSON round trips, legacy checkpoint
+identity, and matching sequential and staged JPEG exports. The Qt preview test
+changed blending against an already edited input, checked the displayed result,
+and saved the draft into the pipeline.

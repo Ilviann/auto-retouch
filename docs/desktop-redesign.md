@@ -36,7 +36,7 @@ are reachable from both areas.
   Keep Fit and 100% beside the image. Choose preview scope independently of the
   comparison and overlays. Whole pipeline uses enabled stages in order.
   Operation only runs the selected available stage on the original, including a
-  manually skipped stage. The stage card's **Preview pipeline** comparison runs
+  manually skipped stage. The stage card's **Preview in pipeline** comparison runs
   earlier enabled stages to supply that stage's input and context. Explain missing
   dependencies on the affected operation. Original viewing and memory-only
   processing previews are available after indexing.

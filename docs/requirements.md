@@ -26,7 +26,7 @@ presets rather than fixed processing paths.
 | U14 | Require a destination folder before batch processing and reject a destination equal to the source folder. |
 | U15 | When recursive search is enabled, also reject a destination inside the source folder. |
 | U16 | Display discovered source files in a thumbnail grid and allow preview of any image. |
-| U17 | Select one thumbnail for preview. Preview the entire pipeline, or use a stage card's **Preview** or **Preview pipeline** action to compare the selected stage's input and output side by side in a modal window. The input is the source for **Preview** and the result of preceding enabled stages for **Preview pipeline**. Edit that stage's parameters in the window, with automatic refresh or **Preview changes** as appropriate. Ask whether to save changed parameters when the window closes. |
+| U17 | Select one thumbnail for preview. Preview the entire pipeline, or use a stage card's **Preview** or **Preview in pipeline** action to compare the selected stage's input and output side by side in a modal window. The input is the source for **Preview** and the result of preceding enabled stages for **Preview in pipeline**. Edit that stage's parameters in the window, with automatic refresh or **Preview changes** as appropriate. Ask whether to save changed parameters when the window closes. |
 | U18 | Support a temporary folder for processing artifacts. |
 | U19 | Sequential mode processes one image through every stage, exports it, then moves to the next image. |
 | U20 | Staged mode processes every image through one stage, persists intermediate results, releases that stage's model resources, then advances to the next stage. |
@@ -62,6 +62,8 @@ presets rather than fixed processing paths.
 | U50 | Previews run without a destination folder. Keep preview images in memory and discard them when the preview window closes. |
 | U51 | The Alibaba skin-retouching stage accepts the incoming image or one crop per face when an upstream stage supplies face rectangles or masks. Its input limit is 5000 pixels on the longest side. Warn before reducing an oversized input. If the user continues, preserve aspect ratio, reduce its longest side to 5000 pixels, process it, and scale the result back to its exact input dimensions. |
 | U52 | Application settings provide independent methods for downscaling and upscaling. Every stage that scales images can override either method on its own stage card. |
+| U53 | Each stage card shows the algorithm name, implementation version, enable checkbox, tagged In and Out rows, stage-specific controls, both stage previews, and move, remove and settings actions. Required and optional inputs are visually distinct. The Alibaba settings menu opens the publisher page and checks required model files. |
+| U54 | Stages that return changed pixels offer a blending slider from 0.0 to 1.0 to mix their input pixels with their result. |
 
 ### Feature priorities
 

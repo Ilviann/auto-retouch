@@ -209,6 +209,6 @@ class PreviewService:
             raise RetouchingError("STAGE_UNAVAILABLE", f"Resolve the model or backend error for {unavailable.stage.id}.")
         if not checked.executable:
             dependency = next(item.dependency_errors[0] for item in checked.stages if item.dependency_errors)
-            hint = "Enable or reorder the required producer." if through_stage else "Use Preview pipeline with the required producer."
+            hint = "Enable or reorder the required producer." if through_stage else "Use Preview in pipeline with the required producer."
             raise RetouchingError("PREVIEW_CONTEXT_REQUIRED", f"{dependency}. {hint}")
         return selected.title, editor.resolve_scaling(checked.definition).stages

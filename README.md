@@ -80,7 +80,8 @@ previews and batches. Existing jobs retain their recorded paths.
 
 When a model is required, download the specified files from the publisher and
 place them at the paths shown on the stage card. The default model folder is
-`models/`, configurable through `paths.checkpoints`. Use Recheck after placement.
+`models/`, configurable through `paths.checkpoints`. On the stage card, choose
+**Settings → Check required model files** after placement.
 
 Pipeline files use version 1 and registered operation versions. Try the reference
 cards with `run.cmd --pipeline examples\pipelines\reference.json`. This example is
@@ -90,8 +91,11 @@ produces a visible warning.
 
 Choosing sources starts a scan and shows thumbnails and disk estimates. Use the
 thumbnail checkboxes to include photos in a batch. Select a photo to **View
-original**, or choose a destination to use **Preview pipeline** or **Preview
-operation**. Processing previews open a picture window with an original toggle.
+original** or **Preview pipeline**. On a stage card, **Preview** compares the
+source with the stage result. **Preview in pipeline** includes earlier enabled
+stages in the comparison input. Both stage previews let you adjust and save
+settings. Pixel stages have a **Blending** slider for mixing the stage input
+with its result.
 
 To export, set the schedule and JPEG options, then select **Check disk space**
 and **Start batch**. Pause and cancel take effect after the current work unit.

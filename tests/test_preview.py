@@ -82,7 +82,7 @@ class PreviewTests(unittest.TestCase):
         self.editor.registry.register(OperationDescriptor("test.consumer", 1, "Context consumer",
                                                           requires=(LUMINANCE,)), ContextConsumer)
         consumer = self.editor.add_operation("test.consumer", 1).stages[-1].stage
-        with self.assertRaisesRegex(RetouchingError, "Use Preview pipeline"):
+        with self.assertRaisesRegex(RetouchingError, "Use Preview in pipeline"):
             self.service.picture(self.index, self.item.image_id, "missing-context", stage_id=consumer.id)
         comparison = self.service.picture(self.index, self.item.image_id, "with-context",
                                           stage_id=consumer.id, through_stage=True)

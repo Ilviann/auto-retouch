@@ -20,7 +20,7 @@ from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
 from retouching_tool.json_io import atomic_json, read_json
-from retouching_tool.operations.reference import EXPOSURE, LUMINANCE, Exposure, ReferenceOperation
+from retouching_tool.operations.reference import EXPOSURE, LUMINANCE, Exposure, ReferenceOperation, Statistics
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
 from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, parse_pipeline
 from retouching_tool.pipeline.executor import StageRuntime, StageSession
@@ -273,7 +273,7 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse(self.editor.status.executable)
 
     def test_shared_stage_pass_and_fresh_stage_per_image_match(self):
-        raw = stage("e", "core.exposure", parameters={"stops": -.5})
+        raw = stage("e", "core.exposure", parameters={"stops": -.5, "blend": .4})
         definition = parse_pipeline(pipeline(raw), self.registry).stages[0]
         inputs = [self.state, ImageState.from_pixels(np.full((3, 5, 3), .3, dtype=np.float32), self.state.metadata)]
         fresh = [self.run_stage(raw, image) for image in inputs]
@@ -284,6 +284,31 @@ class PipelineTests(unittest.TestCase):
             np.testing.assert_array_equal(first.pixels, second.pixels)
             self.assertEqual(first.context, second.context)
             self.assertEqual(first.metadata, second.metadata)
+
+    def test_blend_mixes_stage_input_and_result_and_preserves_legacy_identity(self):
+        raw = stage("exposure", "core.exposure", parameters={"stops": 1})
+        definition = self.editor.load_data(pipeline(raw)).definition
+        self.assertEqual(definition.to_json()["stages"][0], raw)
+        explicit = self.editor.set_parameter("exposure", "blend", 1).definition.stages[0]
+        self.assertEqual(explicit.identity, definition.stages[0].identity)
+        full = self.run_stage(raw)
+        partial = self.editor.set_parameter("exposure", "blend", .25).definition
+        self.assertNotEqual(partial.stages[0].identity, explicit.identity)
+        self.assertEqual(parse_pipeline(read_json(self.editor.autosave), self.registry), partial)
+        mixed = self.run_stage(partial.to_json()["stages"][0])
+        np.testing.assert_array_equal(mixed.pixels, self.state.pixels * .75 + full.pixels * .25)
+        self.assertFalse(mixed.pixels.flags.writeable)
+        self.assertEqual(mixed.pixel_revision, full.pixel_revision)
+        self.assertIs(mixed.metadata, self.state.metadata)
+        zero = self.editor.set_parameter("exposure", "blend", 0).definition
+        original = self.run_stage(zero.to_json()["stages"][0])
+        self.assertIs(original.pixels, self.state.pixels)
+        self.assertEqual(original.pixel_revision, self.state.pixel_revision)
+        for value in (-.01, 1.01, True, float("nan")):
+            with self.subTest(value=value), self.assertRaises(RetouchingError):
+                self.editor.set_parameter("exposure", "blend", value)
+        with self.assertRaisesRegex(RetouchingError, "unknown parameters"):
+            self.editor.load_data(pipeline(stage(parameters={"blend": .25})))
 
     def test_explicit_spatial_preservation_and_geometry_invalidation_at_runtime(self):
         spatial = ContextSpec("test.spatial", pixel_sensitive=False)
@@ -303,6 +328,23 @@ class PipelineTests(unittest.TestCase):
         cropped = self.run_stage(stage("crop", "test.resize"), changed)
         self.assertIsNone(cropped.entry(spatial.key))
         self.assertEqual((cropped.width, cropped.height), (1, 1))
+        with self.assertRaises(RetouchingError) as error:
+            self.run_stage(stage("crop", "test.resize", parameters={"blend": .5}), changed)
+        self.assertEqual(error.exception.code, "STAGE_BLEND_GEOMETRY")
+
+    def test_blend_rejects_stale_output_measurements_with_stage_context(self):
+        class MeasuredExposure(Exposure):
+            def process(self, state):
+                return Statistics.process(self, super().process(state))
+
+        self.register(replace(EXPOSURE, operation="test.measured", provides=(LUMINANCE,)), MeasuredExposure)
+        with self.assertRaises(RetouchingError) as error:
+            self.run_stage(stage("mixed", "test.measured", parameters={"stops": 1, "blend": .5}))
+        self.assertEqual(error.exception.code, "STAGE_BLEND_CONTEXT")
+        failure = next(e for e in self.log.records if e["code"] == "STAGE_PROCESS_FAILED")
+        self.assertIn("STAGE_BLEND_CONTEXT", failure["exception"])
+        self.assertEqual((failure["job_id"], failure["image_id"], failure["stage_instance_id"]),
+                         ("job-test", "image-test", "mixed"))
 
     def test_optional_stale_context_is_absent_and_fallback_is_visible(self):
         observed = []

@@ -146,7 +146,7 @@ class PipelinePanel(QWidget):
                     stage.id, descriptor,
                     on_enable=lambda key, enabled: self._command(self.service.set_enabled, key, enabled),
                     on_parameter=lambda key, name, value: self._command(self.service.set_parameter, key, name, value),
-                    on_recheck=lambda: self._command(self.service.recheck),
+                    on_recheck=self._recheck_stage,
                     on_move=self._move_stage,
                     on_remove=lambda key: self._command(self.service.remove, key),
                     on_preview=self.preview_requested.emit,
@@ -189,6 +189,19 @@ class PipelinePanel(QWidget):
         message = "\n".join(filter(None, (text, self.service.diagnostics.failure)))
         self.message.setText(message)
         self.message.setVisible(bool(message))
+
+    def _recheck_stage(self, stage_id):
+        status = self._command(self.service.recheck, write_unchanged=False)
+        if status is None:
+            return
+        item = next(s for s in status.stages if s.stage.id == stage_id)
+        if item.issues or item.dependency_errors:
+            self._show_message(f"{item.title} needs attention. See the details on its card.")
+        elif item.stage.model_ref:
+            self._show_message(f"{item.title} · Required model files verified.")
+        else:
+            detail = "Dependencies checked." if item.stage.enabled else "Stage is off."
+            self._show_message(f"{item.title} · {detail}")
 
     def _add_stage(self):
         selection = self.operations.currentData()

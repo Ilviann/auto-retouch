@@ -51,7 +51,7 @@ pause/resume/cancel. Offscreen renders were reviewed with generated photos.
 
 Select one thumbnail to preview, independently of its batch inclusion checkbox.
 **Preview** compares the source with the selected stage applied. The stage card's
-**Preview pipeline** uses the output of preceding enabled stages as the input to
+**Preview in pipeline** uses the output of preceding enabled stages as the input to
 the comparison. A manually disabled stage can be inspected with both actions.
 The modal window keeps draft settings, automatically refreshes exposure, and
 uses **Preview changes** for parameters that request manual refresh. Save updates

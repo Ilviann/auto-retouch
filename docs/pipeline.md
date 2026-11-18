@@ -161,6 +161,20 @@ stage and is independent of the portable pipeline.
 
 ## Stage controls and model availability
 
+Cards show the implementation version beside the algorithm name. **In** lists
+pixels and declared context inputs. Optional inputs carry a dashed border and
+an explicit label. **Out** lists edited pixels and produced context. The tooltip
+on **Out** describes context preservation and invalidation.
+
+Pixel stages expose a shared `blend` parameter. At 0.0 they return the stage
+input pixels, at 1.0 they return the algorithm output, and intermediate values
+interpolate in the working linear-sRGB representation. The slider steps by 0.01.
+Both previews and batch schedules use the same calculation. Full blending is
+the default and is implicit in pipeline JSON to preserve older checkpoint identities.
+Stage-specific strength controls apply before blending. Partial blends require
+aligned pixel grids and valid context for the mixed image. The current pixel
+operations preserve geometry and produce no pixel-dependent measurements.
+
 Every editable stage has an on/off control. Off stages retain their order and
 parameters and pass incoming image/context through without executing or producing
 new context. Mandatory decode/metadata/export infrastructure remains outside this
@@ -206,10 +220,10 @@ editor and future jobs; an active job keeps its snapshot. If an asset needed by 
 active job disappears, handle the actual failure explicitly rather than silently
 dropping the stage for subsequent images.
 
-Use Open model page to visit the publisher. The model catalog provides the
+Use **Settings → Open model page in browser** to visit the publisher. The model catalog provides the
 publisher URL, version and expected file identities. Download the required files
 and place them at the paths shown on the card under the configured model folder
-(`models/` by default). Select Recheck to verify the installed files locally.
+(`models/` by default). Select **Settings → Check required model files** to verify the installed files locally.
 
 ## Preview meaning
 
@@ -218,7 +232,7 @@ and place them at the paths shown on the card under the configured model folder
 | Original | Decode/orient/color-manage the selected source; no retouching | Inspect source without a destination. |
 | Whole pipeline | Run all enabled stages on the selected source | Inspect the final configured result. |
 | Stage card **Preview** | Compare the normalized source against the selected stage's result on that source | Isolate one operation and tune its parameters. |
-| Stage card **Preview pipeline** | Compare the result of the preceding enabled stages against the result after applying the selected stage | Inspect the operation with its upstream changes and analysis context. |
+| Stage card **Preview in pipeline** | Compare the result of the preceding enabled stages against the result after applying the selected stage | Inspect the operation with its upstream changes and analysis context. |
 | Context analysis | Run selected analysis and display region/mask overlays or measurements | Inspect output even when pixels are unchanged. |
 
 Original, whole-pipeline, and stage previews open as modal dialogs. Stage
@@ -239,9 +253,9 @@ foreground stage comparison tints the detected region in its result pane. See
 [desktop workspace evidence](verification/desktop-workspace.md).
 
 Both stage actions explicitly run the selected available operation, including
-a manually disabled operation. Earlier stages in **Preview pipeline** and all
+a manually disabled operation. Earlier stages in **Preview in pipeline** and all
 stages in the whole-pipeline preview honor their enable flags. If an isolated
-stage requires upstream analysis, the dialog directs the user to **Preview
+stage requires upstream analysis, the dialog directs the user to **Preview in
 pipeline** and identifies the dependency. Unavailable stages show recovery actions
 on their cards.
 Use optional cached context only when its coordinate and pixel dependencies are

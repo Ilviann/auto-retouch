@@ -52,11 +52,11 @@ class StagePreviewWindow(QDialog):
         self.statistics.hide()
         layout.addWidget(self.statistics)
 
-        if descriptor.parameters:
+        if descriptor.editable_parameters:
             settings = QGroupBox("Stage settings")
             form = QFormLayout(settings)
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
-            for parameter in descriptor.parameters:
+            for parameter in descriptor.editable_parameters:
                 control = parameter_control(parameter)
                 control.setValue(self._original[parameter.name])
                 control.setMinimumWidth(110)
@@ -75,7 +75,7 @@ class StagePreviewWindow(QDialog):
         self.pending = QLabel("Settings are waiting for Preview changes.", objectName="stagePreviewPending")
         actions.addWidget(self.pending)
         actions.addStretch()
-        self._has_manual_settings = any(not p.preview_on_change for p in descriptor.parameters)
+        self._has_manual_settings = any(not p.preview_on_change for p in descriptor.editable_parameters)
         self.apply_preview = QPushButton("Preview changes", objectName="previewChanges", autoDefault=False)
         self.apply_preview.clicked.connect(self._preview_changes)
         actions.addWidget(self.apply_preview)

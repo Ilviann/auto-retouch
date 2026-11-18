@@ -38,6 +38,7 @@ class ScalingParameter:
 
 
 SCALING_PARAMETERS = (ScalingParameter("downscale", "Downscaling"), ScalingParameter("upscale", "Upscaling"))
+BLEND = Parameter("blend", "Blending", 1.0, 0.0, 1.0, preview_on_change=True)
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,10 @@ class OperationDescriptor:
     inference_runtime: str = "onnxruntime"
     resize_limit: ResizeLimit | None = None
 
+    @property
+    def editable_parameters(self):
+        return (*self.parameters, BLEND) if self.changes_pixels else self.parameters
+
     def execution_backend(self, onnx_backend, pytorch_backend):
         if self.inference_runtime == "onnxruntime":
             return onnx_backend
@@ -96,9 +101,10 @@ class StageDefinition:
         return dict(self.parameters)[name]
 
     def portable_parameters(self):
-        # Omitting inherited filters preserves identities of pre-scaling saved jobs and checkpoints.
+        # Implicit defaults keep older job and checkpoint identities stable.
         return {key: value for key, value in self.parameters
-                if key not in ("downscale", "upscale") or value != "inherit"}
+                if not (key in ("downscale", "upscale") and value == "inherit"
+                        or key == BLEND.name and value == BLEND.default)}
 
     @property
     def identity(self):
@@ -144,10 +150,10 @@ def parse_pipeline(data, registry) -> PipelineDefinition:
         descriptor = registry.descriptor(raw["operation"], raw["operation_version"])
         if type(raw["enabled"]) is not bool or not isinstance(raw["parameters"], dict):
             fail(f"Stage {raw['id']}: enabled must be boolean and parameters an object")
-        known = {p.name for p in descriptor.parameters}
+        known = {p.name for p in descriptor.editable_parameters}
         if set(raw["parameters"]) - known:
             fail(f"Stage {raw['id']}: unknown parameters {set(raw['parameters']) - known}")
-        parameters = tuple((p.name, p.validate(raw["parameters"].get(p.name, p.default))) for p in descriptor.parameters)
+        parameters = tuple((p.name, p.validate(raw["parameters"].get(p.name, p.default))) for p in descriptor.editable_parameters)
         model = raw.get("model_ref")
         if (descriptor.model_refs and (not isinstance(model, str) or model not in descriptor.model_refs)
                 or not descriptor.model_refs and "model_ref" in raw):

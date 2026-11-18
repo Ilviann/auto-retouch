@@ -1,12 +1,40 @@
 """One prepared stage pass, reusable by future schedulers and preview workers."""
 
 from dataclasses import dataclass, replace
+from io import BytesIO
 from pathlib import Path
 from time import perf_counter
 
 from ..errors import ResizeApprovalRequired, RetouchingError
 from .validation import retained
-from .definition import PipelineDefinition, StageDefinition, parse_pipeline
+from .definition import BLEND, PipelineDefinition, StageDefinition, parse_pipeline
+
+
+def _blend_result(before, result, amount, produced):
+    if amount == 1 or result.pixels is before.pixels:
+        return result
+    if result.geometry_revision != before.geometry_revision:
+        raise RetouchingError("STAGE_BLEND_GEOMETRY", "Blending requires aligned stage input and output. "
+                              "Use full blending for this geometry change.")
+    if any(spec.pixel_sensitive for spec in produced):
+        raise RetouchingError("STAGE_BLEND_CONTEXT", "This stage measures its edited pixels. "
+                              "Use full blending to keep those measurements valid.")
+    if amount == 0:
+        return replace(result, pixels=before.pixels, pixel_revision=before.pixel_revision,
+                       context=tuple(replace(e, pixel_revision=before.pixel_revision) if e.spec in produced else e
+                                     for e in result.context))
+
+    import numpy as np
+
+    # Freeze the blended RGB in a single bytes buffer, with only strip-sized arithmetic temporaries.
+    with BytesIO() as output:
+        for start in range(0, before.height, 64):
+            original = before.pixels[start:start + 64]
+            edited = result.pixels[start:start + 64]
+            mixed = original + np.float32(amount) * (edited - original)
+            output.write(np.ascontiguousarray(mixed))
+        pixels = np.frombuffer(output.getvalue(), dtype=np.float32).reshape(before.pixels.shape)
+    return replace(result, pixels=pixels)
 
 
 @dataclass(frozen=True)
@@ -88,6 +116,8 @@ class StageSession:
             self.operation.runtime = runtime
             result = self.operation.process(current)
             self._validate_result(current, result)
+            if desc.changes_pixels:
+                result = _blend_result(current, result, runtime.stage.parameter(BLEND.name), desc.provides)
             provided = {spec.key for spec in desc.provides}
             kept = tuple(e for e in current.context if e.spec.key not in provided and retained(e.spec, desc) and e.compatible(result))
             produced = tuple(e for e in result.context if e.spec.key in provided)

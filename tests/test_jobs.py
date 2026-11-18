@@ -151,6 +151,7 @@ with fault:
         self.jpeg("a.jpg")
         self.jpeg("sub/b.jpg")
         self.load_staged_reference()
+        self.app.pipeline_service.set_parameter("exposure-reference", "blend", .4)
         index = self.app.batch_service.index((self.source,), recursive=True)
         alternate = self.root / "staged-output"
         alternate.mkdir()
