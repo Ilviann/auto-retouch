@@ -39,9 +39,13 @@ def application_registry():
     from ..operations.alibaba_skin import DESCRIPTOR as ALIBABA_SKIN, AlibabaSkin
     from ..operations.auto_exposure import DESCRIPTOR as AUTO_EXPOSURE, AutoExposure
     from ..operations.person_foreground import DESCRIPTOR, PersonForeground
+    from ..operations.white_balance import DESCRIPTOR as WHITE_BALANCE, WhiteBalance
+    from ..operations.face_detection import DESCRIPTOR as FACE_DETECTION, FaceDetection
 
     registry = reference_registry()
+    registry.register(WHITE_BALANCE, WhiteBalance)
     registry.register(AUTO_EXPOSURE, AutoExposure)
     registry.register(DESCRIPTOR, PersonForeground)
+    registry.register(FACE_DETECTION, FaceDetection)
     registry.register(ALIBABA_SKIN, AlibabaSkin)
     return registry

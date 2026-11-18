@@ -10,7 +10,8 @@ from ..jobs.execution import ImageDiagnostics
 from ..jobs.journal import runner_lock
 from ..pipeline.definition import parse_pipeline
 from ..pipeline.executor import StageRuntime, StageSession
-from ..pipeline.image_state import PERSON_FOREGROUND, ContextEntry
+from ..pipeline.image_state import FACE_REGIONS, PERSON_FOREGROUND, ContextEntry
+from ..operations.white_balance import sample_neutral
 from ..pipeline.validation import validate_pipeline
 from ..storage.batch_paths import current_file_stamp
 from .batch import IndexedImage, SourceIndex
@@ -35,6 +36,19 @@ class PicturePreview:
     result: DisplayImage | None = None
     context: tuple[ContextEntry, ...] = ()
     result_caption: str | None = None
+    stage_warning: str | None = None
+
+
+class _PreviewDiagnostics(ImageDiagnostics):
+    def __init__(self, diagnostics, stage_id):
+        super().__init__(diagnostics)
+        self.stage_id = stage_id
+        self.stage_warning = None
+
+    def emit(self, code, message, **details):
+        if self.stage_id and details.get("stage_instance_id") == self.stage_id and details.get("level") == "WARNING":
+            self.stage_warning = message
+        super().emit(code, message, **details)
 
 
 class StageComparison:
@@ -50,6 +64,11 @@ class StageComparison:
 
     def clear(self):
         self._baseline = None
+
+    def neutral_settings(self, x, y):
+        if self._baseline is None:
+            raise RetouchingError("PREVIEW_INPUT_REQUIRED", "Render the stage preview before picking a neutral.")
+        return sample_neutral(self._baseline[1], x, y)
 
 
 def _display(rgb, limit):
@@ -89,6 +108,20 @@ def _check_source(image):
     raise RetouchingError("SOURCE_CHANGED", "The indexed JPEG changed. Scan the sources again.")
 
 
+def _face_overlay(display, regions):
+    from PIL import Image, ImageDraw
+
+    if not regions:
+        return display
+    with Image.frombytes("RGB", (display.width, display.height), display.rgb) as image:
+        draw = ImageDraw.Draw(image)
+        width = max(1, max(image.size) // 600)
+        for region in regions:
+            draw.rectangle((region.left, region.top, region.right - 1, region.bottom - 1),
+                           outline=(0, 224, 160), width=width)
+        return _full_display(image)
+
+
 class PreviewService:
     def __init__(self, root, editor, diagnostics):
         self.root, self.editor, self.diagnostics = root, editor, diagnostics
@@ -118,7 +151,7 @@ class PreviewService:
     def picture(self, index: SourceIndex, image_id, request_id, *, process=False, stage_id=None,
                 through_stage=False, parameters=None, _comparison=None, resize_approvals=()) -> PicturePreview:
         """Display the original, run the enabled pipeline, or compare a selected stage in memory."""
-        log = ImageDiagnostics(self.diagnostics)
+        log = _PreviewDiagnostics(self.diagnostics, stage_id)
         runtime = JpegRuntime(log, image_id, preview_request_id=request_id)
         image = next((item for item in index.images if item.image_id == image_id), None)
         try:
@@ -173,8 +206,12 @@ class PreviewService:
         if foreground is not None and foreground.producer_id == stage_id:
             result = _foreground_overlay(result, foreground.value)
             caption = "Detected person foreground"
+        faces = state.entry(FACE_REGIONS.key)
+        if faces is not None and faces.producer_id == stage_id:
+            result = _face_overlay(result, faces.value.regions)
+            caption = f"Detected faces · {len(faces.value.regions)}"
         return PicturePreview(runtime.preview_request_id, f"{title} · {image.path.name}", original, result,
-                              state.context, caption)
+                              state.context, caption, runtime.diagnostics.stage_warning)
 
     def _process_stage(self, state, stage, runtime, resize_approvals):
         stage_runtime = StageRuntime(runtime.diagnostics, self.editor.stage_backend(stage), self.editor.checkpoints,

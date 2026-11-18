@@ -25,6 +25,20 @@ class Parameter:
 
 
 @dataclass(frozen=True)
+class ChoiceParameter:
+    name: str
+    label: str
+    default: str
+    choices: tuple[str, ...]
+    preview_on_change: bool = False
+
+    def validate(self, value):
+        if value not in self.choices:
+            raise RetouchingError("PARAMETER_INVALID", f"{self.label} must be one of {', '.join(self.choices)}.")
+        return value
+
+
+@dataclass(frozen=True)
 class ScalingParameter:
     name: str
     label: str
@@ -62,7 +76,7 @@ class OperationDescriptor:
     operation: str
     version: int
     title: str
-    parameters: tuple[Parameter | ScalingParameter, ...] = ()
+    parameters: tuple[Parameter | ChoiceParameter | ScalingParameter, ...] = ()
     requires: tuple[ContextSpec, ...] = ()
     optional: tuple[ContextSpec, ...] = ()
     provides: tuple[ContextSpec, ...] = ()
@@ -75,6 +89,7 @@ class OperationDescriptor:
     representation: str = "linear-srgb-float32"
     inference_runtime: str = "onnxruntime"
     resize_limit: ResizeLimit | None = None
+    neutral_picker: bool = False
 
     @property
     def editable_parameters(self):

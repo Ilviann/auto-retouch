@@ -205,6 +205,29 @@ class WorkerTests(unittest.TestCase):
                 self.assertGreater(left.getpixel((0, 0))[0], 96)
                 self.assertEqual(left.getexif()[271], "Worker Test Camera")
 
+    def test_fixed_white_balance_replays_in_both_workers(self):
+        editor = self.app.pipeline_service
+        editor.load_data({"schema_version": 1, "name": "Same lighting", "stages": []})
+        stage = editor.add_operation("core.white_balance", 1).stages[0].stage
+        index = self.app.batch_service.index((self.source,))
+        comparison = self.app.preview_service.stage_comparison(index, index.images[0].image_id, stage.id,
+                                                              through_stage=False)
+        comparison.render("pick", {})
+        settings = comparison.neutral_settings(10, 10)
+        editor.set_parameters(stage.id, settings)
+        for mode in ("sequential", "staged"):
+            job = self.create(mode)
+            self.assertIsNone(self.worker.start(job).wait(30).error_code)
+            self.assertEqual(self.jobs.status(job).status, "completed")
+        for path, checksum in self.originals.items():
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), checksum)
+            with (Image.open(self.root / "sequential" / path.name) as left,
+                  Image.open(self.root / "staged" / path.name) as right):
+                self.assertEqual(left.tobytes(), right.tobytes())
+                rgb = left.getpixel((10, 10))
+                self.assertLessEqual(max(rgb) - min(rgb), 2)
+                self.assertEqual(left.getexif()[271], "Worker Test Camera")
+
     def test_pause_cancel_and_one_active_worker(self):
         job_id = self.create()
         run = self.scripted_worker(job_id, CHECKPOINT_WORKER, "pause")

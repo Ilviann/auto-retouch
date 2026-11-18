@@ -8,11 +8,19 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import SCALING_METHODS
-from ...pipeline.definition import BLEND, ScalingParameter
+from ...pipeline.definition import BLEND, ChoiceParameter, ScalingParameter
 from ...pipeline.image_state import FACE_REGIONS, PERSON_FOREGROUND
 
 
-class ScalingControl(QComboBox):
+class ChoiceControl(QComboBox):
+    def value(self):
+        return self.currentData()
+
+    def setValue(self, method):
+        self.setCurrentIndex(self.findData(method))
+
+
+class ScalingControl(ChoiceControl):
     """Keep portable filter names independent of their display labels."""
 
     def __init__(self, *, inherit=False, **kwargs):
@@ -21,12 +29,6 @@ class ScalingControl(QComboBox):
             self.addItem("Use app setting", "inherit")
         for method in SCALING_METHODS:
             self.addItem({"bilinear": "Bilinear", "nearest": "Nearest neighbor"}[method], method)
-
-    def value(self):
-        return self.currentData()
-
-    def setValue(self, method):
-        self.setCurrentIndex(self.findData(method))
 
 
 class BlendControl(QWidget):
@@ -69,6 +71,11 @@ def parameter_control(parameter):
         return BlendControl()
     if isinstance(parameter, ScalingParameter):
         return ScalingControl(inherit=True, objectName=f"parameter-{parameter.name}")
+    if isinstance(parameter, ChoiceParameter):
+        control = ChoiceControl(objectName=f"parameter-{parameter.name}")
+        for value in parameter.choices:
+            control.addItem(value, value)
+        return control
     control = QDoubleSpinBox(objectName=f"parameter-{parameter.name}")
     control.setDecimals(4)
     control.setRange(parameter.minimum, parameter.maximum)
@@ -198,7 +205,7 @@ class StageCard(QFrame):
                 form.addRow(parameter.label, control)
                 if isinstance(control, BlendControl):
                     control.valueChanged.connect(lambda value: on_parameter(stage_id, BLEND.name, value))
-                elif isinstance(control, ScalingControl):
+                elif isinstance(control, ChoiceControl):
                     control.activated.connect(lambda _, n=name, c=control: on_parameter(stage_id, n, c.value()))
                 else:
                     control.editingFinished.connect(lambda n=name, c=control:

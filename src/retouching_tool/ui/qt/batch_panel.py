@@ -488,6 +488,7 @@ class BatchPanel(QWidget):
             self._picture_window.close()
         self._stage_preview = dialog = StagePreviewWindow(
             self.window(), stage, descriptor, image.path.name, through_stage=through_stage, submit=submit,
+            neutral_settings=comparison.neutral_settings if descriptor.neutral_picker else None,
             save=partial(editor.set_parameters, stage_id, image_id=image.image_id))
         dialog.finished.connect(comparison.clear)
         dialog.finished.connect(self._finish_stage_preview)

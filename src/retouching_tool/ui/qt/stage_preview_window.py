@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QFormLayout, QGroupBox, 
 
 from ...errors import ResizeApprovalRequired, RetouchingError
 from .picture_window import PictureComparison, RenderProgressDialog, statistics_text
-from .stage_card import ScalingControl, parameter_control
+from .stage_card import ChoiceControl, parameter_control
 
 
 def confirm_resize(parent, message):
@@ -16,12 +16,13 @@ def confirm_resize(parent, message):
 
 
 class StagePreviewWindow(QDialog):
-    def __init__(self, parent, stage, descriptor, filename, *, through_stage, submit, save):
+    def __init__(self, parent, stage, descriptor, filename, *, through_stage, submit, save, neutral_settings=None):
         super().__init__(parent, objectName="stagePreviewWindow")
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setWindowTitle(f"{descriptor.title} · {filename}")
         self.resize(1050, 720)
         self._submit, self._save = submit, save
+        self._neutral_settings = neutral_settings
         self._original = dict(stage.parameters)
         self._draft = self._original.copy()
         self._requested = self._original.copy()
@@ -42,12 +43,15 @@ class StagePreviewWindow(QDialog):
         self.statistics.hide()
         layout.addWidget(self.statistics)
 
+        self._controls = {}
+        self.pick_neutral = None
         if descriptor.editable_parameters:
             settings = QGroupBox("Stage settings")
             form = QFormLayout(settings)
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
             for parameter in descriptor.editable_parameters:
                 control = parameter_control(parameter)
+                self._controls[parameter.name] = control
                 if isinstance(control, QDoubleSpinBox):
                     control.installEventFilter(self)
                     control.lineEdit().installEventFilter(self)
@@ -56,10 +60,17 @@ class StagePreviewWindow(QDialog):
                 hint = ("Updates the preview automatically." if parameter.preview_on_change
                         else "Select Preview changes to update the preview.")
                 control.setToolTip(hint)
-                signal = control.currentIndexChanged if isinstance(control, ScalingControl) else control.valueChanged
+                signal = control.currentIndexChanged if isinstance(control, ChoiceControl) else control.valueChanged
                 signal.connect(lambda _, p=parameter, widget=control, initial=control.value():
                                self._change(p, widget.value(), initial))
                 form.addRow(parameter.label, control)
+            if descriptor.neutral_picker:
+                self.pick_neutral = QPushButton("Pick neutral from input", checkable=True, autoDefault=False)
+                self.pick_neutral.setToolTip("Click a gray card or neutral midtone to reuse this correction across photos.")
+                self.pick_neutral.setEnabled(False)
+                self.pick_neutral.toggled.connect(self._arm_picker)
+                self.comparison.before.pixel_picked.connect(self._pick)
+                form.addRow(self.pick_neutral)
             layout.addWidget(settings)
 
         self.feedback = QLabel(objectName="stagePreviewFeedback", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
@@ -85,6 +96,25 @@ class StagePreviewWindow(QDialog):
         layout.addLayout(actions)
         self._update_actions()
         self.finished.connect(self.comparison.clear)
+
+    def _arm_picker(self, armed):
+        before = self.comparison.before
+        before.picking = armed
+        before.setCursor(Qt.CursorShape.CrossCursor if armed else Qt.CursorShape.OpenHandCursor)
+        if armed and self.comparison.mode.currentIndex() == self.comparison.RESULT:
+            self.comparison.mode.setCurrentIndex(self.comparison.SOURCE)
+
+    def _pick(self, x, y):
+        try:
+            settings = self._neutral_settings(x, y)
+        except RetouchingError as exc:
+            self.feedback.setText(str(exc))
+            self.feedback.show()
+            return
+        for name, value in settings.items():
+            self._controls[name].setValue(value)
+        self.feedback.hide()
+        self.pick_neutral.setChecked(False)
 
     def eventFilter(self, watched, event):
         # Numeric editors normally claim printable keys before window shortcuts.
@@ -142,11 +172,13 @@ class StagePreviewWindow(QDialog):
         else:
             if current:
                 self.comparison.display(preview)
+                if self.pick_neutral is not None:
+                    self.pick_neutral.setEnabled(True)
                 measurements = statistics_text(preview.context)
                 self.statistics.setText(measurements)
                 self.statistics.setVisible(bool(measurements))
-                self.feedback.clear()
-                self.feedback.hide()
+                self.feedback.setText(preview.stage_warning or "")
+                self.feedback.setVisible(bool(preview.stage_warning))
         # An approved resize retries the same request with the same progress UI.
         if current and self._submitted is not None:
             self._manual_refresh = False

@@ -50,15 +50,50 @@ Place it before image statistics or AI analysis so those stages measure the
 corrected pixels. The target band and defaults are provisional and may need
 adjustment for intentional lighting or grading. See [verification](verification/auto-exposure.md).
 
+## White balance and color cast
+
+`core.white_balance` v1 operates on full-resolution linear-sRGB pixels using the
+CPU. Place it before exposure and analysis. **Automatic** estimates red and blue
+gains relative to green from a grid of up to 192 × 192 samples. It needs
+consistent near-neutral pixels in at least two brightness bands. An inconclusive
+estimate leaves pixels unchanged and shows a warning in the stage preview.
+This heuristic can mistake a lightly colored surface for neutral.
+
+For a set shot under the same lights, open the stage preview on a reference
+shot, choose **Pick neutral from input**, and click a gray card or known neutral
+midtone in the input pane. The picker measures a 5 × 5 patch in the original
+linear stage input, including when zoomed or previewing after upstream stages.
+Clipped, very dark, or excessively saturated samples can be rejected.
+Sampling selects **Fixed** and sets red and blue adjustments in stops relative
+to green. Saving the draft stores these values in the pipeline. Subsequent
+photos use the same gains regardless of composition. **Blending** sets the
+strength. Both modes retain the neutral reference's luminance at midtones and
+roll off the correction at highlights. Numeric defaults remain provisional.
+
+## Face detection with YuNet
+
+`analysis.face_detection` v1 evaluates the local OpenCV YuNet March 2023 FP32
+model on the prepared ONNX Runtime backend. It fits the oriented stage input
+into a 640 × 640 BGR tensor, pads unused pixels, and suppresses overlapping
+detections. Preview shows boxes and a count at the original image coordinates.
+**Minimum confidence** defaults to 0.80. A higher value rejects more candidate
+faces. Inspect the boxes before using this stage on a new lighting setup or group.
+
+Place the stage immediately before **Alibaba skin retouching**. The detector
+leaves pixels unchanged and publishes `face.regions` v1, including an empty
+set when detection succeeds with zero faces. Alibaba skips that image in this
+case. If the detector is disabled and no other stage supplies face regions,
+Alibaba uses the whole image. [Checkpoint, rights and verification](decisions/0005-yunet-face-detection.md).
+
 ## Proposed first catalog
 
 | Operation | Outputs | Main controls and dependencies |
 | --- | --- | --- |
 | Image statistics | Context: histogram/luminance statistics and clipping warnings; pixels unchanged | Analysis scope and thresholds. Measurements identify the pixel revision they describe. Useful as an initial CPU reference stage and diagnostic overlay. |
-| White balance and color-cast correction | Corrected pixels; optional correction measurements | Temperature/tint correction limits and strength. Conservative CPU baseline first; preserve intentional studio lighting when disabled. Uses applicable statistics/context when available. |
+| White balance and color-cast correction | Corrected pixels | Implemented automatic and fixed CPU correction, neutral picker and blending. |
 | Auto exposure and tone | Corrected pixels and correction diagnostics | Implemented baseline with strength, stop limit, and highlight protection. It measures the current pixels directly. |
 | Person and exposed-skin analysis | Context: person regions/instances and exposed-skin masks across the whole photo; pixels unchanged | Validated body/skin segmentation, confidence and overlap handling, association of visible skin with each person. Required for the confirmed all-skin/multiple-person scope; face parsing alone is insufficient. |
-| Portrait detection | Context: face boxes, landmarks, eye/mouth locations and per-face IDs; pixels unchanged | Confidence threshold and minimum face size. Associate faces with person regions when available. Backend/model chosen after evaluation. |
+| Portrait detection | Context: oriented face boxes; pixels unchanged | YuNet face boxes and minimum confidence implemented. Landmark output and person association remain proposals. |
 | Face-region parsing | Context: precise skin, lips, eyes, and teeth masks where supported; pixels unchanged | Per-region confidence, edge treatment, and analysis resolution. Requires faces or a declared self-contained detection implementation. Teeth must have a validated teeth mask; a mouth box is insufficient. |
 | Blemish cleanup | Local pixel edits within valid skin regions; optional candidate/debug context | Strength, maximum spot size, protected regions, and model-specific controls. Optional and quality-gated: distinguishing temporary blemishes from permanent features is uncertain. |
 | Skin-tone evening | Local color edits within valid skin regions | Strength and maximum local tone/color adjustment. Reduce blotchiness while preserving natural skin color, lighting gradients, and protected features; independent from texture smoothing. |
@@ -141,7 +176,7 @@ the whole image is the stage input. A valid detector result with zero faces
 produces a warning and passes the image through. The optional `face.regions`
 v1 payload carries oriented half-open rectangles and optional packed binary mask
 grids. The staged artifact codec preserves these across passes and recovery.
-No face-region producer currently ships in the operation list.
+The **Face detection (YuNet)** stage produces these rectangles.
 
 A 7200 × 4800 image with two 900 × 900 face crops needs no size warning.
 The same image used whole needs approval to run at 5000 × 3333 and return to

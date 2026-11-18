@@ -2,7 +2,7 @@
 
 from math import floor, isclose
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QImage, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
@@ -12,6 +12,8 @@ from .photo_grid import display_image, pixmap
 
 
 class PicturePane(QLabel):
+    pixel_picked = Signal(int, int)
+
     def __init__(self, name, comparison):
         super().__init__(objectName=name)
         self.comparison = comparison
@@ -20,12 +22,15 @@ class PicturePane(QLabel):
         self.setToolTip("Scroll to zoom. Drag to pan.")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._drag_position = None
+        self.picking = False
+        self._painted_target = QRectF()
         self._native = QImage()
 
     def show_pixels(self, display):
         self._native = QImage()
         if display is None:
             self._drag_position = None
+            self._painted_target = QRectF()
             self.clear()
         else:
             if display.overview is not None:
@@ -55,6 +60,7 @@ class PicturePane(QLabel):
                 corner = QPointF((floor(midpoint.x()) - floor(center.x() * size.width()) - transform.dx()) / dpr,
                                  (floor(midpoint.y()) - floor(center.y() * size.height()) - transform.dy()) / dpr)
             target = QRectF(corner.x(), corner.y(), width, height)
+            self._painted_target = target
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, not one_to_one)
             if self._native.isNull() or (width * dpr <= pixels.width() and height * dpr <= pixels.height()):
                 painter.drawPixmap(target, pixels, QRectF(pixels.rect()))
@@ -79,6 +85,15 @@ class PicturePane(QLabel):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and not self.pixmap().isNull():
+            if self.picking:
+                point, target, size = event.position(), self._painted_target, self.image_size()
+                if not target.isEmpty():
+                    x = floor((point.x() - target.x()) * size.width() / target.width())
+                    y = floor((point.y() - target.y()) * size.height() / target.height())
+                    if 0 <= x < size.width() and 0 <= y < size.height():
+                        self.pixel_picked.emit(x, y)
+                event.accept()
+                return
             self._drag_position = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()

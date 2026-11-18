@@ -914,6 +914,42 @@ class DesktopBatchTests(unittest.TestCase):
             check_pixels(view.after, expected_result)
             dialog.close()
 
+    def test_neutral_picker_saves_fixed_white_balance_and_missing_detector_card(self):
+        from retouching_tool.operations.face_detection import DESCRIPTOR, MODEL
+
+        window, panel = self.open_window(tuple(self.originals))
+        self.wait_for_scan(panel, 2)
+        editor = panel.application.pipeline_service
+        page = window.pipeline_page
+        page._command(editor.add_operation, "core.white_balance", 1)
+        wb = editor.status.stages[-1].stage
+        self.until(lambda: wb.id in page.stage_cards, "white balance card did not appear")
+        panel.images.setCurrentRow(0)
+        page.stage_cards[wb.id].preview.click()
+        dialog = panel._stage_preview
+        self.until(dialog.pick_neutral.isEnabled, "no white balance input")
+        self.assertIn("Insufficient consistent neutrals", dialog.feedback.text())
+        dialog.comparison.actual_size()
+        self.qt.processEvents()
+        pane = dialog.comparison.before
+        dialog.pick_neutral.click()
+        QTest.mouseClick(pane, Qt.MouseButton.LeftButton, pos=pane.rect().center())
+        self.until(lambda: dialog._submitted["mode"] == "Fixed" and dialog._future is None,
+                   "the sampled correction did not render")
+        self.assertLess(dialog._draft["red_stops"], 0)
+        self.assertGreater(dialog._draft["blue_stops"], 0)
+        self.assertEqual(editor.status.stages[-1].stage.parameter("mode"), "Automatic")
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Save):
+            dialog.close_button.click()
+        self.assertEqual(editor.status.stages[-1].stage.parameter("mode"), "Fixed")
+        # This test workspace has no model files. Verify the actual detector card and model link.
+        stage = page._command(editor.add_operation, DESCRIPTOR.operation, 1, model_ref=MODEL.ref).stages[-1].stage
+        self.until(lambda: stage.id in page.stage_cards, "face detector card did not appear")
+        card = page.stage_cards[stage.id]
+        self.assertFalse(card.toggle.isEnabled())
+        self.assertIn(MODEL.files[0].relative_path, card.status_label.text())
+        self.assertEqual(card.model_page, MODEL.publisher_url)
+
     def test_modal_stage_comparison_uses_selection_and_saves_or_discards_draft(self):
         window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
         self.wait_for_scan(panel, 2)

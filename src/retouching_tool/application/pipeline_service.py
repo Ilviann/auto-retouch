@@ -10,6 +10,7 @@ from ..config import ScalingSettings
 from ..json_io import atomic_json, read_json
 from ..operations.person_foreground import MODEL as PERSON_FOREGROUND_MODEL
 from ..operations.alibaba_skin import MODEL as ALIBABA_MODEL
+from ..operations.face_detection import MODEL as YUNET_MODEL
 from ..pipeline.assets import ModelCatalog
 from ..pipeline.definition import PipelineDefinition, parse_pipeline
 from ..pipeline.registry import application_registry
@@ -24,7 +25,7 @@ class PipelineService:
         self.scaling = scaling
         self.pytorch_backend = pytorch_backend
         self.registry = registry if registry is not None else application_registry()
-        self.catalog = catalog if catalog is not None else ModelCatalog((PERSON_FOREGROUND_MODEL, ALIBABA_MODEL))
+        self.catalog = catalog if catalog is not None else ModelCatalog((PERSON_FOREGROUND_MODEL, ALIBABA_MODEL, YUNET_MODEL))
         self.status = validate_pipeline(PipelineDefinition("Empty foundation pipeline"), self.registry,
                                         self.catalog, checkpoints, backend, pytorch_backend)
 
