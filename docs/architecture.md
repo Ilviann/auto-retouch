@@ -37,7 +37,9 @@ display data. Qt owns the display objects and picture window. See
 [desktop workspace evidence](verification/desktop-workspace.md).
 The diagnostics dialog reads retained and in-memory log events through a headless
 search service. Qt owns the worker thread dispatch, local time formatting, and
-navigation to matching workspace items. See
+navigation to matching workspace items. The application service exports a local
+diagnostics ZIP through the same log reader and reads job settings and outcomes
+from the saved journal. See
 [desktop diagnostics evidence](verification/desktop-diagnostics.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
 16 GB system RAM on Windows 11 only. Initial export is JPEG with compression settings; later exporters

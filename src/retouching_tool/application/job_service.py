@@ -136,11 +136,17 @@ class JobService:
 
     def status(self, job_id) -> JobStatus:
         try:
-            with open_journal(self.root, job_id) as journal:
-                return self._status(journal, self._load(journal, job_id))
+            _, status = self.read_snapshot(job_id)
+            return status
         except Exception as exc:
             self._emit(job_id, getattr(exc, "code", "JOB_STATUS_FAILED"), str(exc), level="ERROR", exc_info=True)
             raise
+
+    def read_snapshot(self, job_id) -> tuple[JobSnapshot, JobStatus]:
+        """Read the saved settings and committed results without reopening processing inputs."""
+        with open_journal(self.root, job_id) as journal:
+            job = self._load(journal, job_id)
+            return job, self._status(journal, job)
 
     def run(self, job_id, *, control: JobControl | None = None) -> JobStatus:
         """Run synchronously. A new call resumes an interrupted or paused job."""

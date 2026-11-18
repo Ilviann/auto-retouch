@@ -2,8 +2,8 @@
 
 Logging must make warnings, failures, and unexpected processing results useful
 for product improvement and bug investigation. Bootstrap logging, batch worker
-delivery, and desktop log search are implemented. Grouped batch summaries and
-report export remain planned.
+delivery, desktop log search, and local report export are implemented. Grouped
+batch summaries remain planned.
 
 Milestone 3a emits pipeline command failures, asset-unavailable/recovered and
 context-blocked events. Stage sessions emit preparation, completion, release and
@@ -242,17 +242,33 @@ their own error policies; log failure alone must not corrupt their state.
 
 ## Local bug report export
 
-Provide an Export diagnostics action for a selected session or job. Create a local
-ZIP with a readable summary, relevant logs and available crash stderr, environment/
-backend details, effective pipeline/settings, model identifiers/checksums, and
-failure context. Mark rotated/unavailable details as missing rather than implying
-the report is complete. Logs alone do not guarantee a reproducible model result.
+**Export report…** saves a local ZIP for the current application session or the
+job identified by the Job ID field. The text, severity, photo, and operation
+filters remain specific to the Diagnostics table.
 
-Exclude photos, thumbnails, model weights, and other processing artifacts by
-default. Replace user-specific paths, usernames, and photo names consistently in
-the exported copy, including free-text exceptions where possible; keep correlation
-IDs intact. List the contents for inspection. Preserve detailed local originals;
-export never uploads or automatically sends the report anywhere.
+- `README.txt` lists the contents, scope, and known gaps, including unusable
+  records, evidence of worker delivery gaps, and unavailable saved-job settings.
+  Expired logs and logs moved by settings changes in earlier launches can be
+  missing.
+- `settings.json` contains backend/runtime versions, ordered pipeline settings,
+  and available model references/checksums. Job reports use the frozen settings
+  and committed per-photo outcomes. Session reports describe the current
+  workspace at export time.
+- `events.jsonl` contains matching retained and recent in-memory events,
+  including captured worker stderr where available. Exports stream up to
+  64 MiB of redacted event data and report how many matching events were omitted.
+
+Paths and photo names receive consistent aliases within an archive where they
+can be recognized. The report redacts Windows paths, local account names, and
+recognized photo names in free text on a best-effort basis. Correlation IDs stay
+intact. The export excludes photos, thumbnails, model weights, and processing
+artifacts. Review the archive before sharing. The app saves it locally and
+preserves the original logs and any file already at the chosen destination.
+
+`DIAGNOSTIC_REPORT_JOB_UNAVAILABLE` records the cause and produces a partial
+report when a saved journal cannot be read. Export errors include the output
+path, job ID when applicable, and technical cause. See
+[desktop diagnostics verification](verification/desktop-diagnostics.md).
 
 ## Acceptance evidence
 

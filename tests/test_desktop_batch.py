@@ -9,6 +9,7 @@ from threading import Event
 from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
+from zipfile import ZipFile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -305,6 +306,23 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIn("worker_run_id", dialog.details.toPlainText())
         dialog.copy.click()
         self.assertEqual(self.qt.clipboard().text(), dialog.details.toPlainText())
+
+        report = self.root / "job diagnostics.zip"
+        with patch.object(QFileDialog, "getSaveFileName", return_value=(str(report), "ZIP archive (*.zip)")) as save:
+            dialog.export.click()
+            self.assertIn("job diagnostics", save.call_args.args[1])
+        self.until(lambda: dialog.pending is None, "job diagnostics export did not finish")
+        self.assertIn("Saved", dialog.feedback.text())
+        self.assertIn("README.txt", dialog.feedback.text())
+        self.assertEqual([event.code for event in dialog.events], ["EXPOSURE_CLIPPED"])
+        with ZipFile(report) as archive:
+            events = [json.loads(line) for line in archive.read("events.jsonl").splitlines()]
+            self.assertTrue(all(event["job_id"] == job_id for event in events))
+            self.assertIn("EXPOSURE_CLIPPED", {event["code"] for event in events})
+            self.assertIn("JOB_CREATED", {event["code"] for event in events})
+            self.assertNotIn(b"bright.jpg", archive.read("settings.json"))
+            self.assertNotIn(b"bright.jpg", archive.read("events.jsonl"))
+
         with patch.object(QDesktopServices, "openUrl", return_value=True) as opener:
             dialog.open_folder.click()
             self.assertEqual(Path(opener.call_args.args[0].toLocalFile()), self.log.path.parent)

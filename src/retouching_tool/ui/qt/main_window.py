@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(content)
 
     def _diagnostics(self, job_id=""):
-        dialog = DiagnosticsDialog(self, self.batch_panel.application.diagnostic_history,
+        dialog = DiagnosticsDialog(self, self.batch_panel.application,
                                    self.batch_panel.show_diagnostic_photo, self.pipeline_page.show_diagnostic_operation,
                                    job_id=job_id)
         dialog.finished.connect(dialog.deleteLater)

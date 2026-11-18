@@ -17,7 +17,9 @@ backend support plus shared dependencies. Launch always uses the recorded backen
 NVIDIA acceptance requires testing on actual NVIDIA hardware.
 Open **Diagnostics…** to search retained local logs and copy technical details.
 **Job diagnostics…** in the monitor opens the selected job's warnings and errors.
-Local bug-report export and grouped batch summaries remain planned.
+Use **Export report…** in either view to save a local ZIP with redacted
+diagnostics and available settings for the session or job. Review the archive
+before sharing it.
 
 The reference workload is approximately 500 JPEG photos on a consumer NVIDIA RTX
 20-series GPU with at least 6 GB VRAM. Natural and Beauty presets are required.

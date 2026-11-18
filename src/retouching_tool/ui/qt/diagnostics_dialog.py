@@ -1,11 +1,12 @@
 """Search local diagnostic events and inspect their original technical details."""
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Event
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QGridLayout,
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QGridLayout,
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
                                QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
@@ -14,9 +15,10 @@ from ...diagnostics.history import DiagnosticQuery
 
 
 class DiagnosticsDialog(QDialog):
-    def __init__(self, parent, history, show_photo, show_operation, *, job_id=""):
+    def __init__(self, parent, application, show_photo, show_operation, *, job_id=""):
         super().__init__(parent)
-        self.history = history
+        self.history = application.diagnostic_history
+        self.export_diagnostics = application.export_diagnostics
         self.show_photo = show_photo
         self.show_operation = show_operation
         self.setWindowTitle("Diagnostics")
@@ -78,7 +80,10 @@ class DiagnosticsDialog(QDialog):
         self.open_folder = QPushButton("Open log folder", objectName="openDiagnosticFolder")
         self.open_folder.setEnabled(False)
         self.open_folder.clicked.connect(self._open_folder)
-        for button in (self.copy, self.photo, self.operation, self.open_folder):
+        self.export = QPushButton("Export report…", objectName="exportDiagnostics")
+        self.export.setToolTip("Save a redacted ZIP of available job or session evidence. Search filters only affect the table.")
+        self.export.clicked.connect(self._export)
+        for button in (self.copy, self.photo, self.operation, self.open_folder, self.export):
             button.setAutoDefault(False)
             actions.addWidget(button)
         actions.addStretch()
@@ -93,7 +98,7 @@ class DiagnosticsDialog(QDialog):
         self.cancelled = Event()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="diagnostic-history")
         self.timer = QTimer(self, interval=50)
-        self.timer.timeout.connect(self._finish_search)
+        self.timer.timeout.connect(self._finish_pending)
         self.finished.connect(self._stop)
         self._search()
 
@@ -105,17 +110,26 @@ class DiagnosticsDialog(QDialog):
         self.events = ()
         self.table.setRowCount(0)
         self._select_event()
-        self.filters.setEnabled(False)
         self.status.setText("Searching retained logs…")
-        self.pending = self.executor.submit(self.history.search, query, cancelled=self.cancelled.is_set)
+        self._submit(self._finish_search, self.history.search, query)
+
+    def _submit(self, finish, command, *args, **kwargs):
+        self.filters.setEnabled(False)
+        self.export.setEnabled(False)
+        self.finish = finish
+        self.pending = self.executor.submit(command, *args, cancelled=self.cancelled.is_set, **kwargs)
         self.timer.start()
 
-    def _finish_search(self):
+    def _finish_pending(self):
         if not self.pending.done():
             return
         self.timer.stop()
         future, self.pending = self.pending, None
         self.filters.setEnabled(True)
+        self.export.setEnabled(True)
+        self.finish(future)
+
+    def _finish_search(self, future):
         try:
             result = future.result()
         except Exception as exc:
@@ -146,6 +160,29 @@ class DiagnosticsDialog(QDialog):
         if result.storage_warning:
             messages.append(result.storage_warning)
         self.status.setText("\n".join(messages))
+
+    def _export(self):
+        job_id = self.job_id.text().strip()
+        scope = "job" if job_id else "session"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, f"Export {scope} diagnostics", f"Auto ReTouch {scope} diagnostics.zip", "ZIP archive (*.zip)",
+            options=QFileDialog.Option.DontConfirmOverwrite)
+        if filename:
+            path = Path(filename).absolute()
+            if not path.suffix:
+                path = path.with_suffix(".zip")
+            self.feedback.setText(f"Writing the {scope} report…")
+            self._submit(self._finish_export, self.export_diagnostics, path, job_id=job_id)
+
+    def _finish_export(self, future):
+        try:
+            result = future.result()
+        except Exception as exc:
+            self.feedback.setText(f"{getattr(exc, 'code', 'DIAGNOSTIC_REPORT_FAILED')} · {exc}")
+        else:
+            if result is not None:
+                self.feedback.setText(f"Saved {result.path}\n{result.event_count} events · {', '.join(result.members)}\n"
+                                      "Review README.txt for coverage and inspect the report before sharing.")
 
     def _selected_event(self):
         row = self.table.currentRow()

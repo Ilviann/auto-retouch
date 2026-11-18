@@ -1,12 +1,16 @@
 """Headless startup state and pipeline selection. Launch never starts processing."""
 
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
 from ..cli import LaunchOptions
 from ..config import AppConfig, FolderSettings, LoggingSettings, parse_config
 from ..diagnostics.history import DiagnosticHistory
+from ..diagnostics.reports import DiagnosticReport, write_report
 from ..errors import RetouchingError
+from ..jobs.journal import validate_job_id
+from ..jobs.snapshot import model_manifests, runtime_versions
 from ..json_io import atomic_json, read_json
 from ..storage.batch_paths import probe_writable, resolve_folder
 from .batch import BatchService
@@ -24,6 +28,7 @@ class ApplicationService:
         self.root, self.config, self.diagnostics = root, config, diagnostics
         self.batch_service = BatchService(config.temporary, diagnostics)
         self.diagnostic_history = DiagnosticHistory(diagnostics, root / "logs")
+        self._source_index = None
 
     def startup(self, options: LaunchOptions, backend: str) -> StartupSnapshot:
         notices = []
@@ -131,7 +136,59 @@ class ApplicationService:
             self.diagnostics.emit(error.code, str(error), component="application", level="ERROR", exc_info=True,
                                   index_id=index.index_id, sources=sources)
             raise error from exc
+        self._source_index = index
         return index
+
+    def export_diagnostics(self, destination: Path, *, job_id="", cancelled=lambda: False) -> DiagnosticReport | None:
+        """Export this application's session or a saved job's available local evidence."""
+        try:
+            config, editor, index = self.config, self.pipeline_service, self._source_index
+            photo_names = {item.path.name for item in index.images} if index is not None else set()
+            notes = []
+            settings = {"schema_version": 1, "scope": "job" if job_id else "session",
+                        "session_id": self.diagnostics.session_id}
+            if job_id:
+                validate_job_id(job_id)
+                settings["job_id"] = job_id
+                try:
+                    job, status = self.job_service.read_snapshot(job_id)
+                except (RetouchingError, OSError, ValueError):
+                    message = "The saved job journal is unavailable or unreadable. Frozen settings and results are missing."
+                    notes.append(message)
+                    self.diagnostics.emit("DIAGNOSTIC_REPORT_JOB_UNAVAILABLE", message, level="WARNING",
+                                          component="diagnostics", exc_info=True, job_id=job_id)
+                else:
+                    photo_names.update(image.source.name for image in status.images)
+                    photo_names.update(image.output.name for image in status.images)
+                    settings.update(mode=job.mode, recursive=job.recursive, backend=job.backend, versions=job.versions,
+                                    pipeline=_report_pipeline(job.pipeline), pipeline_sha256=job.pipeline_sha256,
+                                    models=job.models, jpeg=asdict(job.settings), status=status.status,
+                                    skipped_stages=[asdict(stage) for stage in status.skipped_stages],
+                                    destination_path=str(job.destination), temporary=str(job.scratch),
+                                    checkpoints=str(job.checkpoints),
+                                    counts=dict(Counter(image.status for image in status.images)),
+                                    images=[{"image_id": image.image_id, "source_path": str(image.source),
+                                             "output_path": str(image.output), "status": image.status,
+                                             "attempts": image.attempts, "warnings": image.warnings,
+                                             "code": image.code, "message": image.message}
+                                            for image in status.images])
+            else:
+                pipeline = editor.status.definition
+                settings.update(backend=editor.backend, versions=runtime_versions(editor.backend),
+                                pipeline=_report_pipeline(pipeline), models=model_manifests(pipeline, editor.catalog),
+                                config_path=str(config.file), checkpoints=str(config.checkpoints),
+                                temporary=str(config.temporary), logs=str(config.logs), logging=asdict(config.logging))
+                notes.append("Settings describe the current workspace at export time. Saved jobs have separate frozen settings.")
+            return write_report(self.diagnostic_history, destination, settings, job_id=job_id,
+                                photo_names=photo_names, limitations=notes, cancelled=cancelled)
+        except Exception as exc:
+            error = exc if isinstance(exc, RetouchingError) else RetouchingError(
+                "DIAGNOSTIC_REPORT_FAILED", "Could not save the diagnostic report. Check folder access and free space.")
+            self.diagnostics.emit(error.code, str(error), level="ERROR", component="diagnostics", exc_info=True,
+                                  job_id=job_id or None, report_path=destination)
+            if error is exc:
+                raise
+            raise error from exc
 
     def _save_sources(self, sources):
         atomic_json(self.root / ".state" / "session.json",
@@ -142,3 +199,10 @@ class ApplicationService:
         for source in sources:
             if not source.exists() or (not source.is_dir() and not (source.is_file() and source.suffix.lower() in (".jpg", ".jpeg"))):
                 raise RetouchingError("SOURCE_INVALID", f"Source must be an existing folder or JPEG file: {source}")
+
+
+def _report_pipeline(definition):
+    # Display names can contain client names. Keep the ordered settings and stable stage IDs.
+    data = definition.to_json()
+    del data["name"]
+    return data

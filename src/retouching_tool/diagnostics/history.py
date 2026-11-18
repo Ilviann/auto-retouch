@@ -1,6 +1,7 @@
 """Read retained diagnostic events without Qt or opening any processing inputs."""
 
 from collections import Counter
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from heapq import heappush, heapreplace
@@ -38,13 +39,17 @@ class DiagnosticEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class DiagnosticResults:
+class DiagnosticRead:
     directory: Path
-    events: tuple[DiagnosticEvent, ...]
-    has_more: bool
     skipped_files: int
     invalid_records: int
     storage_warning: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticResults(DiagnosticRead):
+    events: tuple[DiagnosticEvent, ...]
+    has_more: bool
 
 
 def _open_log(path):
@@ -183,21 +188,12 @@ class DiagnosticHistory:
         self.bootstrap_directory = bootstrap_directory
 
     def search(self, query: DiagnosticQuery, *, cancelled=lambda: False) -> DiagnosticResults:
-        directory, previous_directories, recent, storage_warning = self.diagnostics.search_sources()
         needle = query.text.strip().casefold()
         filters = {key: value.strip() for key, value in (("job_id", query.job_id), ("image_id", query.image_id),
                                                         ("stage_instance_id", query.stage_id)) if value.strip()}
         severities = LOG_LEVELS[LOG_LEVELS.index(query.minimum_severity):]
         latest = []
         order = 0
-        invalid = skipped = 0
-        # Keep disk occurrences even when two identical events arrive in the same millisecond.
-        # Use the memory snapshot to fill in only the occurrences missing from disk.
-        def encode(record):
-            return json.dumps(record, sort_keys=True)
-
-        memory_remaining = Counter(map(encode, recent))
-        recent_times = {record["timestamp"] for record in recent}
 
         def collect(time, record):
             nonlocal order
@@ -211,6 +207,22 @@ class DiagnosticHistory:
             elif time >= latest[0][0]:
                 heapreplace(latest, row)
 
+        read = self.visit(collect, cancelled=cancelled, **filters)
+        events = tuple(_display_event(time, record) for time, _, record in sorted(latest, reverse=True))
+        return DiagnosticResults(read.directory, read.skipped_files, read.invalid_records, read.storage_warning,
+                                 events, order > RESULT_LIMIT)
+
+    def visit(self, collect, *, cancelled, **context) -> DiagnosticRead:
+        """Stream validated retained events plus memory-only occurrences to a consumer."""
+        directory, previous_directories, recent, storage_warning = self.diagnostics.search_sources()
+        invalid = skipped = 0
+        # Keep disk occurrences even when two identical events arrive in the same millisecond.
+        # Use the memory snapshot to fill in only the occurrences missing from disk.
+        def encode(record):
+            return json.dumps(record, sort_keys=True)
+
+        memory_remaining = Counter(map(encode, recent))
+        recent_times = {record["timestamp"] for record in recent}
         read_failure = record_failure = None
 
         def failed_read(path, exc):
@@ -226,17 +238,17 @@ class DiagnosticHistory:
         seen_files = set()
         roots = dict.fromkeys((directory, *previous_directories, self.bootstrap_directory))
         for path in _paths(directory, roots, cancelled, failed_read):
-            try:
-                for time, record in _events(path, seen_files, cancelled, invalid_record):
+            with closing(_events(path, seen_files, cancelled, invalid_record)) as records:
+                for time, record in _read_events(path, records, failed_read):
                     collect(time, record)
                     if record["timestamp"] in recent_times:
                         identity = encode(record)
                         if memory_remaining[identity] > 0:
                             memory_remaining[identity] -= 1
-            except OSError as exc:
-                failed_read(path, exc)
 
         for record in recent:
+            if cancelled():
+                break
             identity = encode(record)
             if memory_remaining[identity] > 0:
                 collect(_event_time(record), record)
@@ -250,8 +262,14 @@ class DiagnosticHistory:
                 if failure is not None:
                     path, cause = failure
                     self.diagnostics.emit(code, message, level="WARNING", component="diagnostics",
-                                          exc_info=cause, log_path=path, occurrence_count=count, **filters)
+                                          exc_info=cause, log_path=path, occurrence_count=count, **context)
 
-        events = tuple(_display_event(time, record) for time, _, record in sorted(latest, reverse=True))
-        return DiagnosticResults(directory, events, order > RESULT_LIMIT, skipped, invalid,
-                                 storage_warning or self.diagnostics.failure)
+        return DiagnosticRead(directory, skipped, invalid, storage_warning or self.diagnostics.failure)
+
+
+def _read_events(path, records, failed_read):
+    # Consumer write errors must propagate separately from problems reading logs.
+    try:
+        yield from records
+    except OSError as exc:
+        failed_read(path, exc)
