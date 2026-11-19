@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QFormLayout, QGroupBox, 
                                QProgressBar, QPushButton, QSpinBox, QVBoxLayout)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
+from ...pipeline.definition import BooleanParameter, MaskTargetParameter
 from .picture_window import PictureComparison, RenderProgressDialog, statistics_text
 from .stage_card import ChoiceControl, add_parameter_row, parameter_control
 
@@ -64,6 +65,14 @@ class StagePreviewWindow(QDialog):
                 signal.connect(lambda _, p=parameter, widget=control, initial=control.value():
                                self._change(p, widget.value(), initial))
                 add_parameter_row(form, parameter, control)
+            for target in descriptor.parameters:
+                if isinstance(target, MaskTargetParameter):
+                    toggle = self._controls[target.name]
+                    for option in descriptor.parameters:
+                        if isinstance(option, BooleanParameter) and option.optional_context_key:
+                            region = self._controls[option.name]
+                            region.setDisabled(toggle.isChecked())
+                            toggle.toggled.connect(region.setDisabled)
             if descriptor.neutral_picker:
                 self.pick_neutral = QPushButton("Pick neutral from input", checkable=True, autoDefault=False)
                 self.pick_neutral.setToolTip("Click a gray card or neutral midtone to reuse this correction across photos.")

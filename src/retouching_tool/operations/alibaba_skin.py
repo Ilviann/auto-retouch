@@ -6,8 +6,9 @@ from ..errors import ResizeApprovalRequired, RetouchingError
 from ..config import ScalingSettings
 from ..imaging.scaling import fit_longest_side, resize_rgb
 from ..pipeline.assets import ModelFile, ModelManifest
-from ..pipeline.definition import BooleanParameter, OperationDescriptor, Parameter, ResizeLimit, SCALING_PARAMETERS
-from ..pipeline.image_state import FACE_REGIONS, FaceRegion, ImageState
+from ..pipeline.definition import BooleanParameter, MaskTargetParameter, OperationDescriptor, Parameter, ResizeLimit, SCALING_PARAMETERS
+from ..pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, FaceRegion, ImageState
+from ..imaging.skin_matte import blend_skin
 
 MAX_INPUT_SIDE = 5000
 MODEL = ModelManifest(
@@ -30,6 +31,8 @@ DESCRIPTOR = OperationDescriptor("retouch.alibaba_skin", 1, "Alibaba skin retouc
 SMOOTHING_MODEL = replace(MODEL, ref="alibaba-skin-tone-smoothing", files=(MODEL.files[0],))
 BLEMISH_MODEL = replace(MODEL, ref="alibaba-blemish-cleanup", files=(MODEL.files[1],))
 SMOOTHING = replace(DESCRIPTOR, operation="retouch.alibaba_skin_tone_smoothing",
+                    parameters=(*DESCRIPTOR.parameters, MaskTargetParameter(
+                        "use_exposed_skin", "Target exposed skin", False, mask=EXPOSED_SKIN)),
                     title="Skin tone smoothing (Alibaba)", model_refs=(SMOOTHING_MODEL.ref,))
 BLEMISH = replace(DESCRIPTOR, operation="retouch.alibaba_blemish_cleanup",
                   title="Blemish cleanup (Alibaba)", model_refs=(BLEMISH_MODEL.ref,))
@@ -153,6 +156,7 @@ class AlibabaSkin:
         self.model = model
         self.strength = stage.parameter("strength")
         self.use_face_rects = stage.parameter("use_face_rects")
+        self.mask_target = descriptor.selected_mask(stage)
         params = stage.portable_parameters()
         self.methods = ScalingSettings(**{key: params[key] for key in ("downscale", "upscale") if key in params})
         self.networks = None
@@ -176,17 +180,25 @@ class AlibabaSkin:
     def process(self, state):
         if not self.strength:
             return state
-        entry = state.entry(FACE_REGIONS.key) if self.use_face_rects else None
+        mask = state.entry(self.mask_target.key).value if self.mask_target is not None else None
+        if mask is not None and not any(mask.labels):
+            self.runtime.emit("RETOUCH_NO_EXPOSED_SKIN", "Smoothing skipped because the exposed skin mask is empty.",
+                              level="WARNING")
+            return state
+        entry = state.entry(FACE_REGIONS.key) if self.use_face_rects and mask is None else None
         crops = None if entry is None else tuple(
             FaceCrop(r.left, r.top, r.right, r.bottom, r if r.mask else None) for r in entry.value.regions)
+        target = "exposed_skin" if mask is not None else "whole_image"
         self.runtime.emit("RETOUCH_TARGET_SELECTED", "Selected the input for skin retouching.",
-                          target="whole_image" if crops is None else "face_regions",
-                          use_face_rects=self.use_face_rects, region_count=1 if crops is None else len(crops))
+                          target="face_regions" if crops is not None else target,
+                          use_face_rects=self.use_face_rects and mask is None, region_count=1 if crops is None else len(crops))
         try:
             pixels = retouch_regions(state.pixels, crops, methods=self.methods,
                                      resize_approved=self.runtime.resize_approved,
                                      infer=lambda rgb: self.networks.apply(rgb, self.methods, self.strength),
                                      emit=self.runtime.emit, stage_id=self.runtime.stage.id, title=self.descriptor.title)
+            if mask is not None:
+                pixels = blend_skin(state.pixels, pixels, mask)
         except RetouchingError:
             raise
         except Exception as exc:

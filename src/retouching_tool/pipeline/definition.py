@@ -92,6 +92,13 @@ class ContextSpec:
     pixel_sensitive: bool = True
 
 
+@dataclass(frozen=True, kw_only=True)
+class MaskTargetParameter(BooleanParameter):
+    """Select an upstream mask as the required target, overriding optional regions."""
+
+    mask: ContextSpec
+
+
 @dataclass(frozen=True)
 class ResizeLimit:
     longest_side: int
@@ -126,9 +133,19 @@ class OperationDescriptor:
         return (*self.parameters, BLEND) if self.changes_pixels else self.parameters
 
     def active_optional_inputs(self, stage):
+        if self.selected_mask(stage) is not None:
+            return ()
         ignored = {p.optional_context_key for p in self.parameters
                    if isinstance(p, BooleanParameter) and p.optional_context_key and not stage.parameter(p.name)}
         return tuple(spec for spec in self.optional if spec.key not in ignored)
+
+    def selected_mask(self, stage):
+        return next((p.mask for p in self.parameters if isinstance(p, MaskTargetParameter)
+                     and stage.parameter(p.name)), None)
+
+    def active_required_inputs(self, stage):
+        mask = self.selected_mask(stage)
+        return (*self.requires, mask) if mask is not None else self.requires
 
     def execution_backend(self, onnx_backend, pytorch_backend):
         if self.inference_runtime == "onnxruntime":
@@ -143,6 +160,7 @@ class OperationDescriptor:
 LEGACY_STAGE_DEFAULTS = {
     ("analysis.face_detection", 1): {"expand_pixels": 0},
     ("retouch.alibaba_skin", 1): {"use_face_rects": True},
+    ("retouch.alibaba_skin_tone_smoothing", 1): {"use_exposed_skin": False},
 }
 
 

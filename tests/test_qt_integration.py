@@ -27,6 +27,7 @@ from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.operations.alibaba_skin import BLEMISH, BLEMISH_MODEL, SMOOTHING, SMOOTHING_MODEL
 from retouching_tool.operations.face_detection import DESCRIPTOR as DETECTOR, MODEL as DETECTOR_MODEL
+from retouching_tool.operations.exposed_skin import DESCRIPTOR as SKIN, MODEL as SKIN_MODEL
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
 from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS
 from retouching_tool.ui.qt.main_window import MainWindow
@@ -375,6 +376,24 @@ class QtIntegrationTests(unittest.TestCase):
             checkbox.click()
             self.app.processEvents()
             self.assertFalse(optional.isHidden())
+            mask_target = card.findChild(QCheckBox, "parameter-use_exposed_skin")
+            mask_tag = card.findChild(QLabel, "tag-In-skin.exposed")
+            self.assertTrue(mask_tag.isHidden())
+            mask_target.click()
+            self.app.processEvents()
+            self.assertFalse(mask_tag.isHidden())
+            self.assertTrue(optional.isHidden())
+            self.assertFalse(checkbox.isEnabled())
+            mask_target.click()
+            self.app.processEvents()
+            self.assertTrue(checkbox.isEnabled())
+            mask_stage = window.pipeline_page._command(editor.add_operation, SKIN.operation, 1,
+                                                       model_ref=SKIN_MODEL.ref).stages[-1].stage
+            self.app.processEvents()
+            mask_card = window.pipeline_page.stage_cards[mask_stage.id]
+            self.assertFalse(mask_card.toggle.isEnabled())
+            self.assertIn(str(editor.checkpoints / SKIN_MODEL.files[0].relative_path), mask_card.status_label.text())
+            self.assertEqual(mask_card.model_page, SKIN_MODEL.publisher_url)
             face_stage = window.pipeline_page._command(editor.add_operation, DETECTOR.operation, 1,
                                                        model_ref=DETECTOR_MODEL.ref).stages[-1].stage
             self.app.processEvents()

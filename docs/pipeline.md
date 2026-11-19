@@ -41,9 +41,11 @@ independently editable CPU stage with strength and a maximum correction in stops
 Place it before pixel-sensitive analysis stages. See the
 [stage catalog](stages.md#initial-stage-catalog-and-image-state) for its tonal
 behavior and provisional defaults.
-The catalog includes the PP-HumanSeg person foreground evaluation operation and
-its local checkpoint manifest. Model-state
-acceptance currently uses synthetic local bytes and injected test operations.
+The catalog includes independent person foreground and exposed-skin analysis
+operations with local checkpoint manifests. Smoothing can select the versioned
+exposed-skin mask as a required input. Editor validation, standalone preview,
+and both batch schedulers enforce that choice. The default retains the original
+target and frozen-job identity. [Exposed skin verification](verification/exposed-skin.md).
 
 The 3b storage slice persists reference states with lossless float32 TIFF,
 strict versioned manifests, typed context and cache identity/checksums. The

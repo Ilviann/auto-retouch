@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import SCALING_METHODS
-from ...pipeline.definition import BLEND, BooleanParameter, ChoiceParameter, IntegerParameter, ScalingParameter
-from ...pipeline.image_state import FACE_REGIONS, PERSON_FOREGROUND
+from ...pipeline.definition import BLEND, BooleanParameter, ChoiceParameter, IntegerParameter, MaskTargetParameter, ScalingParameter
+from ...pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, PERSON_FOREGROUND
 
 
 class BooleanControl(QCheckBox):
@@ -115,7 +115,7 @@ def tag_row(label, entries, hint):
     caption.setToolTip(hint)
     caption.setFixedWidth(caption.fontMetrics().horizontalAdvance("Out") + 4)
     row.addWidget(caption)
-    aliases = {FACE_REGIONS.key: "areas:face", PERSON_FOREGROUND.key: "areas:people"}
+    aliases = {FACE_REGIONS.key: "areas:face", PERSON_FOREGROUND.key: "areas:people", EXPOSED_SKIN.key: "areas:skin"}
     for key, version, optional in entries:
         name = aliases.get(key, key)
         tag = QLabel(f"{name} · optional" if optional else name, objectName=f"tag-{label}-{key}")
@@ -201,6 +201,8 @@ class StageCard(QFrame):
         layout.addWidget(self.status_label)
         inputs = [("pixels", None, False)]
         inputs.extend((spec.key, spec.version, False) for spec in descriptor.requires)
+        inputs.extend((p.mask.key, p.mask.version, False) for p in descriptor.parameters
+                      if isinstance(p, MaskTargetParameter))
         inputs.extend((spec.key, spec.version, True) for spec in descriptor.optional)
         outputs = [("pixels", None, False)] if descriptor.changes_pixels else []
         outputs.extend((spec.key, spec.version, False) for spec in descriptor.provides)
@@ -270,6 +272,12 @@ class StageCard(QFrame):
 
     def show_status(self, status, *, can_move_up, can_move_down):
         active_inputs = self.descriptor.active_optional_inputs(status.stage)
+        mask = self.descriptor.selected_mask(status.stage)
+        for parameter in self.descriptor.parameters:
+            if isinstance(parameter, MaskTargetParameter):
+                self.findChild(QLabel, f"tag-In-{parameter.mask.key}").setVisible(mask == parameter.mask)
+            elif isinstance(parameter, BooleanParameter) and parameter.optional_context_key:
+                self.parameters[parameter.name].setEnabled(mask is None)
         for spec in self.descriptor.optional:
             self.findChild(QLabel, f"tag-In-{spec.key}").setVisible(spec in active_inputs)
         with QSignalBlocker(self.toggle):

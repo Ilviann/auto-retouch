@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "Empty foundation pipeline",
+  "name": "Face ReTouch",
   "stages": [
     {
       "id": "a91499660512417cb1eeeb9fe5ddce05",
@@ -14,14 +14,26 @@
       "model_ref": "opencv-yunet-2023mar"
     },
     {
-      "id": "9f951a430a464ee5afe119eea9a06207",
-      "operation": "retouch.alibaba_skin",
+      "id": "277dea309e32417096f545246adf9da2",
+      "operation": "retouch.alibaba_blemish_cleanup",
       "operation_version": 1,
       "enabled": true,
       "parameters": {
-        "strength": 1.0
+        "strength": 1.0,
+        "use_face_rects": true
       },
-      "model_ref": "alibaba-skin-retouching"
+      "model_ref": "alibaba-blemish-cleanup"
+    },
+    {
+      "id": "c0333614b66348099367b14dc4a5b7d0",
+      "operation": "retouch.alibaba_skin_tone_smoothing",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 1.0,
+        "use_face_rects": true
+      },
+      "model_ref": "alibaba-skin-tone-smoothing"
     }
   ]
 }

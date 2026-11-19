@@ -448,7 +448,9 @@ precision, range, color metadata, and auxiliary artifacts. Repeated JPEG encodin
 is excluded. The reference-state store now uses uncompressed float32 RGB TIFF plus
 strict JSON manifests and opaque source EXIF/profile blobs; see the
 [storage decision](decisions/0002-lossless-tiff-artifacts.md). It supports current
-statistics, measurements, and a bounded person foreground mask grid. Benchmark
+statistics, measurements, face regions and bounded person foreground and
+exposed-skin grids. The exposed-skin labels occupy at most 64 KiB before
+base64 encoding and fit inside the existing manifest reservation. Benchmark
 disk space and I/O as well as GPU work. One raw float32
 RGB state for a hypothetical 24-megapixel image is about 288 MB, or 144 GB for
 500 images before auxiliary artifacts and compression. This is a size calculation,

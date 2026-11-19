@@ -22,7 +22,7 @@ statistics/measurement context in float32 TIFF plus strict JSON manifests, retai
 EXIF, ICC, XMP and IPTC-IIM bytes exactly and verifying source/revision/coordinate
 provenance. The JPEG adapter applies input orientation and converts to working
 linear sRGB. A bounded person foreground grid now has its own artifact codec.
-Exposed-skin masks and per-person association remain pending.
+The exposed skin stage has a separate, lossless face/body label grid. Per-person association remains pending.
 See [artifact evidence](verification/lossless-artifacts.md) and
 [JPEG evidence](verification/jpeg-boundary.md).
 
@@ -101,7 +101,7 @@ stage supplied face regions, Alibaba uses the whole image.
 | Image statistics | Context: histogram/luminance statistics and clipping warnings; pixels unchanged | Analysis scope and thresholds. Measurements identify the pixel revision they describe. Useful as an initial CPU reference stage and diagnostic overlay. |
 | White balance and color-cast correction | Corrected pixels | Implemented automatic and fixed CPU correction, neutral picker and blending. |
 | Auto exposure and tone | Corrected pixels and correction diagnostics | Implemented baseline with strength, stop limit, and highlight protection. It measures the current pixels directly. |
-| Person and exposed-skin analysis | Context: person regions/instances and exposed-skin masks across the whole photo; pixels unchanged | Validated body/skin segmentation, confidence and overlap handling, association of visible skin with each person. Required for the confirmed all-skin/multiple-person scope; face parsing alone is insufficient. |
+| Person and exposed-skin analysis | Whole-frame person foreground and exposed face/body skin grids | Implemented as independent stages. Instance association, overlapping-person quality and representative skin-tone coverage await evaluation. |
 | Portrait detection | Context: oriented face boxes; pixels unchanged | YuNet face boxes and minimum confidence implemented. Landmark output and person association remain proposals. |
 | Face-region parsing | Context: precise skin, lips, eyes, and teeth masks where supported; pixels unchanged | Per-region confidence, edge treatment, and analysis resolution. Requires faces or a declared self-contained detection implementation. Teeth must have a validated teeth mask; a mouth box is insufficient. |
 | Blemish cleanup | Local pixel edits within valid skin regions; optional candidate/debug context | Strength, maximum spot size, protected regions, and model-specific controls. Optional and quality-gated: distinguishing temporary blemishes from permanent features is uncertain. |
@@ -123,13 +123,43 @@ Mask overlays must be available in preview so users can inspect analysis stages.
 Retouching covers all exposed skin of multiple people, with face-specific masks
 refining protection around facial features. Validate arms/hands/legs, overlapping
 people, and visible skin without a detectable face. Preserve skin-tone differences
-between people. This expands analysis beyond the earlier face-only candidate set;
-body/skin model selection is still pending.
+between people. SelfieMulticlass is available for evaluating this coverage.
 
 Red-eye correction is a useful next optional operation, with pupil/candidate masks
 and bounded color correction. Eye whitening, denoising,
 and sharpening follow demonstrated need. Do not make every possible enhancement
 part of the default studio portrait pipeline.
+
+## Exposed Skin Mask
+
+Add **Exposed Skin Mask** immediately before **Skin tone smoothing (Alibaba)** and
+select **Target exposed skin** on the smoothing card. Place blemish cleanup before
+this pair when using both retouching operations. **Preview** on the analysis stage
+shows body skin in green and face skin in magenta. **Preview in pipeline** on
+smoothing compares the actual masked edit with its input. Zoom to 100% to inspect
+hands, hairlines, clothing edges and overlapping subjects.
+
+The stage classifies the whole oriented frame, independently of face detection.
+It stretches sRGB input to the model's 256 × 256 grid and retains the winning
+body-skin and face-skin classes. The other four classes receive zero coverage.
+It publishes a pooled `skin.exposed` v1 mask tied to the source, current pixel
+and geometry revisions, model and producer settings. Pixel edits require fresh
+analysis. Staged jobs store the labels losslessly inside the bounded manifest.
+Preview and smoothing bilinearly sample the mask at output resolution to feather
+its edges. Smoothing evaluates the frame using its usual resize-consent rules
+and blends through the union of both skin classes in linear RGB. An empty mask
+skips the edit with an image-specific warning. A missing producer blocks the
+selected target. Previous pipelines retain their face or whole-frame targeting.
+
+The model is Google SelfieMulticlass float32 v1, converted to ONNX opset 17 by
+senty-au. For manual installation, download `onnx/model.onnx` and place it under
+`selfie-multiclass-256x256/model.onnx` in the configured checkpoint folder.
+Expected SHA-256 is `35ec1ecd9ee7f85073c99c00020b7f6751b69506eeacf683bc8665f6117f85b0`.
+The conversion publisher identifies the weights as Apache-2.0. The model targets
+selfie framing and has coarse boundaries on small subjects. Fine facial features
+and person identities have no separate labels.
+[Publisher model card and weights terms](https://huggingface.co/senty-au/selfie_multiclass_256x256-ONNX)
+and [local verification](verification/exposed-skin.md).
 
 ## Alibaba skin-retouching stage
 

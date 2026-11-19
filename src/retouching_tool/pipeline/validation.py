@@ -45,7 +45,7 @@ def validate_pipeline(definition, registry, catalog, checkpoints, backend, pytor
         stage = replace(original, enabled=False) if issues else original
         errors = []
         if stage.enabled:
-            for required in desc.requires:
+            for required in desc.active_required_inputs(stage):
                 if available.get(required.key) != required:
                     errors.append(f"{required.key} version {required.version} requires a compatible enabled producer before {stage.id}; add/enable/reorder its analysis stage")
             if not errors:

@@ -10,7 +10,8 @@ from ..jobs.execution import ImageDiagnostics
 from ..jobs.journal import runner_lock
 from ..pipeline.definition import parse_pipeline
 from ..pipeline.executor import StageRuntime, StageSession
-from ..pipeline.image_state import FACE_REGIONS, PERSON_FOREGROUND, ContextEntry
+from ..pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, PERSON_FOREGROUND, ContextEntry
+from ..imaging.skin_matte import matte_strips
 from ..operations.white_balance import sample_neutral
 from ..pipeline.validation import validate_pipeline
 from ..storage.batch_paths import current_file_stamp
@@ -108,6 +109,17 @@ def _check_source(image):
     raise RetouchingError("SOURCE_CHANGED", "The indexed JPEG changed. Scan the sources again.")
 
 
+def _skin_overlay(display, mask):
+    from PIL import Image
+
+    with Image.frombytes("RGB", (display.width, display.height), display.rgb) as image:
+        for label, color in ((1, (0, 224, 160)), (2, (232, 100, 255))):
+            for start, stop, strip in matte_strips(mask, image.size, (label,)):
+                with strip.point(lambda x: round(x * .48)) as opacity:
+                    image.paste(color, (0, start, image.width, stop), opacity)
+        return _full_display(image)
+
+
 def _face_overlay(display, regions):
     from PIL import Image, ImageDraw
 
@@ -202,6 +214,10 @@ class PreviewService:
         result = (original if state.pixel_revision == initial_revision else
                   _full_display(Image.fromarray(encode_rgb_samples(state))))
         caption = None
+        skin = state.entry(EXPOSED_SKIN.key)
+        if skin is not None and skin.producer_id == stage_id:
+            result = _skin_overlay(result, skin.value)
+            caption = "Exposed skin · body in green · face in magenta"
         foreground = state.entry(PERSON_FOREGROUND.key)
         if foreground is not None and foreground.producer_id == stage_id:
             result = _foreground_overlay(result, foreground.value)

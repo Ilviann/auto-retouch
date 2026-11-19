@@ -110,7 +110,7 @@ class StageSession:
                     raise RetouchingError("CONTEXT_INVALID", f"Regenerate {spec.key} for this image before editing pixels.")
             # Stale optional measurements are absent.
             current = replace(state, context=tuple(e for e in state.context if e.compatible(state)))
-            for spec in desc.requires:
+            for spec in desc.active_required_inputs(runtime.stage):
                 entry = current.entry(spec.key)
                 if entry is None or entry.spec != spec:
                     raise RetouchingError("CONTEXT_REQUIRED", f"{runtime.stage.id} requires current {spec.key} version {spec.version}; run its analysis producer first")

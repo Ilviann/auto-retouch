@@ -9,6 +9,7 @@ from .definition import ContextSpec
 
 RGB_FLOAT32_BYTES_PER_PIXEL = 3 * 4
 PERSON_FOREGROUND = ContextSpec("person.foreground", 1)
+EXPOSED_SKIN = ContextSpec("skin.exposed", 1)
 FACE_REGIONS = ContextSpec("face.regions", 1, pixel_sensitive=False)
 MAX_FOREGROUND_GRID = 512
 
@@ -54,6 +55,21 @@ class PersonForegroundMask:
 
 
 @dataclass(frozen=True)
+class ExposedSkinMask:
+    """Full-frame oriented grid. Zero excludes a cell, 1 selects body and 2 selects face."""
+
+    width: int
+    height: int
+    labels: bytes
+
+    def __post_init__(self):
+        if (not all(type(n) is int and 1 <= n <= 256 for n in (self.width, self.height))
+                or type(self.labels) is not bytes or len(self.labels) != self.width * self.height
+                or sum(self.labels.count(i) for i in (0, 1, 2)) != len(self.labels)):
+            raise ValueError("Exposed skin requires a bounded grid of background, body and face labels")
+
+
+@dataclass(frozen=True)
 class FaceRegion:
     """Half-open oriented pixel bounds. Optional packed binary mask spans the rectangle, row-major MSB first."""
 
@@ -96,7 +112,7 @@ class ContextEntry:
     geometry_revision: int
     width: int
     height: int
-    value: ImageStatistics | PersonForegroundMask | FaceRegions | tuple[float, ...]
+    value: ImageStatistics | PersonForegroundMask | ExposedSkinMask | FaceRegions | tuple[float, ...]
     source_id: str = ""
     producer_settings_hash: str = ""
     confidence: float | None = None
@@ -110,18 +126,25 @@ class ContextEntry:
         is_foreground = isinstance(self.value, PersonForegroundMask)
         if is_foreground != (self.spec == PERSON_FOREGROUND):
             raise ValueError("Person foreground context requires the versioned foreground mask payload")
+        if isinstance(self.value, ExposedSkinMask) != (self.spec.key == EXPOSED_SKIN.key):
+            raise ValueError("Exposed skin context requires a typed mask")
+        if isinstance(self.value, ExposedSkinMask) and (self.spec != EXPOSED_SKIN or
+                not isinstance(self.model_ref, str) or not self.model_ref):
+            raise ValueError("Invalid exposed skin model or context version")
         if isinstance(self.value, FaceRegions) != (self.spec.key == FACE_REGIONS.key):
             raise ValueError("Face region context requires a typed payload")
-        if isinstance(self.value, FaceRegions) and (
-                self.spec != FACE_REGIONS or not all(isinstance(v, str) and v for v in
-                    (self.source_id, self.producer_id, self.producer_operation))
+        if isinstance(self.value, (ExposedSkinMask, FaceRegions)) and (
+                not all(isinstance(v, str) and v for v in (self.source_id, self.producer_id, self.producer_operation))
                 or type(self.producer_version) is not int or self.producer_version < 1
                 or not isinstance(self.producer_settings_hash, str)
                 or not re.fullmatch(r"[0-9a-f]{64}", self.producer_settings_hash)
-                or not all(type(v) is int and v >= 0 for v in (self.geometry_revision, self.pixel_revision))
+                or not all(type(v) is int and v > 0 for v in (self.width, self.height))
+                or not all(type(v) is int and v >= 0 for v in (self.geometry_revision, self.pixel_revision))):
+            raise ValueError("Invalid region context provenance or image dimensions")
+        if isinstance(self.value, FaceRegions) and (self.spec != FACE_REGIONS
                 or any(face.right > self.width or face.bottom > self.height for face in self.value.regions)):
             raise ValueError("Invalid face region provenance, version or bounds")
-        if not isinstance(self.value, (ImageStatistics, PersonForegroundMask, FaceRegions)) and not (
+        if not isinstance(self.value, (ImageStatistics, PersonForegroundMask, ExposedSkinMask, FaceRegions)) and not (
                 isinstance(self.value, tuple) and all(type(v) in (int, float) and math.isfinite(v) for v in self.value)):
             raise ValueError("Context payload must be immutable typed data")
 

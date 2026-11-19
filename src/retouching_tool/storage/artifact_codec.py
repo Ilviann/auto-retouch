@@ -10,7 +10,7 @@ import re
 
 from ..pipeline.definition import ContextSpec
 from ..pipeline.image_state import (MAX_FOREGROUND_GRID, ContextEntry, ImageState, ImageStatistics,
-                                    FaceRegion, FaceRegions, PersonForegroundMask, SourceMetadata)
+                                    ExposedSkinMask, FaceRegion, FaceRegions, PersonForegroundMask, SourceMetadata)
 
 REPRESENTATION = "linear-srgb-float32"
 MAX_METADATA_BYTES = 16 * 1024 * 1024
@@ -66,7 +66,7 @@ def validate_context(entry, state):
                 and sum(value.histogram) == value.pixel_count
                 and all(integer(v) and v <= value.pixel_count for v in (value.clipped_low, value.clipped_high)),
                 "Invalid statistics counts")
-    elif not isinstance(value, (PersonForegroundMask, FaceRegions)):
+    elif not isinstance(value, (PersonForegroundMask, ExposedSkinMask, FaceRegions)):
         require(type(value) is tuple and len(value) <= 4096 and all(finite(v) for v in value),
                 "Unsupported context payload; a versioned codec is required")
 
@@ -106,8 +106,9 @@ def encode_context(entry):
     elif isinstance(value, FaceRegions):
         data["value"] = {"kind": "face-regions-v1", "data": [
             {**asdict(region), "mask": b64encode(region.mask).decode("ascii")} for region in value.regions]}
-    elif isinstance(value, PersonForegroundMask):
-        data["value"] = {"kind": "person-foreground-v1", "data": {
+    elif isinstance(value, (PersonForegroundMask, ExposedSkinMask)):
+        kind = "exposed-skin-v1" if isinstance(value, ExposedSkinMask) else "person-foreground-v1"
+        data["value"] = {"kind": kind, "data": {
             "width": value.width, "height": value.height, "labels": b64encode(value.labels).decode("ascii")}}
     else:
         data["value"] = {"kind": "measurements-v1", "data": list(value)}
@@ -134,13 +135,14 @@ def decode_context(data):
             fields(item, "left top right bottom mask_width mask_height mask")
             regions.append(FaceRegion(**{**item, "mask": b64decode(item["mask"], validate=True)}))
         value = FaceRegions(tuple(regions))
-    elif data["value"]["kind"] == "person-foreground-v1":
+    elif data["value"]["kind"] in ("person-foreground-v1", "exposed-skin-v1"):
         fields(payload, "width height labels")
         width, height, labels = payload["width"], payload["height"], payload["labels"]
         require(all(integer(n, 1) and n <= MAX_FOREGROUND_GRID for n in (width, height))
                 and isinstance(labels, str) and len(labels) == 4 * ((width * height + 2) // 3),
                 "Invalid foreground mask grid dimensions or encoded length")
-        value = PersonForegroundMask(width, height, b64decode(labels, validate=True))
+        mask_type = ExposedSkinMask if data["value"]["kind"] == "exposed-skin-v1" else PersonForegroundMask
+        value = mask_type(width, height, b64decode(labels, validate=True))
     else:
         raise ValueError("Unknown context payload codec")
     return ContextEntry(**{**data, "spec": ContextSpec(**data["spec"]), "value": value})
