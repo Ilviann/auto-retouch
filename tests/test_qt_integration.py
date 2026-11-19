@@ -81,6 +81,8 @@ class QtIntegrationTests(unittest.TestCase):
             options = LaunchOptions((), None, None)
             snapshot = application.startup(options, "directml")
             editor = application.pipeline_service
+            config.pipelines.mkdir(exist_ok=True)
+            (config.pipelines / "Studio.json").write_text(json.dumps(editor.status.definition.to_json()))
             window = MainWindow(snapshot, editor, application=application)
             panel = window.pipeline_page
 
@@ -105,6 +107,9 @@ class QtIntegrationTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertTrue(window.batch_panel.images.isVisible())
                 self.assertTrue(panel.isVisible())
+                presets = panel.presets
+                self.assertEqual(presets.count(), 1)
+                self.assertEqual((presets.currentIndex(), presets.currentText(), presets.placeholderText()), (-1, "", ""))
                 self.assertIsNone(panel.findChild(QComboBox, "operationPicker"))
                 menu = panel.findChild(QPushButton, "addOperation").menu()
                 expected = [(d.operation, d.version, model) for d in editor.registry.descriptors()
@@ -152,11 +157,10 @@ class QtIntegrationTests(unittest.TestCase):
                 card(second).findChild(QCheckBox, "stageEnabled").click()
                 self.app.processEvents()
 
-                presets = panel.findChild(QComboBox, "presetPicker")
-                self.assertEqual(presets.count(), 0)
                 output = config.pipelines / "сохранённый профиль.json"
                 select_file("savePipeline", output)
                 self.assertEqual(presets.currentData(), str(output))
+                self.assertTrue(window.batch_panel.pipeline_summary.text().startswith(output.stem + " ·"))
                 output_bytes = output.read_bytes()
                 saved = json.loads(output_bytes)
                 self.assertEqual(saved, editor.status.definition.to_json())

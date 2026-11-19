@@ -8,7 +8,9 @@ batch preflight, saved jobs and worker process.
 - **Batch setup** accepts folders or explicit JPEGs from launch, restored
   source paths, or the file dialogs. The recursion toggle invalidates the index.
   Scanning reads headers, remembers the current paths, and lists every indexed
-  JPEG. All entries start selected. An unreadable header blocks planning until
+  JPEG. All entries start checked. **Check all** and **Uncheck all** change batch
+  inclusion in one action and preserve the current preview selection.
+  An unreadable header blocks planning until
   the affected photo is repaired or explicitly excluded.
 - The destination must be an existing folder. Choosing folders, rescanning,
   changing included photos, or switching schedules automatically refreshes
@@ -22,6 +24,10 @@ batch preflight, saved jobs and worker process.
 - The processing modal shows frozen settings, skipped operations, per-photo attempts and
   warnings, and committed progress. Staged progress shows work units and per-photo
   completed stages. Skipped, failed and canceled photos count toward units accounted for.
+  The elapsed clock accumulates active processing time observed for the current
+  job in this window and freezes when the worker stops. Each start or continue
+  estimates time remaining from newly accounted photos or staged work units.
+  Files skipped at creation and checkpoints from earlier runs supply no timing samples.
   Worker errors and incomplete diagnostic delivery have their own notice.
 - **Pause** and a confirmed **Break** apply to an active worker at its next
   scheduler boundary. Escape and the processing window's close control also
@@ -34,6 +40,11 @@ batch preflight, saved jobs and worker process.
   worker transport retain their plain-Python and local process boundaries.
 
 ## Focused verification
+
+On 2026-11-19, five focused Qt integration tests passed for bulk photo
+selection, sequential export, staged timing, pause/continue and worker exit.
+A controlled clock with a real staged worker verified the remaining-time
+countdown between checkpoints and the frozen elapsed duration during a pause.
 
 The output-collision checks used generated photos and real local workers. Desktop
 tests exercised all three dialog choices, destination selection and rescan with

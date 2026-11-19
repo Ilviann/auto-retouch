@@ -280,6 +280,32 @@ class DesktopBatchTests(unittest.TestCase):
         records = [json.loads(line) for line in self.log.path.read_text(encoding="utf-8").splitlines()]
         self.assertTrue(any(event.get("worker_run_id") and event.get("job_id") == panel._job_id for event in records))
 
+    def test_bulk_photo_checks_preserve_preview_selection_and_recheck_space_once(self):
+        _, panel = self.open_window(tuple(self.originals))
+        self.assertFalse(panel.check_all.isEnabled() or panel.uncheck_all.isEnabled())
+        self.wait_for_scan(panel, 2)
+        panel.destination.setText(str(self.destination))
+        self.wait_for_space(panel)
+        panel.images.setCurrentRow(1)
+        current = panel.images.currentItem()
+        self.assertFalse(panel.check_all.isEnabled())
+        self.assertTrue(panel.uncheck_all.isEnabled())
+        with patch.object(panel.application.batch_service, "estimate", wraps=panel.application.batch_service.estimate) as estimate:
+            panel.uncheck_all.click()
+            estimate.assert_called_once()
+            self.assertIn("0 included", panel.source_summary.text())
+            self.assertFalse(panel.start.isEnabled() or panel.uncheck_all.isEnabled())
+            self.assertEqual(panel.space.text(), "")
+            panel.images.item(0).setCheckState(Qt.CheckState.Checked)
+            self.assertTrue(panel.check_all.isEnabled() and panel.uncheck_all.isEnabled())
+            estimate.reset_mock()
+            panel.check_all.click()
+            estimate.assert_called_once()
+        self.wait_for_space(panel)
+        self.assertIn("2 included", panel.source_summary.text())
+        self.assertIs(panel.images.currentItem(), current)
+        self.assertFalse(panel.check_all.isEnabled())
+
     def test_sequential_folder_preflight_and_jpeg_export(self):
         corrupt = self.source / "broken.jpg"
         corrupt.write_bytes(b"not a JPEG")
@@ -328,6 +354,7 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertIn("2 exported", panel.job_counts.text())
             self.assertIn("JPEG 81, 4:2:0, progressive", panel.job_metadata.text())
             self.assertEqual(panel.job_progress.value(), 2)
+            self.assertRegex(panel.job_timing.text(), r"Elapsed: \d+:\d\d:\d\d .*Estimated remaining: 0:00:00$")
             self.assertFalse((self.destination / corrupt.name).exists())
             for path, original in self.originals.items():
                 self.assertEqual(path.read_bytes(), original)
@@ -589,10 +616,29 @@ class DesktopBatchTests(unittest.TestCase):
         panel.mode.setCurrentIndex(panel.mode.findData("staged"))
         self.assertFalse(panel.start.isEnabled())
         self.wait_for_space(panel)
-        self.start_at_checkpoint(panel, "pause", panel.start)
+        worker = panel.application.job_worker
+        launch = worker.start
+        with patch("retouching_tool.ui.qt.batch_panel.monotonic", return_value=100.0) as clock:
+            def start(job_id):
+                run = launch(job_id)
+                clock.return_value = 112.0
+                return run
+
+            with patch.object(worker, "start", start):
+                self.start_at_checkpoint(panel, "pause", panel.start)
+            self.until(lambda: panel.job_progress.value() == 1, "stage progress did not reach the monitor")
+            # Three enabled stages plus export across two photos, one unit committed.
+            self.assertIn("Elapsed: 0:00:12", panel.job_timing.text())
+            self.assertIn("Estimated remaining: 0:01:24", panel.job_timing.text())
+            clock.return_value += 1
+            self.until(lambda: "0:01:23" in panel.job_timing.text(), "ETA did not count down between checkpoints")
+            panel.pause.click()
+            self.until(lambda: panel.resume.isEnabled(), "paused job did not become resumable")
+            clock.return_value += 3600
+            panel._tick()
+            self.assertIn("Elapsed: 0:00:13", panel.job_timing.text())
+            self.assertIn("Estimated remaining: —", panel.job_timing.text())
         job_id = panel.application.job_service.saved_jobs()[0].job_id
-        panel.pause.click()
-        self.until(lambda: panel.resume.isEnabled(), "paused job did not become resumable")
         self.assertTrue(panel.job_heading.text().startswith("Paused"))
         self.assertGreater(panel.job_progress.value(), 0)
         self.assertLess(panel.job_progress.value(), panel.job_progress.maximum())
@@ -607,6 +653,7 @@ class DesktopBatchTests(unittest.TestCase):
             self.until(lambda: panel.resume.isEnabled(), "saved job did not reopen")
         self.assertIn(job_id, panel.job_heading.text())
         self.assertIn("Staged", panel.job_metadata.text())
+        self.assertIn("Elapsed: —", panel.job_timing.text())
         self.start_at_checkpoint(panel, "cancel", panel.resume)
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as confirm:
             QTest.keyClick(panel.monitor, Qt.Key.Key_Escape)
@@ -620,6 +667,7 @@ class DesktopBatchTests(unittest.TestCase):
         self.until(lambda: panel.history.isEnabled(), "canceled job did not finish")
         self.assertTrue(panel.job_heading.text().startswith("Canceled"))
         self.assertIn("2 canceled", panel.job_counts.text())
+        self.assertIn("Estimated remaining: —", panel.job_timing.text())
         self.assertFalse(panel.resume.isEnabled())
         self.assertEqual(list(self.destination.iterdir()), [])
 

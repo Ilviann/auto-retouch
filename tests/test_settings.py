@@ -139,6 +139,33 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.log.records[-1]["code"], "PRESET_FOLDER_UNAVAILABLE")
         self.assertIn("exception", self.log.records[-1])
 
+    def test_restore_preset_with_legacy_placeholder_name(self):
+        editor = self.application.pipeline_service
+        editor.add_operation("core.exposure", 1)
+        legacy = {**editor.status.definition.to_json(), "name": "Empty foundation pipeline"}
+        preset = self.config.pipelines / "Face ReTouch.json"
+        atomic_json(preset, legacy)
+        atomic_json(editor.autosave, legacy)
+        atomic_json(editor.autosave.with_name("last-preset.json"), str(preset))
+
+        options = LaunchOptions((), None, self.path)
+        startup = self.application.startup(options, "directml")
+        restored = self.application.pipeline_service
+        self.assertEqual(startup.pipeline_name, preset.stem)
+        self.assertEqual(restored.preset_path, preset)
+        self.assertFalse(restored.has_unsaved_changes)
+        stage = restored.status.definition.stages[0]
+        restored.set_enabled(stage.id, False)
+        self.application.startup(options, "directml")
+        restored = self.application.pipeline_service
+        self.assertFalse(restored.status.definition.stages[0].enabled)
+        self.assertTrue(restored.has_unsaved_changes)
+        self.assertEqual(read_json(preset), legacy)
+        restored.load(preset)
+        self.assertEqual(restored.preflight().name, preset.stem)
+        self.assertTrue(restored.status.definition.stages[0].enabled)
+        self.assertFalse(restored.has_unsaved_changes)
+
     def test_validation_and_io_errors_keep_previous_settings(self):
         app = self.application
         editor = app.pipeline_service

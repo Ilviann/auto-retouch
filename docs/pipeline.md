@@ -67,6 +67,10 @@ use that worker. See
 The editor provides add, remove, reorder, enable/disable, and a parameter panel
 for each operation instance. Multiple instances of the same operation are allowed.
 The **Preset** picker lists JSON files directly in the configured preset folder.
+When presets are available and none is selected, the picker stays blank.
+A new working pipeline is titled **Untitled pipeline**. Saving it as a preset
+uses the filename stem as its name. Opening or restoring an older preset with
+the placeholder name **Empty foundation pipeline** also uses its filename stem.
 Choosing a preset or opening a JSON file asks for confirmation when the working
 pipeline differs from its last explicit load or save. Cancel keeps the current
 pipeline. Recovery saves preserve edits across launches. The editor remembers

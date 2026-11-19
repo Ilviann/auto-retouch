@@ -136,7 +136,7 @@ class PipelinePanel(QWidget):
             self.preset_folder_error = ""
             for path in paths:
                 self.presets.addItem(path.stem, str(path))
-            self.presets.setPlaceholderText("Choose a preset…" if paths else "No presets found")
+            self.presets.setPlaceholderText("" if paths else "No presets found")
         self._show_message(self.command_message)
         self._sync_preset()
 
@@ -327,3 +327,4 @@ class PipelinePanel(QWidget):
             self._show_details(self.service.status.definition.name)
             self._show_message(self.service.preset_notice or f"Saved pipeline to {path}")
             self._refresh_presets()
+            self.changed.emit()

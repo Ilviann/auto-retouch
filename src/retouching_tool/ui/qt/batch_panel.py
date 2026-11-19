@@ -2,11 +2,12 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from math import ceil
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGroupBox,
                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit,
                               QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
@@ -64,6 +65,12 @@ def _size(byte_count):
         value /= 1024
 
 
+def _duration(seconds):
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}:{minutes:02}:{seconds:02}"
+
+
 def confirm_existing_outputs(parent, collisions):
     dialog = QMessageBox(parent)
     dialog.setWindowTitle("Output files already exist")
@@ -118,6 +125,10 @@ class BatchPanel(QWidget):
         self._job_id = None
         self._status = None
         self._run = None
+        self._elapsed = None
+        self._started_at = None
+        self._initial_work = None
+        self._estimated_finish = None
         self._request_sent = None
         self._poll_failed = False
         self._closing = False
@@ -181,7 +192,11 @@ class BatchPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.source_summary = _label("batchSourceSummary")
-        layout.addWidget(self.source_summary)
+        self.check_all = _button("Check all", "checkAllImages", partial(self._check_all, Qt.CheckState.Checked))
+        self.uncheck_all = _button("Uncheck all", "uncheckAllImages", partial(self._check_all, Qt.CheckState.Unchecked))
+        selection = _row(self.source_summary, self.check_all, self.uncheck_all)
+        selection.setStretch(0, 1)
+        layout.addLayout(selection)
         self.images = PhotoGrid(self.application.preview_service)
         self.images.itemChanged.connect(self._invalidate_plan)
         self.images.itemSelectionChanged.connect(self._update_controls)
@@ -266,12 +281,15 @@ class BatchPanel(QWidget):
         layout.addLayout(heading)
         self.job_metadata = _label("jobMetadata")
         self.job_counts = _label("jobCounts")
+        self.job_timing = _label("jobTiming")
+        self.job_timing.setToolTip("Elapsed counts active processing time observed for this job in this window. "
+                                   "The estimate uses progress since the worker last started.")
         self.worker_warning = _label("jobWorkerWarning")
         self.job_message = _label("jobMessage")
         self.job_progress = QProgressBar()
         self.job_progress.setObjectName("jobProgress")
         self.job_progress.hide()
-        for widget in (self.job_metadata, self.job_progress, self.job_counts,
+        for widget in (self.job_metadata, self.job_progress, self.job_timing, self.job_counts,
                        self.worker_warning, self.job_message):
             layout.addWidget(widget)
         self.results = _table("jobImages", ("Source JPEG", "Result", "Attempts", "Warnings", "Stages"), 0)
@@ -336,6 +354,12 @@ class BatchPanel(QWidget):
             return ()
         return tuple(image.image_id for row, image in enumerate(self._index.images)
                      if self.images.item(row).checkState() == Qt.CheckState.Checked)
+
+    def _check_all(self, state):
+        with QSignalBlocker(self.images):
+            for row in range(self.images.count()):
+                self.images.item(row).setCheckState(state)
+        self._invalidate_plan()
 
     def _scan(self):
         if self._task is not None or self._run is not None:
@@ -558,6 +582,8 @@ class BatchPanel(QWidget):
 
         self.pipeline_locked.emit(True)
         self._status = self._job_id = None
+        self._elapsed = None
+        self._update_timing()
         self.job_heading.setText("Preparing job")
         self.job_message.setText("Validating the pipeline and saving the job snapshot…")
         self.job_counts.clear()
@@ -565,6 +591,7 @@ class BatchPanel(QWidget):
         self.worker_warning.clear()
         self.results.setRowCount(0)
         self.job_progress.setRange(0, 0)
+        self.job_progress.reset()
         self.job_progress.show()
         if not self.monitor.isVisible():
             self.monitor.open()
@@ -573,6 +600,10 @@ class BatchPanel(QWidget):
     def _start(self):
         self.worker_warning.clear()
         self.job_message.setText("Starting the worker…")
+        self._initial_work = self.job_progress.maximum() - self.job_progress.value() if self._status else None
+        self._estimated_finish = None
+        self._started_at = monotonic()
+        self._update_timing()
         self._submit("start", partial(self.application.job_worker.start, self._job_id))
 
     def _open_history(self):
@@ -619,6 +650,8 @@ class BatchPanel(QWidget):
 
     def _show_status(self, status):
         previous = self._status
+        if self._job_id != status.job_id:
+            self._elapsed = None
         self._status, self._job_id = status, status.job_id
         settings = status.settings
         skipped = ", ".join(f"{stage.stage_id} ({stage.reason})" for stage in status.skipped_stages)
@@ -642,11 +675,41 @@ class BatchPanel(QWidget):
         units = len(status.stage_ids) + 1 if status.mode == "staged" else 1
         done = sum(units if image.status in ("completed", "failed", "canceled", "skipped")
                    else (image.completed_stages or 0) for image in images)
-        self.job_progress.setRange(0, len(images) * units)
+        total = len(images) * units
+        if self._started_at is not None and done != self.job_progress.value():
+            if self._initial_work is None:
+                self._initial_work = total - skipped_images * units
+            remaining = total - done
+            processed = self._initial_work - remaining
+            self._estimated_finish = None
+            if processed > 0:
+                now = monotonic()
+                self._estimated_finish = now + (now - self._started_at) * remaining / processed
+        self.job_progress.setRange(0, total)
         self.job_progress.setValue(done)
         label = "Work units accounted for" if status.mode == "staged" else "Photos accounted for"
         self.job_progress.setFormat(f"{label}  %v / %m")
         self.job_progress.show()
+
+    def _stop_timing(self):
+        self._elapsed = (self._elapsed or 0) + (monotonic() - self._started_at)
+        self._started_at = None
+
+    def _update_timing(self):
+        elapsed = self._elapsed
+        estimate = "—"
+        if self._started_at is not None:
+            now = monotonic()
+            elapsed = (elapsed or 0) + (now - self._started_at)
+            estimate = "Estimating…"
+            if self._estimated_finish is not None and self._estimated_finish > now:
+                estimate = _duration(ceil(self._estimated_finish - now))
+        if self._status and self._status.status in ("completed", "completed_with_errors"):
+            estimate = _duration(0)
+        elif self._status and self._status.status == "canceled":
+            estimate = "—"
+        active = "—" if elapsed is None else _duration(int(elapsed))
+        self.job_timing.setText(f"Elapsed: {active}    ·    Estimated remaining: {estimate}")
 
     def _show_results(self, images, previous, status):
         previous_images = previous.images if previous and previous.job_id == status.job_id else ()
@@ -684,6 +747,8 @@ class BatchPanel(QWidget):
         try:
             result = future.result()
         except Exception as exc:
+            if action == "start":
+                self._stop_timing()
             if not isinstance(exc, RetouchingError):
                 self.application.diagnostics.emit("DESKTOP_BATCH_COMMAND_FAILED",
                     "Batch command failed. Check local diagnostics for the cause.", component="desktop",
@@ -764,6 +829,7 @@ class BatchPanel(QWidget):
         if self._task is None and self._run is not None:
             outcome = self._run.poll()
             if outcome is not None:
+                self._stop_timing()
                 self._run = None
                 self._request_sent = None
                 messages = []
@@ -777,6 +843,7 @@ class BatchPanel(QWidget):
                     self._submit("poll", partial(self.application.job_service.status, self._job_id))
             elif not self._closing and not self._poll_failed:
                 self._submit("poll", partial(self.application.job_service.status, self._job_id))
+        self._update_timing()
         self._update_controls()
         if self._closing and self._task is None and self._run is None and self._space_check is None and self.images.shutdown():
             self.ready_to_close.emit()
@@ -791,6 +858,8 @@ class BatchPanel(QWidget):
         self.export.setEnabled(idle)
         choosing_preview = self._task is not None and self._task[0] in ("original", "preview")
         self.images.setEnabled(idle or (not self._closing and choosing_preview))
+        self.check_all.setEnabled(self.images.isEnabled() and selected < self.images.count())
+        self.uncheck_all.setEnabled(self.images.isEnabled() and selected > 0)
         self.scan.setEnabled(idle and bool(self._sources))
         executable = self.application.pipeline_service.status.executable
         self.start.setEnabled(idle and self._plan is not None and executable)

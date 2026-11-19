@@ -17,6 +17,16 @@ from ..pipeline.registry import application_registry
 from ..pipeline.validation import validate_pipeline
 
 
+UNTITLED_PIPELINE = "Untitled pipeline"
+
+
+def _name_untitled_pipeline(definition, path=None):
+    if definition.name in ("Empty foundation pipeline", UNTITLED_PIPELINE):
+        name = path.stem.strip()[:200] if path else ""
+        return replace(definition, name=name or UNTITLED_PIPELINE)
+    return definition
+
+
 class PipelineService:
     def __init__(self, checkpoints, backend, diagnostics, *, autosave=None, registry=None, catalog=None,
                  scaling=ScalingSettings(), pytorch_backend=None, preset_folder=None):
@@ -29,7 +39,7 @@ class PipelineService:
         self.pytorch_backend = pytorch_backend
         self.registry = registry if registry is not None else application_registry()
         self.catalog = catalog if catalog is not None else ModelCatalog((PERSON_FOREGROUND_MODEL, ALIBABA_MODEL, YUNET_MODEL))
-        self.status = validate_pipeline(PipelineDefinition("Empty foundation pipeline"), self.registry,
+        self.status = validate_pipeline(PipelineDefinition(UNTITLED_PIPELINE), self.registry,
                                         self.catalog, checkpoints, backend, pytorch_backend)
         self._saved_definition = self.status.definition
 
@@ -106,7 +116,7 @@ class PipelineService:
 
     def load(self, path: Path, *, persist=True):
         def action():
-            definition = parse_pipeline(read_json(path), self.registry)
+            definition = _name_untitled_pipeline(parse_pipeline(read_json(path), self.registry), path)
             status = self._commit(definition, persist=persist)
             self.preset_path, self._saved_definition = path, definition
             if persist:
@@ -114,13 +124,13 @@ class PipelineService:
             return status
         return self._command(action, preset_path=path)
 
-    def _remember_preset(self):
+    def _remember_preset(self, *, renamed=False):
         self.preset_notice = ""
         if self.autosave is None:
             return
         try:
             # A fresh, empty pipeline can be saved before the first editor autosave.
-            if not self.autosave.exists():
+            if renamed or not self.autosave.exists():
                 atomic_json(self.autosave, self.status.definition.to_json())
             atomic_json(self.autosave.with_name("last-preset.json"), str(self.preset_path.absolute()))
         except OSError as exc:
@@ -138,23 +148,28 @@ class PipelineService:
                 if not isinstance(saved, str) or not Path(saved).is_absolute():
                     raise ValueError(f"Expected an absolute preset path in {selection}")
                 path = Path(saved)
-                self._saved_definition = parse_pipeline(read_json(path), self.registry)
+                self._saved_definition = _name_untitled_pipeline(parse_pipeline(read_json(path), self.registry), path)
                 self.preset_path = path
+                self.status = replace(status, definition=_name_untitled_pipeline(status.definition, path))
         except (OSError, ValueError, RetouchingError) as exc:
             self._saved_definition = None
             self.preset_notice = f"Restored the working pipeline. Its saved preset could not be read: {exc}"
             self.diagnostics.emit("PRESET_SELECTION_RESTORE_FAILED", self.preset_notice, level="WARNING",
                                   component="pipeline", exc_info=True, selection_path=selection)
-        return status
+        return self.status
 
     def load_data(self, data, *, persist=True):
-        return self._command(lambda: self._commit(parse_pipeline(data, self.registry), persist=persist))
+        return self._command(lambda: self._commit(_name_untitled_pipeline(parse_pipeline(data, self.registry)),
+                                                  persist=persist))
 
     def save(self, path: Path):
-        definition = self.status.definition
+        definition = _name_untitled_pipeline(self.status.definition, path)
         self._command(lambda: self._write(path, definition), preset_path=path)
+        renamed = definition != self.status.definition
+        if renamed:
+            self.status = replace(self.status, definition=definition)
         self.preset_path, self._saved_definition = path, definition
-        self._remember_preset()
+        self._remember_preset(renamed=renamed)
 
     @staticmethod
     def _write(path, definition):

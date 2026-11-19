@@ -17,11 +17,11 @@ from ..storage.batch_paths import probe_writable, resolve_folder
 from .batch import BatchService
 from .contracts import StartupSnapshot
 from .job_service import JobService
-from .pipeline_service import PipelineService
+from .pipeline_service import PipelineService, UNTITLED_PIPELINE
 from .preview import PreviewService
 from .worker_service import WorkerService
 
-DEFAULT_PIPELINE = {"schema_version": 1, "name": "Empty foundation pipeline", "stages": []}
+DEFAULT_PIPELINE = {"schema_version": 1, "name": UNTITLED_PIPELINE, "stages": []}
 
 
 class ApplicationService:
@@ -72,10 +72,10 @@ class ApplicationService:
                     origin = str(previous)
                 except RetouchingError as exc:
                     self.diagnostics.emit("PIPELINE_RESTORE_FAILED", str(exc), level="WARNING", exc_info=True)
-                    notices.append("Last-used pipeline is invalid or unsupported; the empty foundation default is shown.")
-                    pipeline, origin = dict(DEFAULT_PIPELINE), "foundation default"
+                    notices.append("Last-used pipeline is invalid or unsupported. Open a preset or add operations to start again.")
+                    pipeline, origin = dict(DEFAULT_PIPELINE), "new pipeline"
             else:
-                pipeline, origin = dict(DEFAULT_PIPELINE), "foundation default"
+                pipeline, origin = dict(DEFAULT_PIPELINE), "new pipeline"
         if self.config.using_defaults:
             notices.append("Default folders were used at launch. Open Settings to customize them.")
         if self.diagnostics.failure:
