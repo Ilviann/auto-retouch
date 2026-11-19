@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
 )
 
@@ -77,22 +77,19 @@ class PipelinePanel(QWidget):
         preset_row.addWidget(self.presets, 1)
         layout.addLayout(preset_row)
 
-        tools = QHBoxLayout()
-        self.operations = QComboBox()
-        self.operations.setObjectName("operationPicker")
-        self.operations.setAccessibleName("Operation to add")
+        add = QPushButton("Add operation", objectName="addOperation")
+        menu = QMenu(add)
         for descriptor in service.registry.descriptors():
             for model_ref in descriptor.model_refs or (None,):
                 label = f"{descriptor.title} · v{descriptor.version}"
                 if model_ref is not None:
                     label += f" · {model_ref}"
-                self.operations.addItem(label, (descriptor.operation, descriptor.version, model_ref))
-        tools.addWidget(self.operations, 1)
-        add = QPushButton("Add operation", objectName="addOperation")
-        add.setEnabled(self.operations.count() > 0)
-        add.clicked.connect(self._add_stage)
-        tools.addWidget(add)
-        layout.addLayout(tools)
+                action = menu.addAction(label)
+                action.setData((descriptor.operation, descriptor.version, model_ref))
+        menu.triggered.connect(self._add_stage)
+        add.setMenu(menu)
+        add.setEnabled(not menu.isEmpty())
+        layout.addWidget(add, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.message = QLabel(objectName="pipelineCommandError", wordWrap=True)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
@@ -196,7 +193,7 @@ class PipelinePanel(QWidget):
                     on_parameter=lambda key, name, value: self._command(self.service.set_parameter, key, name, value),
                     on_recheck=self._recheck_stage,
                     on_move=self._move_stage,
-                    on_remove=lambda key: self._command(self.service.remove, key),
+                    on_remove=self._remove_stage,
                     on_preview=self.preview_requested.emit,
                 )
                 self.stage_cards[stage.id] = card
@@ -253,14 +250,21 @@ class PipelinePanel(QWidget):
             detail = "Dependencies checked." if item.stage.enabled else "Stage is off."
             self._show_message(f"{item.title} · {detail}")
 
-    def _add_stage(self):
-        selection = self.operations.currentData()
-        if selection is None:
-            return
-        operation, version, model_ref = selection
+    def _add_stage(self, action):
+        operation, version, model_ref = action.data()
         status = self._command(self.service.add_operation, operation, version, model_ref=model_ref)
         if status is not None:
             self.reveal_stage = status.stages[-1].stage.id
+
+    def _remove_stage(self, stage_id):
+        card = self.stage_cards[stage_id]
+        position = self.cards.indexOf(card) + 1
+        answer = QMessageBox.question(
+            self, "Remove stage", f"Remove stage {position} ({card.descriptor.title}) from the pipeline?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel)
+        if answer == QMessageBox.StandardButton.Yes:
+            self._command(self.service.remove, stage_id)
 
     def _move_stage(self, stage_id, step):
         order = [stage.id for stage in self.service.status.definition.stages]

@@ -7,6 +7,7 @@ inside MakerNotes cannot be verified by this codec.
 
 from dataclasses import dataclass
 import struct
+import xml.etree.ElementTree as ET
 
 from ..errors import RetouchingError
 
@@ -144,10 +145,30 @@ def read_exif(raw):
     return result
 
 
+def _is_asus_imginfo(make, note):
+    """Recognize the self-contained ASUS camera settings record before relocating it."""
+    if make != ascii_entry("ASUS") or note.kind != 7:
+        return False
+    raw = note.value
+    if not raw.startswith(b"<imginfo>") or not raw.endswith(b"</imginfo>") or b"<!" in raw or b"<?" in raw:
+        return False
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return False
+    settings = {"type", "facing", "mode", "ditfilter", "customwatermark", "devicewatermark",
+                "datewatermark", "timewatermark", "undistort", "aeb"}
+    return (len(root) > 0 and not (root.text or "").strip()
+            and all(field.tag in settings and not field.attrib and len(field) == 0
+                    and not (field.tail or "").strip() for field in root))
+
+
 def for_output(source, size, software):
-    if any(MAKER_NOTE in entries for entries in (source.primary, source.capture, source.gps or {}, source.interop or {})):
-        raise RetouchingError("OUTPUT_METADATA_UNSUPPORTED",
-                              "MakerNote offsets cannot be verified for this export. Keep the original JPEG and review metadata support.")
+    for entries in (source.primary, source.capture, source.gps or {}, source.interop or {}):
+        note = entries.get(MAKER_NOTE)
+        if note is not None and not (entries is source.capture and _is_asus_imginfo(source.primary.get(271), note)):
+            raise RetouchingError("OUTPUT_METADATA_UNSUPPORTED",
+                                  "Unrecognized camera MakerNote layout. Keep the original JPEG and report the camera make and model.")
     if 700 in source.primary or 34377 in source.primary:
         raise RetouchingError("OUTPUT_METADATA_UNSUPPORTED",
                               "XMP or Photoshop resources stored inside EXIF are unsupported. Keep the original JPEG.")

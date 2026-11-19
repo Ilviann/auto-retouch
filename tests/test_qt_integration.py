@@ -12,9 +12,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QPlainTextEdit, QSlider,
-    QMessageBox, QSpinBox,
+    QMessageBox, QPushButton, QSpinBox,
 )
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QFontMetrics
 from retouching_tool.application.contracts import StartupSnapshot
@@ -103,11 +105,24 @@ class QtIntegrationTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertTrue(window.batch_panel.images.isVisible())
                 self.assertTrue(panel.isVisible())
-                picker = panel.findChild(QComboBox, "operationPicker")
-                picker.setCurrentIndex(next(index for index in range(picker.count())
-                                            if picker.itemData(index) == ("core.exposure", 1, None)))
+                self.assertIsNone(panel.findChild(QComboBox, "operationPicker"))
+                menu = panel.findChild(QPushButton, "addOperation").menu()
+                expected = [(d.operation, d.version, model) for d in editor.registry.descriptors()
+                            for model in d.model_refs or (None,)]
+                self.assertEqual([action.data() for action in menu.actions()], expected)
+                QTimer.singleShot(0, lambda: QTest.keyClick(menu, Qt.Key.Key_Escape))
                 click("addOperation")
-                click("addOperation")
+                self.assertFalse(stages())
+                exposure_action = next(a for a in menu.actions() if a.data() == ("core.exposure", 1, None))
+
+                def choose_exposure():
+                    menu.setActiveAction(exposure_action)
+                    QTest.keyClick(menu, Qt.Key.Key_Return)
+
+                for _ in range(2):
+                    QTimer.singleShot(0, choose_exposure)
+                    click("addOperation")
+                self.app.processEvents()  # Apply the deferred card refresh after the menu action.
                 first, second = stages()
                 self.assertEqual(first.operation, "core.exposure")
                 self.assertNotEqual(first.id, second.id)
@@ -146,7 +161,16 @@ class QtIntegrationTests(unittest.TestCase):
                 saved = json.loads(output_bytes)
                 self.assertEqual(saved, editor.status.definition.to_json())
                 self.assertFalse(saved["stages"][1]["enabled"])
-                click("removeStage", card(first))
+                working = editor.autosave.read_bytes()
+                with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Cancel) as confirm:
+                    click("removeStage", card(first))
+                    confirm.assert_called_once()
+                    self.assertIn("stage 1 (Exposure (reference))", confirm.call_args.args[2])
+                    self.assertEqual(confirm.call_args.args[-1], QMessageBox.StandardButton.Cancel)
+                self.assertEqual(editor.status.definition.to_json(), saved)
+                self.assertEqual(editor.autosave.read_bytes(), working)
+                with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+                    click("removeStage", card(first))
                 self.assertEqual([stage.id for stage in stages()], [second.id])
                 self.assertIsNone(card(first))
 

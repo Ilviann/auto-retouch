@@ -44,8 +44,10 @@ distribution before release. [Pinned wheel](https://pypi.org/project/pillow/13.0
   timestamps and photographer credits stay intact. Other Photoshop resources,
   including previews and editor-specific settings, are outside this adapter's
   supported metadata set.
-- Fail explicitly for unsupported MakerNotes at export because their internal
-  offsets cannot be verified after reserialization. Extended or multiple XMP
+- Preserve the recognized ASUS `imginfo` MakerNote byte for byte. Its flat XML
+  fields describe camera settings and can move with the EXIF capture directory.
+  Reject unrecognized MakerNote layouts because their internal offsets cannot
+  be verified after reserialization. Extended or multiple XMP
   packets and malformed capture EXIF have explicit error paths. Original EXIF,
   ICC, XMP and IPTC-IIM bytes remain available in decoded states and staged
   artifacts. [CIPA Exif specification](https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf)

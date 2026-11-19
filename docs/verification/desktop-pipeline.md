@@ -1,7 +1,9 @@
 # Desktop pipeline editor
 
-Milestone 5b adds a registry-driven operation picker and Move up, Move down
-and Remove controls to the Qt Pipeline tab. Added instances start with unique
+**Add operation** opens a popup menu populated from the operation registry.
+Each stage card has Move up, Move down and Remove controls. Remove asks for
+confirmation with the stage's current position and name. Cancel is the default.
+Added instances start with unique
 IDs and descriptor defaults and pass through the shared asset and context
 checks. The cards retain their toggles, parameters, asset details and recovery
 actions. The batch setup summary reflects editor changes.
@@ -21,6 +23,13 @@ and keeping the selection after a failed import. The desktop settings test
 checks that a folder change updates the picker immediately.
 
 ## Focused verification
+
+On 2026-11-19, the offscreen Qt test
+`test_pipeline_editor_actions_json_dialogs_and_restart` checked the popup
+entries against every registered operation, version and model choice. It
+dismissed the popup with Escape, added two instances of the same operation,
+and checked that canceling removal preserved the pipeline and its autosave.
+Confirming removal deleted only the selected instance.
 
 On 2026-11-18, verification used Python 3.14.7, PySide6 Essentials 6.12.0 and the
 prepared DirectML environment on Windows 11.

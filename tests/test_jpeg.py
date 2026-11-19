@@ -17,7 +17,7 @@ from PIL import Image, ImageCms, JpegImagePlugin, TiffImagePlugin
 
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
-from retouching_tool.imaging.exif import read_exif
+from retouching_tool.imaging.exif import MAKER_NOTE, Entry, read_exif, write_exif
 from retouching_tool.imaging.export import export_image
 from retouching_tool.imaging.export_settings import BmpSettings, JxlSettings, PngSettings, TiffSettings
 from retouching_tool.imaging.iptc import iptc_marker
@@ -62,18 +62,21 @@ def linear_icc():
     return bytes(profile)
 
 
-def camera_exif(orientation=6, order="<", *, maker_note=False, color_space=1):
+def camera_exif(orientation=6, order="<", *, make="Test Camera Co", maker_note=None, color_space=1):
     rational = TiffImagePlugin.IFDRational
     exif = Image.Exif()
     exif.endian = order
-    exif.update({271: "Test Camera Co", 272: "Test Model", 274: orientation, 305: "Camera Software",
+    exif.update({271: make, 272: "Test Model", 274: orientation, 305: "Camera Software",
                  306: "2024:11:08 10:05:04", 315: "Photographer", 33432: "Copyright notice"})
     exif[34665] = {33434: rational(1, 125), 36867: "2024:11:08 10:05:03", 36881: "+03:00",
                    37521: "123", 40961: color_space, 40962: 999, 40963: 999, 42036: "Test Lens",
                    40965: {1: "R98", 2: b"0100"}}
     exif[34853] = {1: "N", 2: (rational(1), rational(2), rational(3, 7))}
-    if maker_note:
-        exif[34665][37500] = b"opaque vendor data with internal offsets"
+    if maker_note is not None:
+        # Pillow infers TIFF BYTE for a Python bytes value. Cameras store tag 37500 as UNDEFINED.
+        fields = read_exif(exif.tobytes())
+        fields.capture[MAKER_NOTE] = Entry(7, len(maker_note), maker_note)
+        return write_exif(fields)
     return exif.tobytes()
 
 
@@ -310,11 +313,40 @@ class JpegTests(unittest.TestCase):
         self.save(xmp=b'<!DOCTYPE x [<!ENTITY x "test">]><x>&x;</x>')
         self.assertIn("DTD", self.failure("INPUT_METADATA_INVALID", self.decode)["exception"])
 
-    def test_unsupported_maker_note_and_invalid_pixels_fail_without_output(self):
-        self.save(exif=camera_exif(maker_note=True))
-        state = self.decode()
-        self.assertIn(b"opaque vendor data", state.metadata.exif)
-        self.failure("OUTPUT_METADATA_UNSUPPORTED", lambda: self.export(state))
+    def test_asus_imginfo_survives_verified_exports(self):
+        note = b"<imginfo>\n <type>main</type><mode>photo</mode><ditfilter></ditfilter>\n</imginfo>"
+        for order in ("<", ">"):
+            raw = add_thumbnail(camera_exif(order=order, make="ASUS", maker_note=note))
+            self.save(exif=raw)
+            state = self.decode()
+            for settings, suffix in [(JxlSettings(), ".jxl"), (JpegSettings(), ".jpg"),
+                                     (PngSettings(), ".png"), (TiffSettings(), ".tif")]:
+                with self.subTest(order=order, settings=settings):
+                    destination = self.output.with_suffix(suffix)
+                    export_image(state, destination, settings=settings, pipeline_sha256=HASH, runtime=self.runtime)
+                    with Image.open(destination) as image:
+                        exif = image.getexif()
+                        self.assertEqual(exif.get_ifd(34665)[37500], note)
+                        self.assertEqual((exif[274], exif[305]), (1, SOFTWARE))
+                    self.assertEqual(state.metadata.exif, raw)
+                    destination.unlink()
+
+    def test_unsupported_maker_notes_fail_without_output(self):
+        for make, note in [
+                ("Test Camera Co", b"<imginfo><mode>photo</mode></imginfo>"),
+                ("ASUS", b"opaque vendor data with internal offsets"),
+                ("ASUS", b"<imginfo><offset>1234</offset></imginfo>"),
+                ("ASUS", b"<imginfo><mode offset='1234'/></imginfo>"),
+                ("ASUS", b"<imginfo><mode><offset/></mode></imginfo>"),
+                ("ASUS", b"<imginfo><mode></imginfo>"),
+                ("ASUS", b"<imginfo><mode>photo</mode></imginfo>\x00binary trailer")]:
+            with self.subTest(make=make, note=note):
+                self.save(exif=camera_exif(make=make, maker_note=note))
+                state = self.decode()
+                self.failure("OUTPUT_METADATA_UNSUPPORTED", lambda: self.export(state))
+                self.assertFalse(self.output.exists())
+
+    def test_invalid_pixels_fail_without_output(self):
         invalid = ImageState.from_pixels(np.zeros((8, 8, 3), np.float32), SourceMetadata("test"))
         invalid = replace(invalid, representation="unsupported")
         self.failure("OUTPUT_STATE_INVALID", lambda: self.export(invalid))

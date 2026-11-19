@@ -45,3 +45,13 @@ recovery. Earlier snapshots containing only JPEG options still load as JPEG.
 diagnostic reports, selected scheduler cases and desktop integration. This check
 covered file integrity and metadata. Portrait appearance and full-batch peak
 memory were outside the verification scope.
+
+### ASUS MakerNote regression
+
+Two local ASUS_AI2302 JPEGs, including the reported 4,096 × 3,072 input,
+exported to JPEG XL at default settings. Reopening both outputs confirmed
+byte-identical `imginfo` MakerNotes, normalized orientation, expected dimensions
+and the Auto ReTouch Software tag. Both source SHA-256 hashes matched after
+the run. Synthetic fixtures exercised JPEG, JPEG XL, PNG and TIFF in both EXIF
+byte orders. Unrecognized binary notes, malformed XML, unknown fields and
+trailing binary data produced correlated errors before publication.
