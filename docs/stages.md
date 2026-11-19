@@ -105,7 +105,7 @@ stage supplied face regions, Alibaba uses the whole image.
 | Portrait detection | Context: oriented face boxes; pixels unchanged | YuNet face boxes and minimum confidence implemented. Landmark output and person association remain proposals. |
 | Face-region parsing | Context: precise skin, lips, eyes, and teeth masks where supported; pixels unchanged | Per-region confidence, edge treatment, and analysis resolution. Requires faces or a declared self-contained detection implementation. Teeth must have a validated teeth mask; a mouth box is insufficient. |
 | Blemish cleanup | Local pixel edits within valid skin regions; optional candidate/debug context | Strength, maximum spot size, protected regions, and model-specific controls. Optional and quality-gated: distinguishing temporary blemishes from permanent features is uncertain. |
-| Skin-tone evening | Local color edits within valid skin regions | Strength and maximum local tone/color adjustment. Reduce blotchiness while preserving natural skin color, lighting gradients, and protected features; independent from texture smoothing. |
+| Local skin tone evening | Local color edits within the current exposed-skin mask | Implemented native-resolution CPU correction with strength, neighborhood radius and a per-pixel color shift limit. [Stage details](#local-skin-tone-evening). |
 | Skin texture correction | Skin-local pixel edits | Strength, detail preservation, and blending. Uses valid skin masks and protects eyes, lips, hair, and facial features. Conventional baseline or validated neural adapter; do not equate face restoration with retouching. |
 | Teeth whitening | Pixel edits confined to a valid teeth mask | Strength, yellow reduction, brightness limit, and edge feathering. Preserve shading and tooth detail. Optional and disabled by default until visual review. |
 
@@ -160,6 +160,32 @@ selfie framing and has coarse boundaries on small subjects. Fine facial features
 and person identities have no separate labels.
 [Publisher model card and weights terms](https://huggingface.co/senty-au/selfie_multiclass_256x256-ONNX)
 and [local verification](verification/exposed-skin.md).
+
+## Local skin tone evening
+
+Place **Exposed Skin Mask** immediately before **Local skin tone evening** and
+choose **Preview in pipeline**. Inspect a small area of uneven cheek, neck or arm
+color at 100%. The stage adjusts local color in face and body skin, preserving
+linear luminance at each pixel so shadows, highlights and fine luminance texture
+keep their shape. It runs on the CPU at the oriented input resolution and uses
+the existing analysis mask. It requires no additional checkpoint.
+
+| Control | Initial setting | Effect |
+| --- | --- | --- |
+| Strength | 0.5 | Fraction of the bounded correction to apply. |
+| Neighborhood radius | 24 px | Distance sampled on each side of the pixel. Increase for broader patches. Range 1–96 native pixels. |
+| Maximum color shift | 6% of luminance | Caps each linear RGB channel's change relative to the pixel's luminance before applying strength. |
+
+The reference color comes from nearby, high-coverage skin. Mixed-color areas,
+large color differences, deep shadows and near-clipped highlights attenuate the
+correction. The mask feathers the result. Fine facial features have no separate
+labels and touching subjects may share a neighborhood. Use a smaller radius
+where these boundaries matter. The initial settings still need portrait review.
+
+The required `skin.exposed` v1 entry must match the current pixels. An empty
+mask skips the image-stage edit and reports a warning. To follow another
+pixel-editing stage with this operation, run the mask stage after that edit.
+[Verification](verification/skin-tone-evening.md).
 
 ## Alibaba skin-retouching stage
 

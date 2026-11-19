@@ -52,6 +52,7 @@ def application_registry():
     from ..operations.white_balance import DESCRIPTOR as WHITE_BALANCE, WhiteBalance
     from ..operations.face_detection import DESCRIPTOR as FACE_DETECTION, FaceDetection
     from ..operations.exposed_skin import DESCRIPTOR as EXPOSED_SKIN, ExposedSkin
+    from ..operations.skin_tone_evening import DESCRIPTOR as SKIN_TONE_EVENING, LocalSkinToneEvening
 
     registry = reference_registry()
     registry.register(WHITE_BALANCE, WhiteBalance)
@@ -59,6 +60,7 @@ def application_registry():
     registry.register(DESCRIPTOR, PersonForeground)
     registry.register(FACE_DETECTION, FaceDetection)
     registry.register(EXPOSED_SKIN, ExposedSkin)
+    registry.register(SKIN_TONE_EVENING, LocalSkinToneEvening)
     registry.register(BLEMISH, partial(AlibabaSkin, descriptor=BLEMISH, model=BLEMISH_MODEL))
     registry.register(SMOOTHING, partial(AlibabaSkin, descriptor=SMOOTHING, model=SMOOTHING_MODEL))
     registry.register(ALIBABA_SKIN, AlibabaSkin, retired=True)

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "name": "Natural",
+  "stages": [
+    {
+      "id": "natural-white-balance",
+      "operation": "core.white_balance",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "mode": "Automatic",
+        "blend": 0.35
+      }
+    },
+    {
+      "id": "natural-exposure",
+      "operation": "core.auto_exposure",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 0.35,
+        "max_stops": 0.5
+      }
+    },
+    {
+      "id": "natural-skin-mask",
+      "operation": "analysis.exposed_skin",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {},
+      "model_ref": "selfie-multiclass-256x256-onnx"
+    },
+    {
+      "id": "natural-tone-evening",
+      "operation": "retouch.local_skin_tone_evening",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 0.3,
+        "radius": 16,
+        "max_shift": 4
+      }
+    }
+  ]
+}

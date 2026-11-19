@@ -48,8 +48,14 @@ The runtime foundation (milestone 1a) and pipeline contracts/reference stages (3
 are implemented. The Qt window shows startup settings and loaded stage cards with
 on/off controls, numeric parameters, asset errors, and dependency status. Headless
 services support add/remove/reorder, atomic JSON save/load, and last-used restore.
-CPU statistics and manual exposure are contract references. Natural and Beauty
-presets remain pending. Add **Blemish cleanup (Alibaba)** for localized repairs
+Choose **Natural** or **Beauty** in the **Preset** picker above the stages.
+Both apply mild automatic white balance and exposure correction. **Natural**
+gently evens exposed-skin color. **Beauty** increases the evening strength
+and adds masked skin-tone smoothing. Select a studio photo and choose **Run
+pipeline** to compare the result at 100%. Use **Save JSON…** with a new filename
+to keep your own settings. [Preset settings and model requirements](docs/pipeline.md#portrait-presets).
+
+Add **Blemish cleanup (Alibaba)** for localized repairs
 and **Skin tone smoothing (Alibaba)** for tonal adjustments. Each has its own
 strength, face targeting, scaling, blending and preview. [Model files and stage behavior](docs/stages.md#alibaba-skin-retouching-stage).
 
@@ -98,9 +104,10 @@ place them at the paths shown on the stage card. The default model folder is
 `models/`, configurable through `paths.checkpoints`. On the stage card, choose
 **Settings → Check required model files** after placement.
 
-Pipeline files use version 1 and registered operation versions. Try the reference
-cards with `run.cmd --pipeline examples\pipelines\reference.json`. This example is
-not a Natural or Beauty preset. Unknown operations/parameters fail explicitly.
+Pipeline files use version 1 and registered operation versions. From the project
+folder, `run.cmd --pipeline pipelines\Natural.json` opens Natural directly.
+The CPU reference cards are available in `examples\pipelines\reference.json`.
+Unknown operations/parameters fail explicitly.
 Valid explicit settings replace last-used selection; corrupt restored state
 produces a visible warning.
 

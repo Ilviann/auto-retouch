@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "name": "Beauty",
+  "stages": [
+    {
+      "id": "beauty-white-balance",
+      "operation": "core.white_balance",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "mode": "Automatic",
+        "blend": 0.35
+      }
+    },
+    {
+      "id": "beauty-exposure",
+      "operation": "core.auto_exposure",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 0.35,
+        "max_stops": 0.5
+      }
+    },
+    {
+      "id": "beauty-skin-mask",
+      "operation": "analysis.exposed_skin",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {},
+      "model_ref": "selfie-multiclass-256x256-onnx"
+    },
+    {
+      "id": "beauty-tone-evening",
+      "operation": "retouch.local_skin_tone_evening",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 0.6,
+        "radius": 32,
+        "max_shift": 8
+      }
+    },
+    {
+      "id": "beauty-smoothing-mask",
+      "operation": "analysis.exposed_skin",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {},
+      "model_ref": "selfie-multiclass-256x256-onnx"
+    },
+    {
+      "id": "beauty-smoothing",
+      "operation": "retouch.alibaba_skin_tone_smoothing",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 0.3,
+        "use_exposed_skin": true,
+        "use_face_rects": false
+      },
+      "model_ref": "alibaba-skin-tone-smoothing"
+    }
+  ]
+}

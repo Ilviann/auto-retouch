@@ -21,6 +21,7 @@ from retouching_tool.errors import RetouchingError
 from retouching_tool.jobs.journal import JobJournal
 from retouching_tool.operations.alibaba_skin import SMOOTHING, SMOOTHING_MODEL
 from retouching_tool.operations.exposed_skin import DESCRIPTOR, MODEL, SIZE
+from retouching_tool.operations.skin_tone_evening import DESCRIPTOR as TONE_EVENING
 from retouching_tool.pipeline.assets import ModelCatalog
 from retouching_tool.pipeline.executor import StageRuntime, StageSession
 from retouching_tool.pipeline.image_state import ImageState, SourceMetadata
@@ -181,3 +182,40 @@ class ExposedSkinTests(unittest.TestCase):
         self.assertEqual([s.state for s in self.editor.recheck().stages], ["skipped", "blocked"])
         self.editor.set_enabled(self.analysis.id, True)
         self.assertTrue(self.editor.status.executable)
+
+    def test_local_tone_evening_preview_and_frozen_schedules(self):
+        self.editor.remove(self.smoothing.id)
+        stage = self.editor.add_operation(TONE_EVENING.operation, 1).stages[-1].stage
+        self.editor.set_parameter(stage.id, "radius", 8)
+        self.editor.set_parameter(stage.id, "strength", 1)
+        self.editor.load_data(self.editor.status.definition.to_json())
+        self.assertEqual(self.editor.status.stages[-1].stage.parameter("radius"), 8)
+        self.editor.reorder((stage.id, self.analysis.id))
+        self.assertEqual(self.editor.status.stages[0].state, "blocked")
+        self.editor.reorder((self.analysis.id, stage.id))
+        samples = np.full((71, 119, 3), [180, 143, 125], dtype=np.uint8)
+        samples[28:36, 52:60, 0] += 8
+        source = self.root / "color.jpg"
+        Image.fromarray(samples).save(source, quality=100, subsampling=0)
+        index = self.app.batch_service.index((source,))
+        picture = self.app.preview_service.picture
+        with self.assertRaises(RetouchingError) as missing:
+            picture(index, index.images[0].image_id, "standalone", stage_id=stage.id)
+        self.assertEqual(missing.exception.code, "PREVIEW_CONTEXT_REQUIRED")
+        comparison = picture(index, index.images[0].image_id, "masked", stage_id=stage.id, through_stage=True)
+        self.assertNotEqual(comparison.original.rgb, comparison.result.rgb)
+        jobs = self.app.job_service
+        frozen = []
+        for mode in ("sequential", "staged"):
+            destination = self.root / mode
+            destination.mkdir()
+            frozen.append(jobs.create(index, destination, mode=mode))
+        self.editor.set_parameter(stage.id, "strength", 0)
+        exports = []
+        for job in frozen:
+            result = jobs.run(job)
+            self.assertEqual(result.status, "completed")
+            self.assertTrue(any(r["code"] == "SKIN_TONE_APPLIED" and r["job_id"] == job for r in self.log.records))
+            with Image.open(result.images[0].output) as image:
+                exports.append(image.tobytes())
+        self.assertEqual(*exports)

@@ -79,49 +79,35 @@ Choosing a preset or opening a JSON file asks for confirmation when the working
 pipeline differs from its last explicit load or save. Cancel keeps the current
 pipeline. Recovery saves preserve edits across launches. The editor remembers
 the selected preset path separately so those edits still count as unsaved.
-The required editable Natural and Beauty presets await portrait engine evaluation.
 
-An illustrative portable JSON file is:
+### Portrait presets
 
-```json
-{
-  "schema_version": 1,
-  "name": "Natural portrait",
-  "stages": [
-    {
-      "id": "contrast-1",
-      "operation": "core.auto_contrast",
-      "operation_version": 1,
-      "enabled": true,
-      "parameters": { "strength": 0.3 }
-    },
-    {
-      "id": "faces-1",
-      "operation": "analysis.portrait_detection",
-      "operation_version": 1,
-      "enabled": true,
-      "model_ref": "portrait-detector-candidate",
-      "parameters": {}
-    },
-    {
-      "id": "regions-1",
-      "operation": "analysis.face_regions",
-      "operation_version": 1,
-      "enabled": true,
-      "model_ref": "face-parser-candidate",
-      "parameters": {}
-    },
-    {
-      "id": "skin-1",
-      "operation": "portrait.skin_texture",
-      "operation_version": 1,
-      "enabled": true,
-      "model_ref": "skin-texture-candidate",
-      "parameters": { "strength": 0.25 }
-    }
-  ]
-}
-```
+The default `pipelines` folder includes [Natural](../pipelines/Natural.json)
+and [Beauty](../pipelines/Beauty.json). Both use automatic white balance with
+35% blending and automatic exposure at 35% strength with a half-stop limit.
+The skin stages use the exposed face/body mask. The following initial values
+are editable on their stage cards.
+
+| Skin treatment | Natural | Beauty |
+| --- | --- | --- |
+| Local tone evening strength | 30% | 60% |
+| Neighborhood radius | 16 px | 32 px |
+| Per-channel color shift limit before strength | 4% of local luminance | 8% of local luminance |
+| Alibaba smoothing | Off (stage omitted) | 30% strength on exposed skin |
+
+Both need the local SelfieMulticlass ONNX checkpoint. Beauty additionally needs
+the Alibaba smoothing checkpoint and a supported PyTorch CPU setup. Its second
+mask stage measures the pixels after local tone evening. The smoothing stage
+requests permission before resizing a frame over 5,000 pixels on its longest
+side. Model filenames and installation instructions are on the stage cards.
+[Exposed Skin Mask](stages.md#exposed-skin-mask) and [Alibaba smoothing](stages.md#alibaba-skin-retouching-stage).
+
+Blemish removal is opt-in. Review freckles, makeup and skin boundaries at 100%
+before settling on strengths for a studio set. Visual acceptance is pending.
+With a custom preset folder, open either shipped JSON through **Open JSON…**
+and use **Save JSON…** to place an editable copy in that folder.
+
+### Portable pipeline format
 
 - Array order determines execution order. IDs identify instances, not operation
   types, and must be unique within the pipeline.
@@ -131,8 +117,8 @@ An illustrative portable JSON file is:
   and invalidation effects in the operation registry. Stage results preserve source
   metadata and carry image/context forward according to those declarations.
 - `model_ref` resolves to a local asset manifest containing version, checksum, and
-  runtime requirements under the configured checkpoint folder; the example names
-  no actual selected checkpoint. Runtime backends must support Python 3.14.
+  runtime requirements under the configured checkpoint folder. Runtime backends
+  must support Python 3.14.
 - Do not embed model weights, photographs, temporary paths, or job progress in
   pipeline JSON. Source, destination, recursion, temporary root, and execution mode
   are job/session settings, stored separately from the operation sequence.
