@@ -1395,6 +1395,12 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIsNotNone(comparisons[0]._baseline)
         source = red(operation.comparison.before)
         self.assertEqual(source, red(operation.comparison.after))
+        operation.preview_mode.setCurrentText("Pixel difference")
+        self.until(lambda: "Pixel difference" in operation.comparison.result_label.text(),
+                   "pixel difference did not render")
+        self.assertEqual(red(operation.comparison.after), 0)
+        operation.preview_mode.setCurrentText("Stage result")
+        self.until(lambda: red(operation.comparison.after) == source, "stage result did not return")
         self.check_comparison_views(operation, operation.findChild(QDoubleSpinBox, "parameter-stops"))
         operation.findChild(QDoubleSpinBox, "parameter-stops").setValue(1)
         self.until(lambda: red(operation.comparison.after) > source, "exposure did not refresh automatically")

@@ -237,6 +237,13 @@ and place them at the paths shown on the card under the configured model folder
 | Stage card **Preview in pipeline** | Compare the result of the preceding enabled stages against the result after applying the selected stage | Inspect the operation with its upstream changes and analysis context. |
 | Context analysis | Run selected analysis and display region/mask overlays or measurements | Inspect output even when pixels are unchanged. |
 
+For every pixel-changing stage, select **Show affected pixels** to tint its edited
+pixels pink over its input. A pixel is highlighted when any working RGB channel
+differs after blending. Choose **Pixel difference** to see the magnitude of the
+edit. Each channel shows the absolute difference between the stage input and
+its blended output in linear RGB, converted to sRGB for display. Unchanged
+pixels appear black. Choose **Stage result** to see the retouched image again.
+
 Double-clicking a thumbnail opens its source in a modal window. **Run pipeline**
 opens a window-modal progress dialog immediately and displays the completed
 comparison in the same photo window. The dialog names the running stage, shows

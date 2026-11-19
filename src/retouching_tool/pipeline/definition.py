@@ -126,7 +126,6 @@ class OperationDescriptor:
     inference_runtime: str = "onnxruntime"
     resize_limit: ResizeLimit | None = None
     neutral_picker: bool = False
-    preview_affected_areas: bool = False
 
     @property
     def editable_parameters(self):

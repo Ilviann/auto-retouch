@@ -1,9 +1,10 @@
 """Modal stage comparison, including local draft settings and preview scheduling."""
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+from PySide6.QtWidgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
                                QProgressBar, QPushButton, QVBoxLayout)
 
+from ...application.preview import StagePreviewMode
 from ...errors import ResizeApprovalRequired, RetouchingError
 from ...pipeline.definition import BooleanParameter, MaskTargetParameter
 from .picture_window import PictureComparison, RenderProgressDialog, statistics_text
@@ -99,10 +100,11 @@ class StagePreviewWindow(QDialog):
         actions.addWidget(self.live_progress)
         self.status = QLabel()
         actions.addWidget(self.status, 1)
-        self.affected_areas = QCheckBox("Show affected areas")
-        self.affected_areas.setVisible(descriptor.preview_affected_areas)
-        self.affected_areas.toggled.connect(self.start_preview)
-        actions.addWidget(self.affected_areas)
+        self.preview_mode = QComboBox(accessibleName="Stage preview mode")
+        self.preview_mode.addItems(list(StagePreviewMode))
+        self.preview_mode.setVisible(descriptor.changes_pixels)
+        self.preview_mode.currentIndexChanged.connect(self.start_preview)
+        actions.addWidget(self.preview_mode)
         self.apply_preview = QPushButton("Preview changes", objectName="previewChanges", autoDefault=False)
         self.apply_preview.clicked.connect(self._preview_changes)
         actions.addWidget(self.apply_preview)
@@ -150,7 +152,7 @@ class StagePreviewWindow(QDialog):
         self._update_actions()
 
     def start_preview(self):
-        request = (self._requested.copy(), self.affected_areas.isChecked())
+        request = (self._requested.copy(), self.preview_mode.currentText())
         if self._close_requested or self._future is not None or request == self._submitted:
             return
         self._submitted = request
@@ -164,7 +166,7 @@ class StagePreviewWindow(QDialog):
             return
         future, self._future = self._future, None
         self._poll_timer.stop()
-        current = (self._requested, self.affected_areas.isChecked()) == self._submitted
+        current = (self._requested, self.preview_mode.currentText()) == self._submitted
         try:
             preview = future.result()
         except RetouchingError as exc:

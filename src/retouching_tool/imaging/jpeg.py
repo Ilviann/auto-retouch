@@ -248,6 +248,14 @@ def decode_jpeg(path, *, source_id, runtime: JpegRuntime, expected_sha256: str |
     return state
 
 
+def encode_srgb_strip(strip):
+    """Convert normalized linear RGB samples to 8-bit sRGB for display or export."""
+    import numpy as np
+
+    encoded = np.where(strip <= .0031308, 12.92 * strip, 1.055 * strip ** (1 / 2.4) - .055)
+    return np.rint(encoded * 255).astype(np.uint8)
+
+
 def encode_rgb_samples(state):
     import numpy as np
 
@@ -264,8 +272,7 @@ def encode_rgb_samples(state):
         strip = pixels[start:start + STRIP_ROWS]
         if not np.isfinite(strip).all() or strip.min() < 0 or strip.max() > 1:
             raise ValueError("RGB export requires finite linear samples in [0, 1]")
-        encoded = np.where(strip <= .0031308, 12.92 * strip, 1.055 * strip ** (1 / 2.4) - .055)
-        result[start:start + STRIP_ROWS] = np.rint(encoded * 255).astype(np.uint8)
+        result[start:start + STRIP_ROWS] = encode_srgb_strip(strip)
     return result
 
 

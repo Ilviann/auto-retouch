@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from PIL import Image, ImageOps
 
+from retouching_tool.application.preview import StagePreviewMode
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
@@ -107,6 +108,48 @@ class PreviewTests(unittest.TestCase):
         thumbnail = self.service.thumbnail(index.images[0])
         self.assertEqual(thumbnail.height, 160)
         self.assertIsNone(thumbnail.overview)
+
+    def test_affected_pixels_compare_only_the_selected_stage_after_blending(self):
+        self.editor.set_parameter("exposure-reference", "stops", 1)
+        self.editor.set_enabled("exposure-reference", True)
+        selected = self.editor.add_operation("core.exposure", 1).stages[-1].stage
+        args = self.index, self.item.image_id
+        upstream = self.service.picture(*args, "upstream", stage_id="exposure-reference")
+        for through, baseline in ((False, upstream.original), (True, upstream.result)):
+            with self.subTest(through=through):
+                comparison = self.service.stage_comparison(*args, selected.id, through_stage=through)
+                marked = comparison.render("marked", {"stops": 1}, show_affected_areas=True)
+                self.assertEqual(marked.original, baseline)
+                self.assertIn("pink", marked.result_caption)
+                tint = Image.new("RGB", (1, 1), tuple(baseline.rgb[:3]))
+                tint.paste((255, 64, 144), mask=Image.new("L", (1, 1), 144))
+                self.assertEqual(marked.result.rgb[:3], tint.tobytes())
+                zero = comparison.render("zero", {"stops": 1, "blend": 0}, show_affected_areas=True)
+                self.assertEqual(zero.result, baseline)
+        with self.assertRaisesRegex(RetouchingError, "stage that changes pixels"):
+            self.service.picture(*args, "analysis", stage_id="statistics-after", show_affected_areas=True)
+
+    def test_pixel_difference_displays_absolute_linear_rgb_after_blending(self):
+        path = self.source / "stripes.png"
+        height = 1601
+        Image.frombytes("RGB", (2, height), bytes((0, 0, 0, 64, 96, 128)) * height).save(path)
+        index = self.app.index_sources((path,))
+        self.editor.set_parameter("exposure-reference", "stops", -1)
+        self.editor.set_enabled("exposure-reference", True)
+        selected = self.editor.add_operation("core.exposure", 1).stages[-1].stage
+        for through, expected in ((False, (44, 68, 92)), (True, (30, 48, 66))):
+            comparison = self.service.stage_comparison(index, index.images[0].image_id, selected.id,
+                                                       through_stage=through)
+            # Both edits change each channel by half the stage input in linear light.
+            for stops, blend in ((-1, 1), (1, .5), (1, 0)):
+                with self.subTest(through=through, stops=stops, blend=blend):
+                    view = comparison.render("difference", {"stops": stops, "blend": blend},
+                                             mode=StagePreviewMode.DIFFERENCE)
+                    row = bytes(3) + (bytes(expected) if blend else bytes(3))
+                    self.assertEqual(view.result.rgb, row * height)
+                    self.assertEqual((view.result.width, view.result.height), (2, height))
+                    self.assertEqual(view.result.overview.height, 1600)
+                    self.assertIn("Pixel difference", view.result_caption)
 
     def test_preview_rejects_missing_dependencies_and_changed_source(self):
         self.editor.registry.register(OperationDescriptor("test.consumer", 1, "Context consumer",

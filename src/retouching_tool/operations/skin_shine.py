@@ -8,7 +8,7 @@ from ..pipeline.image_state import EXPOSED_SKIN, ImageState
 DESCRIPTOR = OperationDescriptor(
     "retouch.skin_shine_reduction", 1, "Skin shine reduction",
     parameters=(Parameter("strength", "Strength", 0.5, 0, 1, preview_on_change=True),),
-    requires=(EXPOSED_SKIN,), changes_pixels=True, preview_affected_areas=True,
+    requires=(EXPOSED_SKIN,), changes_pixels=True,
     backends=("cpu",), inference_runtime="cpu",
 )
 TILE_SIZE = 256

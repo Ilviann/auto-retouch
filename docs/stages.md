@@ -191,8 +191,8 @@ tone evening. An empty mask skips the image-stage edit and reports a warning.
 
 Place **Skin shine reduction** after **Exposed Skin Mask** and open **Preview in
 pipeline**. Adjust **Strength** from 0 to 1 (initially 0.5). Select **Show affected
-areas** to highlight edited pixels in pink over the stage input. Clear the
-checkbox to inspect the retouched photo at 100%. The overlay reflects both
+pixels** to highlight edited pixels in pink over the stage input. Choose
+**Stage result** to inspect the retouched photo at 100%. The overlay reflects both
 Strength and Blending and is available only in the stage preview.
 
 The CPU operation works at the original resolution on both face and body skin.
