@@ -120,6 +120,15 @@ class PipelineService:
                                   exc_info=True, **context)
             raise
 
+    def new_pipeline(self):
+        def action():
+            checked = self._commit(PipelineDefinition(UNTITLED_PIPELINE), preset=None)
+            self.preset_path = None
+            self._saved_definition = checked.definition
+            self.preset_notice = ""
+            return checked
+        return self._command(action)
+
     def load(self, path: Path, *, persist=True):
         def action():
             definition = _name_untitled_pipeline(parse_pipeline(read_json(path), self.registry), path)
@@ -151,8 +160,8 @@ class PipelineService:
         data = self.state.read() if data is None else data
         status = self.load_data(data["pipeline"], persist=False)
         try:
-            if "preset" in data:
-                saved = data["preset"]
+            saved = data.get("preset")
+            if saved is not None:
                 if not isinstance(saved, str) or not Path(saved).is_absolute():
                     raise ValueError(f"Expected an absolute preset path in {self.autosave}")
                 path = Path(saved)

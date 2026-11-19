@@ -49,6 +49,9 @@ class PipelinePanel(QWidget):
             return
 
         files = QHBoxLayout()
+        new_file = QPushButton("New pipeline", objectName="newPipeline")
+        new_file.clicked.connect(self._new_pipeline)
+        files.addWidget(new_file)
         open_file = QPushButton("Open JSON…", objectName="openPipeline")
         open_file.clicked.connect(self._open)
         files.addWidget(open_file)
@@ -199,13 +202,13 @@ class PipelinePanel(QWidget):
                 )
                 self.stage_cards[stage.id] = card
                 self.cards.insertWidget(index, card)
+                card.expand.setChecked(stage.id == self.reveal_stage)
             elif self.cards.indexOf(card) != index:
                 self.cards.removeWidget(card)
                 self.cards.insertWidget(index, card)
             card.show_status(status, can_move_up=index > 0, can_move_down=index + 1 < len(stages))
             card.set_preview_available(self.preview_available)
         if self.reveal_stage in self.stage_cards:
-            self.stage_cards[self.reveal_stage].expand.setChecked(True)
             self.cards.activate()
             self.scroll.ensureWidgetVisible(self.stage_cards[self.reveal_stage])
         self.reveal_stage = None
@@ -292,6 +295,14 @@ class PipelinePanel(QWidget):
             return None
         finally:
             dialog.deleteLater()
+
+    def _new_pipeline(self):
+        answer = QMessageBox.question(
+            self, "New pipeline", "Clear all stages and start a new pipeline? Any unsaved changes will be lost.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel)
+        if answer == QMessageBox.StandardButton.Yes and self._command(self.service.new_pipeline) is not None:
+            self.origin = "New pipeline"
 
     def _open(self):
         path = self._choose_file()

@@ -20,8 +20,7 @@
       "enabled": true,
       "parameters": {
         "strength": 1.0,
-        "use_face_rects": true,
-        "blend": 0.87
+        "use_face_rects": true
       },
       "model_ref": "alibaba-blemish-cleanup"
     },

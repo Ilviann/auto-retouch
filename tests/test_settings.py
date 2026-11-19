@@ -142,6 +142,35 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.log.records[-1]["code"], "PRESET_FOLDER_UNAVAILABLE")
         self.assertIn("exception", self.log.records[-1])
 
+    def test_new_pipeline_replaces_working_state_only_after_autosave(self):
+        editor = self.application.pipeline_service
+        editor.add_operation("core.exposure", 1)
+        preset = self.root / "Studio.json"
+        editor.save(preset)
+        original = preset.read_bytes()
+        editor.add_operation("core.exposure", 1)
+        previous = editor.status
+        working = editor.autosave.read_bytes()
+        with patch("retouching_tool.json_io.os.replace", side_effect=PermissionError("simulated denial")):
+            with self.assertRaisesRegex(RetouchingError, "simulated denial"):
+                editor.new_pipeline()
+        self.assertIs(editor.status, previous)
+        self.assertEqual(editor.preset_path, preset)
+        self.assertTrue(editor.has_unsaved_changes)
+        self.assertEqual(editor.autosave.read_bytes(), working)
+
+        empty = editor.new_pipeline().definition
+        self.assertEqual((empty.name, empty.stages), ("Untitled pipeline", ()))
+        self.assertIsNone(editor.preset_path)
+        self.assertFalse(editor.has_unsaved_changes)
+        self.application.startup(LaunchOptions((), None, self.path), "directml")
+        restored = self.application.pipeline_service
+        self.assertEqual(restored.status.definition, empty)
+        self.assertIsNone(restored.preset_path)
+        self.assertFalse(restored.has_unsaved_changes)
+        self.assertEqual(restored.preset_notice, "")
+        self.assertEqual(preset.read_bytes(), original)
+
     def test_restore_preset_with_legacy_placeholder_name(self):
         editor = self.application.pipeline_service
         editor.add_operation("core.exposure", 1)

@@ -1,13 +1,16 @@
 # Desktop pipeline editor
 
 **Add operation** opens a popup menu populated from the operation registry.
-Each stage card has Move up, Move down and Remove controls. Remove asks for
+Each stage card shows Move up, Move down and Remove to the left of the fold
+button. Moving a stage preserves its expanded or folded state. Remove asks for
 confirmation with the stage's current position and name. Cancel is the default.
 Added instances start with unique
 IDs and descriptor defaults and pass through the shared asset and context
 checks. The cards retain their toggles, parameters, asset details and recovery
 actions. The batch setup summary reflects editor changes.
 
+**New pipeline** asks for confirmation, with Cancel selected by default.
+Confirming starts an empty untitled pipeline and clears the preset selection.
 **Open JSON** validates a portable pipeline before replacing the editor state.
 **Save JSON** writes the editor's current order, enabled flags and parameters.
 Successful edits and opens update the separate last-used pipeline. The editor
@@ -29,7 +32,12 @@ On 2026-11-19, the offscreen Qt test
 entries against every registered operation, version and model choice. It
 dismissed the popup with Escape, added two instances of the same operation,
 and checked that canceling removal preserved the pipeline and its autosave.
-Confirming removal deleted only the selected instance.
+Confirming removal deleted only the selected instance. The test also checked
+button order and visibility on a folded card, moved it while folded, and
+exercised both confirmation choices for **New pipeline**. The headless test
+`test_new_pipeline_replaces_working_state_only_after_autosave` restored the
+empty pipeline on restart, verified the saved preset was intact and checked
+that a failed autosave retained the previous working pipeline and selection.
 
 On 2026-11-18, verification used Python 3.14.7, PySide6 Essentials 6.12.0 and the
 prepared DirectML environment on Windows 11.

@@ -90,6 +90,7 @@ presets rather than fixed processing paths.
 
 ### Desktop workflow refinements approved on 2026-11-19
 
+- **New pipeline** asks for confirmation before clearing the stage list. Each stage card keeps Move up, Move down and Remove visible to the left of its fold button.
 - Rescanning the same source preserves inclusion, the viewed photo and grid position for surviving files and reports additions and removals.
 - Keep stage cards expandable, summarize export settings and keep the included count, readiness and Start processing visible in the workspace. When no stages are enabled, indicate export-only processing and offer a preset shortcut.
 - Provide Previous and Next in the photo preview with the current position, synchronized zoom and comparison mode. Show stage-specific pipeline warnings with access to the affected stage. Enable fixed white-balance adjustments in Fixed mode.
