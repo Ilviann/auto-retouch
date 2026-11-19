@@ -1,6 +1,6 @@
 """Native-resolution, mask-weighted correction of local skin color variation."""
 
-from ..imaging.skin_matte import matte_strips
+from ..imaging.skin_matte import full_skin_matte, neighborhood_sums
 from ..pipeline.definition import IntegerParameter, OperationDescriptor, Parameter
 from ..pipeline.image_state import EXPOSED_SKIN, ImageState
 
@@ -40,13 +40,7 @@ def _correct_tile(rgb, coverage, rows, cols, radius, strength, max_shift):
     moments[:, :, 1] = sample_weight * red
     moments[:, :, 2] = sample_weight * blue
     moments[:, :, 3] = sample_weight * (red * red + blue * blue)
-    np.cumsum(moments, axis=0, out=moments)
-    np.cumsum(moments, axis=1, out=moments)
-    y = np.arange(rows.start, rows.stop)[:, None]
-    x = np.arange(cols.start, cols.stop)
-    top, bottom = np.maximum(0, y - radius), np.minimum(height, y + radius + 1)
-    left, right = np.maximum(0, x - radius), np.minimum(width, x + radius + 1)
-    sums = integral[bottom, right] - integral[top, right] - integral[bottom, left] + integral[top, left]
+    sums = neighborhood_sums(integral, rows, cols, radius)
     weight = sums[:, :, 0]
     mean = sums[:, :, 1:] / np.maximum(weight[:, :, None], 1e-12)
     mean_red, mean_blue, mean_square = mean.transpose(2, 0, 1)
@@ -97,9 +91,7 @@ class LocalSkinToneEvening:
             return state
 
         # One byte per image pixel. All neighborhood scratch is bounded by the tile and halo.
-        matte = np.empty((state.height, state.width), dtype=np.uint8)
-        for start, stop, strip in matte_strips(mask, (state.width, state.height), (1, 2)):
-            matte[start:stop] = np.asarray(strip)
+        matte = full_skin_matte(mask, (state.width, state.height))
         output = None
         changed = 0
         radius = self.radius

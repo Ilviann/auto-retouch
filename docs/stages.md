@@ -105,6 +105,7 @@ stage supplied face regions, Alibaba uses the whole image.
 | Face-region parsing | Context: precise skin, lips, eyes, and teeth masks where supported; pixels unchanged | Per-region confidence, edge treatment, and analysis resolution. Requires faces or a declared self-contained detection implementation. Teeth must have a validated teeth mask; a mouth box is insufficient. |
 | Blemish cleanup | Local pixel edits within valid skin regions; optional candidate/debug context | Strength, maximum spot size, protected regions, and model-specific controls. Optional and quality-gated: distinguishing temporary blemishes from permanent features is uncertain. |
 | Local skin tone evening | Local color edits within the current exposed-skin mask | Implemented native-resolution CPU correction with strength, neighborhood radius and a per-pixel color shift limit. [Stage details](#local-skin-tone-evening). |
+| Skin shine reduction | Local highlight edits within the current exposed-skin mask | Adjustable CPU correction with a preview of the affected pixels. [Stage details](#skin-shine-reduction). |
 | Skin texture correction | Skin-local pixel edits | Strength, detail preservation, and blending. Uses valid skin masks and protects eyes, lips, hair, and facial features. Conventional baseline or validated neural adapter; do not equate face restoration with retouching. |
 | Teeth whitening | Pixel edits confined to a valid teeth mask | Strength, yellow reduction, brightness limit, and edge feathering. Preserve shading and tooth detail. Optional and disabled by default until visual review. |
 
@@ -186,7 +187,28 @@ for the photo's geometry. For example, exposure can run between mask analysis an
 tone evening. An empty mask skips the image-stage edit and reports a warning.
 [Verification](verification/skin-tone-evening.md).
 
-## Alibaba skin-retouching stage
+## Skin shine reduction
+
+Place **Skin shine reduction** after **Exposed Skin Mask** and open **Preview in
+pipeline**. Adjust **Strength** from 0 to 1 (initially 0.5). Select **Show affected
+areas** to highlight edited pixels in pink over the stage input. Clear the
+checkbox to inspect the retouched photo at 100%. The overlay reflects both
+Strength and Blending and is available only in the stage preview.
+
+The CPU operation works at the original resolution on both face and body skin.
+It looks for patches that are brighter and less colorful than nearby skin, as
+expected when neutral studio light reflects off the surface. It estimates how
+much neutral light to subtract from the linear RGB channels, capped at 30% of
+the local pixel luminance at full strength. The surrounding reference covers a
+radius of 2.5% of the shorter image dimension, bounded to 8–96 pixels.
+Feathered skin coverage, weak reference color and near-clipping reduce the edit.
+An empty mask produces a warning. Zero strength and absence of eligible shine
+produce a pass-through.
+
+This estimate needs nearby diffuse skin. Broad uniform shine or colored
+reflections can be missed, and makeup highlights can be selected. The skin mask
+can cover edges of small facial features. Inspect these areas when tuning
+strength. Fully clipped highlights contain no recoverable texture.
 
 Choose either operation in the Add menu. Both run on PyTorch CPU. When using both,
 put cleanup before smoothing to apply the tone adjustment to the repaired pixels.

@@ -710,8 +710,9 @@ class BatchPanel(QWidget):
         comparison = self.application.preview_service.stage_comparison(self._index, image.image_id, stage_id,
                                                                        through_stage=through_stage)
 
-        def submit(parameters, approvals):
-            return self._executor.submit(comparison.render, uuid4().hex, parameters, resize_approvals=approvals)
+        def submit(parameters, approvals, show_affected_areas):
+            return self._executor.submit(comparison.render, uuid4().hex, parameters, resize_approvals=approvals,
+                                         show_affected_areas=show_affected_areas)
 
         if self._picture_window is not None:
             self._picture_window.close()

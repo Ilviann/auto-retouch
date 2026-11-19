@@ -159,6 +159,8 @@ class StagedRunner:
             prefix.append(definition)
             if stage.enabled:
                 descriptor = asdict(self.registry.descriptor(stage.operation, stage.operation_version))
+                # A preview display option does not change saved processing contracts.
+                del descriptor["preview_affected_areas"]
                 extensions = LEGACY_STAGE_DEFAULTS.get((stage.operation, stage.operation_version), {})
                 descriptor["parameters"] = tuple(p for p in descriptor["parameters"]
                                                  if p["name"] not in extensions or p["name"] in definition["parameters"])

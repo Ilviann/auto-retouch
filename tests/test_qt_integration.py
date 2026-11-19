@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from contextlib import ExitStack
+from concurrent.futures import Future
 from pathlib import Path
 import hashlib
 import io
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QFontMetrics
 from retouching_tool.application.contracts import StartupSnapshot
 from retouching_tool.application.pipeline_service import PipelineService
+from retouching_tool.application.preview import DisplayImage, PicturePreview
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
@@ -28,8 +30,9 @@ from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.operations.alibaba_skin import BLEMISH, BLEMISH_MODEL, SMOOTHING, SMOOTHING_MODEL
 from retouching_tool.operations.face_detection import DESCRIPTOR as DETECTOR, MODEL as DETECTOR_MODEL
 from retouching_tool.operations.exposed_skin import DESCRIPTOR as SKIN, MODEL as SKIN_MODEL
+from retouching_tool.operations.skin_shine import DESCRIPTOR as SHINE
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
-from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS
+from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS, StageDefinition
 from retouching_tool.ui.qt.main_window import MainWindow
 from retouching_tool.ui.qt.stage_card import StageCard
 from retouching_tool.ui.qt.stage_preview_window import StagePreviewWindow
@@ -38,6 +41,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class QtIntegrationTests(unittest.TestCase):
+    def test_shine_preview_toggle_follows_latest_request_without_changing_settings(self):
+        settings = {"strength": .5, "blend": 1.0}
+        stage = StageDefinition("shine", SHINE.operation, 1, True, tuple(settings.items()))
+        pending = []
+        def submit(parameters, approvals, show_areas):
+            future = Future()
+            pending.append((parameters, show_areas, future))
+            return future
+
+        dialog = StagePreviewWindow(None, stage, SHINE, "fixture", through_stage=True, submit=submit,
+                                    save=lambda _: self.fail("Changing the display modified stage settings"))
+        dialog.show()
+        dialog.start_preview()
+        self.assertTrue(dialog.affected_areas.isVisible())
+        dialog.affected_areas.click()
+        pixel = DisplayImage(1, 1, bytes([50, 40, 30]))
+        pending[0][2].set_result(PicturePreview("1", "shine", pixel, pixel))
+        dialog._finish_preview()
+        self.assertEqual([item[:2] for item in pending], [(settings, False), (settings, True)])
+        self.assertTrue(dialog.comparison.after.pixmap().isNull())
+        colored = DisplayImage(1, 1, bytes([220, 50, 130]))
+        pending[1][2].set_result(PicturePreview("2", "shine", pixel, colored, result_caption="Areas in pink"))
+        dialog._finish_preview()
+        self.assertEqual(dialog.comparison.result_label.text(), "Areas in pink")
+        dialog.affected_areas.click()
+        pending[2][2].set_result(PicturePreview("3", "shine", pixel, pixel))
+        dialog._finish_preview()
+        self.assertEqual(dialog.comparison.result_label.text(), "After this stage")
+        with patch.object(QMessageBox, "question") as prompt:
+            dialog.close()
+            prompt.assert_not_called()
+
     def close_window(self, window):
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
             window.close()

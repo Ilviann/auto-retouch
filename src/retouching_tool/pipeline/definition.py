@@ -126,6 +126,7 @@ class OperationDescriptor:
     inference_runtime: str = "onnxruntime"
     resize_limit: ResizeLimit | None = None
     neutral_picker: bool = False
+    preview_affected_areas: bool = False
 
     @property
     def editable_parameters(self):
@@ -147,6 +148,8 @@ class OperationDescriptor:
         return (*self.requires, mask) if mask is not None else self.requires
 
     def execution_backend(self, onnx_backend, pytorch_backend):
+        if self.inference_runtime == "cpu":
+            return "cpu"
         if self.inference_runtime == "onnxruntime":
             return onnx_backend
         if self.inference_runtime == "pytorch":

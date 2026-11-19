@@ -22,6 +22,7 @@ from retouching_tool.jobs.journal import JobJournal
 from retouching_tool.operations.alibaba_skin import SMOOTHING, SMOOTHING_MODEL
 from retouching_tool.operations.exposed_skin import DESCRIPTOR, MODEL, SIZE
 from retouching_tool.operations.skin_tone_evening import DESCRIPTOR as TONE_EVENING
+from retouching_tool.operations.skin_shine import DESCRIPTOR as SKIN_SHINE
 from retouching_tool.pipeline.assets import ModelCatalog
 from retouching_tool.pipeline.executor import StageRuntime, StageSession
 from retouching_tool.pipeline.image_state import ImageState, SourceMetadata
@@ -254,5 +255,43 @@ class ExposedSkinTests(unittest.TestCase):
                 self.run_model.assert_not_called()
             self.assertTrue(any(r["code"] == "SKIN_TONE_APPLIED" and r["job_id"] == job for r in self.log.records))
             with Image.open(result.images[0].output) as image:
+                exports.append(image.tobytes())
+        self.assertEqual(*exports)
+
+    def test_shine_preview_overlay_and_batch_schedules(self):
+        self.editor.remove(self.smoothing.id)
+        stage = self.editor.add_operation(SKIN_SHINE.operation, 1).stages[-1].stage
+        self.editor.set_parameter(stage.id, "strength", 1)
+        samples = np.full((60, 120, 3), [156, 118, 97], np.uint8)
+        samples[23:28, 51:56] = [206, 185, 173]
+        path = self.root / "shine.png"
+        Image.fromarray(samples).save(path)
+        index = self.app.batch_service.index((path,))
+        comparison = self.app.preview_service.stage_comparison(index, index.images[0].image_id, stage.id, through_stage=True)
+        result = comparison.render("edit", {})
+        areas = comparison.render("overlay", {}, show_affected_areas=True)
+        self.run_model.assert_called_once()
+        self.assertIn("pink", areas.result_caption)
+        def pixels(display):
+            return np.frombuffer(display.rgb, np.uint8).reshape(samples.shape)
+        self.assertLess(pixels(result.result)[25, 53, 0], samples[25, 53, 0])
+        self.assertGreater(pixels(areas.result)[25, 53, 0], samples[25, 53, 0])
+        self.assertTrue((pixels(areas.result)[0] == samples[0]).all())
+        for setting in ("strength", "blend"):
+            zero = comparison.render(setting, {setting: 0}, show_affected_areas=True)
+            self.assertEqual(zero.original, zero.result)
+        full = self.app.preview_service.picture(index, index.images[0].image_id, "full", process=True)
+        self.assertEqual(full.result, result.result)
+        jobs = self.app.job_service
+        exports = []
+        for mode in ("sequential", "staged"):
+            destination = self.root / mode
+            destination.mkdir()
+            job = jobs.create(index, destination, mode=mode)
+            finished = jobs.run(job)
+            self.assertEqual(finished.status, "completed")
+            self.assertTrue(any(r["code"] == "SKIN_SHINE_APPLIED" and r["job_id"] == job and r["backend"] == "cpu"
+                                for r in self.log.records))
+            with Image.open(finished.images[0].output) as image:
                 exports.append(image.tobytes())
         self.assertEqual(*exports)

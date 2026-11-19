@@ -1,7 +1,7 @@
 """Modal stage comparison, including local draft settings and preview scheduling."""
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+from PySide6.QtWidgets import (QCheckBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
                                QProgressBar, QPushButton, QVBoxLayout)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
@@ -99,6 +99,10 @@ class StagePreviewWindow(QDialog):
         actions.addWidget(self.live_progress)
         self.status = QLabel()
         actions.addWidget(self.status, 1)
+        self.affected_areas = QCheckBox("Show affected areas")
+        self.affected_areas.setVisible(descriptor.preview_affected_areas)
+        self.affected_areas.toggled.connect(self.start_preview)
+        actions.addWidget(self.affected_areas)
         self.apply_preview = QPushButton("Preview changes", objectName="previewChanges", autoDefault=False)
         self.apply_preview.clicked.connect(self._preview_changes)
         actions.addWidget(self.apply_preview)
@@ -146,10 +150,11 @@ class StagePreviewWindow(QDialog):
         self._update_actions()
 
     def start_preview(self):
-        if self._close_requested or self._future is not None or self._requested == self._submitted:
+        request = (self._requested.copy(), self.affected_areas.isChecked())
+        if self._close_requested or self._future is not None or request == self._submitted:
             return
-        self._submitted = self._requested.copy()
-        self._future = self._submit(self._submitted, self._resize_approvals)
+        self._submitted = request
+        self._future = self._submit(request[0], self._resize_approvals, request[1])
         self._failed = False
         self._poll_timer.start()
         self._update_actions()
@@ -159,7 +164,7 @@ class StagePreviewWindow(QDialog):
             return
         future, self._future = self._future, None
         self._poll_timer.stop()
-        current = self._requested == self._submitted
+        current = (self._requested, self.affected_areas.isChecked()) == self._submitted
         try:
             preview = future.result()
         except RetouchingError as exc:

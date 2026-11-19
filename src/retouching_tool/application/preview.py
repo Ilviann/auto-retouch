@@ -65,9 +65,9 @@ class StageComparison:
         self._render = render
         self._baseline = None
 
-    def render(self, request_id, parameters, *, resize_approvals=()):
+    def render(self, request_id, parameters, *, resize_approvals=(), show_affected_areas=False):
         return self._render(request_id=request_id, parameters=parameters, _comparison=self,
-                            resize_approvals=resize_approvals)
+                            resize_approvals=resize_approvals, show_affected_areas=show_affected_areas)
 
     def clear(self):
         self._baseline = None
@@ -126,6 +126,21 @@ def _skin_overlay(display, mask):
         return _full_display(image)
 
 
+def _affected_overlay(display, before, after):
+    import numpy as np
+    from PIL import Image
+
+    if before is after:
+        return display
+    with Image.frombytes("RGB", (display.width, display.height), display.rgb) as image:
+        for top in range(0, display.height, 64):
+            bottom = min(top + 64, display.height)
+            changed = np.any(before[top:bottom] != after[top:bottom], axis=2)
+            with Image.fromarray(changed.astype(np.uint8) * 144) as opacity:
+                image.paste((255, 64, 144), (0, top, display.width, bottom), opacity)
+        return _full_display(image)
+
+
 def _face_overlay(display, regions):
     from PIL import Image, ImageDraw
 
@@ -168,7 +183,7 @@ class PreviewService:
 
     def picture(self, index: SourceIndex, image_id, request_id, *, process=False, stage_id=None,
                 through_stage=False, parameters=None, _comparison=None, resize_approvals=(),
-                on_pipeline_progress=None) -> PicturePreview:
+                on_pipeline_progress=None, show_affected_areas=False) -> PicturePreview:
         """Display the original, run the enabled pipeline, or compare a selected stage in memory."""
         log = _PreviewDiagnostics(self.diagnostics, stage_id)
         runtime = JpegRuntime(log, image_id, preview_request_id=request_id)
@@ -182,10 +197,14 @@ class PreviewService:
                 original = self._source_display(image, runtime)
                 return PicturePreview(request_id, f"Original · {image.path.name}", original)
             title, stages = self._stages(stage_id, through_stage, parameters)
+            if show_affected_areas and (stage_id is None or not self.editor.registry.descriptor(
+                    stages[-1].operation, stages[-1].operation_version).preview_affected_areas):
+                raise RetouchingError("PREVIEW_STAGE_REQUIRED", "Select a stage with an affected-area preview.")
             lock = runner_lock(self.root) if any(stage.model_ref is not None for stage in stages) else nullcontext()
             with lock:
                 return self._render(image, stages, runtime, title, stage_id, through_stage, _comparison,
-                                    resize_approvals, on_pipeline_progress if stage_id is None else None)
+                                    resize_approvals, on_pipeline_progress if stage_id is None else None,
+                                    show_affected_areas)
         except ResizeApprovalRequired:
             raise
         except Exception as exc:
@@ -198,7 +217,7 @@ class PreviewService:
             raise RetouchingError(code, message) from exc
 
     def _render(self, image, stages, runtime, title, stage_id, through_stage, comparison, resize_approvals,
-                on_pipeline_progress):
+                on_pipeline_progress, show_affected_areas):
         from PIL import Image
 
         prefix, remaining = (stages[:-1], stages[-1:]) if through_stage else ((), stages)
@@ -219,6 +238,7 @@ class PreviewService:
             if comparison is not None:
                 comparison._baseline = (baseline_key, state, original)
         initial_revision = state.pixel_revision
+        area_input = state.pixels if show_affected_areas else None
         for number, stage in enumerate(remaining, 1):
             if on_pipeline_progress:
                 descriptor = self.editor.registry.descriptor(stage.operation, stage.operation_version)
@@ -227,9 +247,13 @@ class PreviewService:
         if on_pipeline_progress:
             on_pipeline_progress("Preparing comparison…")
         _check_source(image)
-        result = (original if state.pixel_revision == initial_revision else
-                  _full_display(Image.fromarray(encode_rgb_samples(state))))
         caption = None
+        if show_affected_areas:
+            result = _affected_overlay(original, area_input, state.pixels)
+            caption = "Affected areas · changed pixels in pink"
+        else:
+            result = (original if state.pixel_revision == initial_revision else
+                      _full_display(Image.fromarray(encode_rgb_samples(state))))
         skin = state.entry(EXPOSED_SKIN.key)
         if skin is not None and skin.producer_id == stage_id:
             result = _skin_overlay(result, skin.value)

@@ -84,6 +84,7 @@ presets rather than fixed processing paths.
 | U72 | Ask for confirmation before closing the application. Declining keeps the workspace and any running batch open. |
 | U73 | Provide separate **Skin tone smoothing (Alibaba)** and **Blemish cleanup (Alibaba)** stages. Omit the combined stage from the operation list and ignore its entries when loading pipeline JSON. |
 | U74 | Keep each stage's named output for the current photo until the pipeline ends or a later enabled stage writes the same key. Multiple later stages can read the same output across pixel edits. Spatial data must match the photo and its coordinate frame. |
+| U75 | Provide CPU-based Skin shine reduction using the existing exposed-skin mask, with adjustable strength and a preview of the affected areas. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 
