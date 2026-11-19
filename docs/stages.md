@@ -187,6 +187,30 @@ for the photo's geometry. For example, exposure can run between mask analysis an
 tone evening. An empty mask skips the image-stage edit and reports a warning.
 [Verification](verification/skin-tone-evening.md).
 
+## Protect facial features
+
+Add **Face detection (YuNet)** before **Protect facial features**. Use **Preview in
+pipeline** on the protection stage to inspect each face. Amber covers the eyes,
+eyebrows and outer lip contour (including the mouth opening). A solid amber
+rectangle and a warning indicate that the whole detected face is protected.
+
+`analysis.protect_facial_features` v1 runs the Google MediaPipe FaceMesh V2
+landmark model on one 256 × 256 sRGB crop per detected face. The square crop
+includes a 25% margin on each side of the longer box dimension and extends the
+edge pixels where it crosses the photo boundary. Each successful result stores
+five polygons in oriented source-pixel coordinates in `face.protected_features`
+v1. A low face-presence score, a predicted nose outside the detection, or an
+off-image or unresolved contour protects the entire detection box. The preview
+and the shine operation rasterize the same polygons. Staged jobs save the
+coordinates losslessly with their source, geometry and model provenance.
+
+The checkpoint is the senty-au opset 17 ONNX conversion of the landmark model
+from Google's float16 Face Landmarker bundle v1. Place `model.onnx` under
+`mediapipe/face_mesh_v2/` inside the configured checkpoint directory. The
+expected SHA-256 is `7d6e82dee82a1dca5fbddb282b3cc74571833a530de317fc22ae325c3358beeb`.
+Google's model card and the conversion publisher identify the weights as Apache
+2.0. Preserve license and applicable notices if redistributing. [Google model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf) · [Conversion and checksum](https://huggingface.co/senty-au/face_landmarks_detector-ONNX) · [Download ONNX](https://huggingface.co/senty-au/face_landmarks_detector-ONNX/resolve/main/onnx/model.onnx?download=true)
+
 ## Skin shine reduction
 
 Place **Skin shine reduction** after **Exposed Skin Mask** and open **Preview in
@@ -194,6 +218,15 @@ pipeline**. Adjust **Strength** from 0 to 1 (initially 0.5). Select **Show affec
 pixels** to highlight edited pixels in pink over the stage input. Choose
 **Stage result** to inspect the retouched photo at 100%. The overlay reflects both
 Strength and Blending and is available only in the stage preview.
+
+To protect facial details, also place **Protect facial features** upstream.
+**Use facial feature protection when available** is on by default. Inside a
+reliably located face, the protected features contribute neither an edit nor
+reference samples for estimating shine. An uncertain face box excludes all
+pixels in it, including where boxes overlap. Outside matched boxes only body
+skin is eligible, so missed face detections do not authorize edits to the
+face-skin label. With the option off or the protection stage absent, shine
+reduction uses the original exposed-skin matte.
 
 The CPU operation works at the original resolution on both face and body skin.
 It looks for patches that are brighter and less colorful than nearby skin, as

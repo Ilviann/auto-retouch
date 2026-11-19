@@ -12,8 +12,8 @@ from ..jobs.execution import ImageDiagnostics
 from ..jobs.journal import runner_lock
 from ..pipeline.definition import parse_pipeline
 from ..pipeline.executor import StageRuntime, StageSession
-from ..pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, PERSON_FOREGROUND, ContextEntry
-from ..imaging.skin_matte import matte_strips
+from ..pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, FACIAL_FEATURES, PERSON_FOREGROUND, ContextEntry
+from ..imaging.skin_matte import matte_strips, paint_protection
 from ..operations.white_balance import sample_neutral
 from ..pipeline.validation import validate_pipeline
 from ..storage.batch_paths import current_file_stamp
@@ -298,6 +298,14 @@ class PreviewService:
             if faces is not None and faces.producer_id == stage_id:
                 result = _face_overlay(result, faces.value.regions)
                 caption = f"Detected faces · {len(faces.value.regions)}"
+            protection = state.entry(FACIAL_FEATURES.key)
+            if protection is not None and protection.producer_id == stage_id:
+                with (Image.frombytes("RGB", (result.width, result.height), result.rgb) as overlay,
+                      Image.new("L", overlay.size) as matte):
+                    paint_protection(matte, protection.value, 144)
+                    overlay.paste((255, 156, 0), mask=matte)
+                    result = _full_display(overlay)
+                caption = "Protected facial features · amber · uncertain faces shown as full boxes"
         titles = {stage.id: self.editor.registry.descriptor(stage.operation, stage.operation_version).title
                   for stage in stages}
         warnings = tuple((key, titles[key], message) for key, message in runtime.diagnostics.stage_messages if key in titles)

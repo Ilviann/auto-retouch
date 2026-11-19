@@ -51,6 +51,7 @@ def application_registry():
     from ..operations.person_foreground import DESCRIPTOR, PersonForeground
     from ..operations.white_balance import DESCRIPTOR as WHITE_BALANCE, WhiteBalance
     from ..operations.face_detection import DESCRIPTOR as FACE_DETECTION, FaceDetection
+    from ..operations.facial_features import DESCRIPTOR as FACIAL_FEATURES, ProtectFacialFeatures
     from ..operations.exposed_skin import DESCRIPTOR as EXPOSED_SKIN, ExposedSkin
     from ..operations.skin_tone_evening import DESCRIPTOR as SKIN_TONE_EVENING, LocalSkinToneEvening
     from ..operations.skin_shine import DESCRIPTOR as SKIN_SHINE, SkinShineReduction
@@ -60,6 +61,7 @@ def application_registry():
     registry.register(AUTO_EXPOSURE, AutoExposure)
     registry.register(DESCRIPTOR, PersonForeground)
     registry.register(FACE_DETECTION, FaceDetection)
+    registry.register(FACIAL_FEATURES, ProtectFacialFeatures)
     registry.register(EXPOSED_SKIN, ExposedSkin)
     registry.register(SKIN_TONE_EVENING, LocalSkinToneEvening)
     registry.register(SKIN_SHINE, SkinShineReduction)

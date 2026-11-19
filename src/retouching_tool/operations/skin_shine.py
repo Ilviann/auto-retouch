@@ -1,14 +1,16 @@
 """Attenuate localized near-neutral reflections on exposed skin in linear light."""
 
 from ..imaging.skin_matte import full_skin_matte, neighborhood_sums
-from ..pipeline.definition import OperationDescriptor, Parameter
-from ..pipeline.image_state import EXPOSED_SKIN, ImageState
+from ..pipeline.definition import BooleanParameter, OperationDescriptor, Parameter
+from ..pipeline.image_state import EXPOSED_SKIN, FACIAL_FEATURES, ImageState
 
 
 DESCRIPTOR = OperationDescriptor(
     "retouch.skin_shine_reduction", 1, "Skin shine reduction",
-    parameters=(Parameter("strength", "Strength", 0.5, 0, 1, preview_on_change=True),),
-    requires=(EXPOSED_SKIN,), changes_pixels=True,
+    parameters=(Parameter("strength", "Strength", 0.5, 0, 1, preview_on_change=True),
+                BooleanParameter("protect_features", "Use facial feature protection when available", True,
+                                 FACIAL_FEATURES.key, preview_on_change=True)),
+    requires=(EXPOSED_SKIN,), optional=(FACIAL_FEATURES,), changes_pixels=True,
     backends=("cpu",), inference_runtime="cpu",
 )
 TILE_SIZE = 256
@@ -47,6 +49,7 @@ def _reflection(rgb, coverage, rows, cols, radius):
 class SkinShineReduction:
     def __init__(self, stage):
         self.strength = stage.parameter("strength")
+        self.protect_features = stage.parameter("protect_features")
 
     def prepare(self, runtime):
         self.runtime = runtime
@@ -66,7 +69,8 @@ class SkinShineReduction:
                               level="WARNING")
             return state
 
-        matte = full_skin_matte(mask, (state.width, state.height))
+        entry = state.entry(FACIAL_FEATURES.key) if self.protect_features else None
+        matte = full_skin_matte(mask, (state.width, state.height), entry.value if entry else None)
         radius = max(8, min(96, round(min(state.width, state.height) * .025)))
         output = None
         changed = 0

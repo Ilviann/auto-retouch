@@ -8,7 +8,7 @@ from ..imaging.jpeg import JpegRuntime
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import MAX_ATTEMPTS, TERMINAL, JournalError
 from ..jobs.publication import checked_output
-from ..pipeline.definition import LEGACY_STAGE_DEFAULTS
+from ..pipeline.definition import ADDED_OPTIONAL_INPUTS, LEGACY_STAGE_DEFAULTS
 from ..pipeline.executor import StageRuntime, StageSession
 from ..storage.artifact_codec import require
 from ..storage.artifacts import ArtifactIdentity, ArtifactRef, ArtifactStore, fingerprint
@@ -154,14 +154,20 @@ class StagedRunner:
     def _prefix_digests(self):
         definitions = self.job.pipeline.to_json()["stages"]
         prefix, contracts = [], []
+        provided = set()
         digests = []
         for definition, stage in zip(definitions, self.job.pipeline.stages, strict=True):
             prefix.append(definition)
             if stage.enabled:
                 descriptor = asdict(self.registry.descriptor(stage.operation, stage.operation_version))
-                extensions = LEGACY_STAGE_DEFAULTS.get((stage.operation, stage.operation_version), {})
+                key = (stage.operation, stage.operation_version)
+                extensions = LEGACY_STAGE_DEFAULTS.get(key, {})
                 descriptor["parameters"] = tuple(p for p in descriptor["parameters"]
                                                  if p["name"] not in extensions or p["name"] in definition["parameters"])
+                added = ADDED_OPTIONAL_INPUTS.get(key, ())
+                descriptor["optional"] = tuple(spec for spec in descriptor["optional"]
+                                               if spec["key"] not in added or spec["key"] in provided)
+                provided.update(spec["key"] for spec in descriptor["provides"])
                 if descriptor["resize_limit"] is None:
                     del descriptor["resize_limit"]
                 if self.job.pytorch_backend is None and descriptor["inference_runtime"] == "onnxruntime":

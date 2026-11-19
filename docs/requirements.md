@@ -86,6 +86,7 @@ presets rather than fixed processing paths.
 | U74 | Keep each stage's named output for the current photo until the pipeline ends or a later enabled stage writes the same key. Multiple later stages can read the same output across pixel edits. Spatial data must match the photo and its coordinate frame. |
 | U75 | Provide CPU-based Skin shine reduction using the existing exposed-skin mask, with adjustable strength and a preview of the affected areas. |
 | U76 | Offer **Show affected pixels** and **Pixel difference** in both stage previews for every operation that changes pixels. Show the selected stage's edits after blending as a highlight or as the absolute difference per RGB channel. |
+| U77 | Provide **Protect facial features** for eyes, eyebrows and lips and connect its protection mask to **Skin shine reduction**. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 

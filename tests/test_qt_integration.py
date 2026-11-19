@@ -29,6 +29,7 @@ from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.operations.alibaba_skin import BLEMISH, BLEMISH_MODEL, SMOOTHING, SMOOTHING_MODEL
 from retouching_tool.operations.face_detection import DESCRIPTOR as DETECTOR, MODEL as DETECTOR_MODEL
+from retouching_tool.operations.facial_features import DESCRIPTOR as FEATURES, MODEL as FEATURES_MODEL
 from retouching_tool.operations.exposed_skin import DESCRIPTOR as SKIN, MODEL as SKIN_MODEL
 from retouching_tool.operations.skin_shine import DESCRIPTOR as SHINE
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
@@ -42,6 +43,26 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class QtIntegrationTests(unittest.TestCase):
+    def test_feature_protection_card_shows_checkpoint_and_context(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as resources:
+            root = Path(tmp)
+            log = Diagnostics(root / "logs", console=io.StringIO())
+            resources.callback(log.close)
+            editor = PipelineService(root / "models", "directml", log)
+            status, = editor.add_operation(FEATURES.operation, 1, model_ref=FEATURES_MODEL.ref).stages
+            snapshot = StartupSnapshot((), "Fixture", "Fixture", "directml", root, root, root, (), stages=(status,))
+            window = MainWindow(snapshot, editor)
+            try:
+                card = window.findChild(StageCard, f"stage-{status.stage.id}")
+                self.assertFalse(card.toggle.isEnabled())
+                self.assertIn(str(editor.checkpoints / FEATURES_MODEL.files[0].relative_path), card.status_label.text())
+                self.assertEqual(card.findChild(QLabel, "tag-In-face.regions").text(), "areas:face")
+                self.assertEqual(card.findChild(QLabel, "tag-Out-face.protected_features").text(), "areas:facial features")
+            finally:
+                self.close_window(window)
+                window.deleteLater()
+                self.app.processEvents()
+
     def test_change_preview_modes_follow_each_stages_pixel_contract(self):
         for descriptor in application_registry().descriptors():
             with self.subTest(stage=descriptor.title):
@@ -60,7 +81,7 @@ class QtIntegrationTests(unittest.TestCase):
                     dialog.close()
 
     def test_stage_preview_mode_follows_latest_request_without_changing_settings(self):
-        settings = {"strength": .5, "blend": 1.0}
+        settings = {parameter.name: parameter.default for parameter in SHINE.editable_parameters}
         stage = StageDefinition("shine", SHINE.operation, 1, True, tuple(settings.items()))
         pending = []
         def submit(parameters, approvals, mode):

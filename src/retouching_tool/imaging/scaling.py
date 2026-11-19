@@ -10,29 +10,31 @@ def fit_longest_side(size, limit):
     return tuple(max(1, (side * limit + longest // 2) // longest) for side in size)
 
 
-def _axis(source, target, methods):
+def _axis(source, target, methods, start=0, length=None):
     import numpy as np
 
-    method = methods.downscale if target < source else methods.upscale
+    length = source if length is None else length
+    method = methods.downscale if target < length else methods.upscale
     if method not in SCALING_METHODS:
         raise ValueError(f"Unsupported resize method: {method}")
-    centers = (np.arange(target, dtype=np.float32) + .5) * (source / target) - .5
+    centers = start + (np.arange(target, dtype=np.float32) + .5) * (length / target) - .5
     centers = np.clip(centers, 0, source - 1)
-    if method == "nearest" or source == target:
+    if method == "nearest" or length == target and start == int(start):
         return (centers + .5).astype(np.intp), None, None
     low = centers.astype(np.intp)
     return low, np.minimum(low + 1, source - 1), centers - low.astype(np.float32)
 
 
-def resize_rgb(pixels, size, methods: ScalingSettings, *, encode_srgb=False):
+def resize_rgb(pixels, size, methods: ScalingSettings, *, encode_srgb=False, box=None):
     """Resize float32 RGB; optional sRGB conversion precedes interpolation for model inputs."""
     import numpy as np
 
     width, height = size
     if width < 1 or height < 1:
         raise ValueError("Resize dimensions must be positive")
-    x0, x1, fx = _axis(pixels.shape[1], width, methods)
-    y0, y1, fy = _axis(pixels.shape[0], height, methods)
+    left, top, right, bottom = box if box is not None else (0, 0, pixels.shape[1], pixels.shape[0])
+    x0, x1, fx = _axis(pixels.shape[1], width, methods, left, right - left)
+    y0, y1, fy = _axis(pixels.shape[0], height, methods, top, bottom - top)
 
     def samples(rows, cols):
         values = pixels[rows[:, None], cols[None, :]]

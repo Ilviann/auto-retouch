@@ -11,6 +11,7 @@ RGB_FLOAT32_BYTES_PER_PIXEL = 3 * 4
 PERSON_FOREGROUND = ContextSpec("person.foreground", 1)
 EXPOSED_SKIN = ContextSpec("skin.exposed", 1)
 FACE_REGIONS = ContextSpec("face.regions", 1, pixel_sensitive=False)
+FACIAL_FEATURES = ContextSpec("face.protected_features", 1, pixel_sensitive=False)
 MAX_FOREGROUND_GRID = 512
 
 
@@ -103,6 +104,34 @@ class FaceRegions:
 
 
 @dataclass(frozen=True)
+class ProtectedFace:
+    """Half-open detector box and five native-pixel polygons. Empty contours protect the box."""
+
+    box: tuple[int, int, int, int]
+    contours: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self):
+        if (type(self.box) is not tuple or len(self.box) != 4
+                or not all(type(n) is int and n >= 0 for n in self.box)
+                or self.box[0] >= self.box[2] or self.box[1] >= self.box[3]):
+            raise ValueError("Invalid protected face bounds")
+        if (type(self.contours) is not tuple or len(self.contours) not in (0, 5)
+                or any(type(p) is not tuple or len(p) < 6 or len(p) > 40 or len(p) % 2
+                       or not all(type(n) is int and n >= 0 for n in p) for p in self.contours)):
+            raise ValueError("Invalid facial feature polygons")
+
+
+@dataclass(frozen=True)
+class FacialFeatureMask:
+    faces: tuple[ProtectedFace, ...]
+
+    def __post_init__(self):
+        if (type(self.faces) is not tuple or len(self.faces) > 256
+                or not all(isinstance(face, ProtectedFace) for face in self.faces)):
+            raise ValueError("Expected at most 256 protected faces")
+
+
+@dataclass(frozen=True)
 class ContextEntry:
     spec: ContextSpec
     producer_id: str
@@ -112,7 +141,7 @@ class ContextEntry:
     geometry_revision: int
     width: int
     height: int
-    value: ImageStatistics | PersonForegroundMask | ExposedSkinMask | FaceRegions | tuple[float, ...]
+    value: ImageStatistics | PersonForegroundMask | ExposedSkinMask | FaceRegions | FacialFeatureMask | tuple[float, ...]
     source_id: str = ""
     producer_settings_hash: str = ""
     confidence: float | None = None
@@ -133,7 +162,9 @@ class ContextEntry:
             raise ValueError("Invalid exposed skin model or context version")
         if isinstance(self.value, FaceRegions) != (self.spec.key == FACE_REGIONS.key):
             raise ValueError("Face region context requires a typed payload")
-        if isinstance(self.value, (ExposedSkinMask, FaceRegions)) and (
+        if isinstance(self.value, FacialFeatureMask) != (self.spec.key == FACIAL_FEATURES.key):
+            raise ValueError("Facial feature protection requires a typed mask")
+        if isinstance(self.value, (ExposedSkinMask, FaceRegions, FacialFeatureMask)) and (
                 not all(isinstance(v, str) and v for v in (self.source_id, self.producer_id, self.producer_operation))
                 or type(self.producer_version) is not int or self.producer_version < 1
                 or not isinstance(self.producer_settings_hash, str)
@@ -144,7 +175,13 @@ class ContextEntry:
         if isinstance(self.value, FaceRegions) and (self.spec != FACE_REGIONS
                 or any(face.right > self.width or face.bottom > self.height for face in self.value.regions)):
             raise ValueError("Invalid face region provenance, version or bounds")
-        if not isinstance(self.value, (ImageStatistics, PersonForegroundMask, ExposedSkinMask, FaceRegions)) and not (
+        if isinstance(self.value, FacialFeatureMask) and (self.spec != FACIAL_FEATURES
+                or not isinstance(self.model_ref, str) or not self.model_ref
+                or any(face.box[2] > self.width or face.box[3] > self.height
+                       or any(max(p[::2]) >= self.width or max(p[1::2]) >= self.height for p in face.contours)
+                       for face in self.value.faces)):
+            raise ValueError("Invalid facial feature mask version, model or image coordinates")
+        if not isinstance(self.value, (ImageStatistics, PersonForegroundMask, ExposedSkinMask, FaceRegions, FacialFeatureMask)) and not (
                 isinstance(self.value, tuple) and all(type(v) in (int, float) and math.isfinite(v) for v in self.value)):
             raise ValueError("Context payload must be immutable typed data")
 

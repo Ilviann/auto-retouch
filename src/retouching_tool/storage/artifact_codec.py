@@ -7,10 +7,12 @@ from base64 import b64decode, b64encode
 from dataclasses import asdict
 import math
 import re
+import struct
 
 from ..pipeline.definition import ContextSpec
 from ..pipeline.image_state import (MAX_FOREGROUND_GRID, ContextEntry, ImageState, ImageStatistics,
-                                    ExposedSkinMask, FaceRegion, FaceRegions, PersonForegroundMask, SourceMetadata)
+                                    ExposedSkinMask, FaceRegion, FaceRegions, FacialFeatureMask,
+                                    PersonForegroundMask, ProtectedFace, SourceMetadata)
 
 REPRESENTATION = "linear-srgb-float32"
 MAX_METADATA_BYTES = 16 * 1024 * 1024
@@ -66,7 +68,7 @@ def validate_context(entry, state):
                 and sum(value.histogram) == value.pixel_count
                 and all(integer(v) and v <= value.pixel_count for v in (value.clipped_low, value.clipped_high)),
                 "Invalid statistics counts")
-    elif not isinstance(value, (PersonForegroundMask, ExposedSkinMask, FaceRegions)):
+    elif not isinstance(value, (PersonForegroundMask, ExposedSkinMask, FaceRegions, FacialFeatureMask)):
         require(type(value) is tuple and len(value) <= 4096 and all(finite(v) for v in value),
                 "Unsupported context payload; a versioned codec is required")
 
@@ -106,6 +108,12 @@ def encode_context(entry):
     elif isinstance(value, FaceRegions):
         data["value"] = {"kind": "face-regions-v1", "data": [
             {**asdict(region), "mask": b64encode(region.mask).decode("ascii")} for region in value.regions]}
+    elif isinstance(value, FacialFeatureMask):
+        # Keep 256 faces inside the existing 1 MiB manifest even with pretty-printed JSON.
+        data["value"] = {"kind": "facial-features-v1", "data": [
+            {"box": face.box, "contours": [
+                b64encode(struct.pack(f"<{len(p)}I", *p)).decode("ascii") for p in face.contours]}
+            for face in value.faces]}
     elif isinstance(value, (PersonForegroundMask, ExposedSkinMask)):
         kind = "exposed-skin-v1" if isinstance(value, ExposedSkinMask) else "person-foreground-v1"
         data["value"] = {"kind": kind, "data": {
@@ -128,6 +136,22 @@ def decode_context(data):
     elif data["value"]["kind"] == "measurements-v1":
         require(isinstance(payload, list), "Expected measurement list")
         value = tuple(payload)
+    elif data["value"]["kind"] == "facial-features-v1":
+        require(isinstance(payload, (list, tuple)) and len(payload) <= 256, "Invalid protected face list")
+        faces = []
+        for item in payload:
+            fields(item, "box contours")
+            require(isinstance(item["box"], (list, tuple)) and len(item["box"]) == 4
+                    and isinstance(item["contours"], (list, tuple)) and len(item["contours"]) in (0, 5)
+                    and all(isinstance(p, str) and len(p) <= 216 for p in item["contours"]),
+                    "Invalid facial feature polygon data")
+            contours = []
+            for encoded in item["contours"]:
+                raw = b64decode(encoded, validate=True)
+                require(24 <= len(raw) <= 160 and len(raw) % 8 == 0, "Invalid facial feature coordinate pairs")
+                contours.append(struct.unpack(f"<{len(raw) // 4}I", raw))
+            faces.append(ProtectedFace(tuple(item["box"]), tuple(contours)))
+        value = FacialFeatureMask(tuple(faces))
     elif data["value"]["kind"] == "face-regions-v1":
         require(isinstance(payload, list) and len(payload) <= 256, "Invalid face region list")
         regions = []

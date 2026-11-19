@@ -27,13 +27,45 @@ def blend_skin(source, edited, mask):
     return output
 
 
-def full_skin_matte(mask, size):
+def paint_protection(image, protection, fill, *, top=0):
+    """Paint native-pixel contours (or the entire uncertain box) onto an image or strip."""
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(image)
+    for face in protection.faces:
+        if not face.contours:
+            x, y, right, bottom = face.box
+            draw.rectangle((x, y - top, right - 1, bottom - top - 1), fill=fill)
+        else:
+            for polygon in face.contours:
+                ys = polygon[1::2]
+                if max(ys) >= top and min(ys) < top + image.height:
+                    draw.polygon([(x, y - top) for x, y in zip(polygon[::2], ys)], fill=fill)
+
+
+def full_skin_matte(mask, size, protection=None):
     import numpy as np
 
     width, height = size
     coverage = np.empty((height, width), dtype=np.uint8)
-    for start, stop, strip in matte_strips(mask, size, (1, 2)):
-        coverage[start:stop] = np.asarray(strip)
+    all_skin = matte_strips(mask, size, (1, 2))
+    if protection is None:
+        for start, stop, strip in all_skin:
+            coverage[start:stop] = np.asarray(strip)
+        return coverage
+
+    # Outside reliably located face boxes only the body label is eligible. This
+    # also covers facial skin missed by YuNet in a group. Uncertain boxes take
+    # precedence over successful boxes wherever they overlap.
+    for (start, stop, strip), (_, _, body) in zip(all_skin, matte_strips(mask, size, (1,)), strict=True):
+        for face in protection.faces:
+            left, top, right, bottom = face.box
+            if face.contours and top < stop and bottom > start:
+                box = (left, max(top - start, 0), right, min(stop, bottom) - start)
+                with strip.crop(box) as inside:
+                    body.paste(inside, box)
+        paint_protection(body, protection, 0, top=start)
+        coverage[start:stop] = np.asarray(body)
     return coverage
 
 

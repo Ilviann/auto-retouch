@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 
 from ...config import SCALING_METHODS
 from ...pipeline.definition import BLEND, BooleanParameter, ChoiceParameter, IntegerParameter, MaskTargetParameter, Parameter, ScalingParameter
-from ...pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, PERSON_FOREGROUND
+from ...pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, FACIAL_FEATURES, PERSON_FOREGROUND
 
 
 class BooleanControl(QCheckBox):
@@ -115,7 +115,8 @@ def tag_row(label, entries, hint):
     caption.setToolTip(hint)
     caption.setFixedWidth(caption.fontMetrics().horizontalAdvance("Out") + 4)
     row.addWidget(caption)
-    aliases = {FACE_REGIONS.key: "areas:face", PERSON_FOREGROUND.key: "areas:people", EXPOSED_SKIN.key: "areas:skin"}
+    aliases = {FACE_REGIONS.key: "areas:face", PERSON_FOREGROUND.key: "areas:people",
+               EXPOSED_SKIN.key: "areas:skin", FACIAL_FEATURES.key: "areas:facial features"}
     for key, version, optional in entries:
         name = aliases.get(key, key)
         tag = QLabel(f"{name} · optional" if optional else name, objectName=f"tag-{label}-{key}")

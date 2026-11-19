@@ -159,9 +159,16 @@ class OperationDescriptor:
 # These settings extend existing v1 stages. Their defaults reproduce the
 # original behavior, including the settings and contract hashes in saved jobs.
 LEGACY_STAGE_DEFAULTS = {
+    ("retouch.skin_shine_reduction", 1): {"protect_features": True},
     ("analysis.face_detection", 1): {"expand_pixels": 0},
     ("retouch.alibaba_skin", 1): {"use_face_rects": True},
     ("retouch.alibaba_skin_tone_smoothing", 1): {"use_exposed_skin": False},
+}
+
+# Optional inputs introduced after v1 shipped do not affect the legacy contract
+# when no preceding stage in a saved job provides them.
+ADDED_OPTIONAL_INPUTS = {
+    ("retouch.skin_shine_reduction", 1): ("face.protected_features",),
 }
 
 
