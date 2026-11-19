@@ -55,7 +55,7 @@ class SkinToneEveningTests(unittest.TestCase):
         self.assertTrue(np.all(np.max(np.abs(edited.pixels - pixels), axis=2) <= bound + 4e-8))
         np.testing.assert_array_equal(edited.pixels[:, :18], pixels[:, :18])
         self.assertIs(edited.metadata, state.metadata)
-        self.assertIsNone(edited.entry(EXPOSED_SKIN.key))
+        self.assertIs(edited.entry(EXPOSED_SKIN.key), state.entry(EXPOSED_SKIN.key))
         self.assertEqual((edited.geometry_revision, edited.pixel_revision), (2, 1))
         half = self.process(state, strength=.5, radius=10, max_shift=1)
         np.testing.assert_allclose(half.pixels - pixels, .5 * (edited.pixels - pixels), atol=5e-8)
@@ -91,7 +91,7 @@ class SkinToneEveningTests(unittest.TestCase):
         self.assertIs(self.process(empty).pixels, empty.pixels)
         warning = next(c.kwargs for c in self.log.emit.call_args_list if c.args[0] == "SKIN_TONE_EMPTY_MASK")
         self.assertEqual((warning["level"], warning["image_id"]), ("WARNING", "photo"))
-        for invalid in (replace(skin, context=()), replace(skin, pixel_revision=1),
+        for invalid in (replace(skin, context=()), replace(skin, geometry_revision=3),
                         replace(skin, metadata=SourceMetadata("different"))):
             with self.assertRaises(RetouchingError) as error:
                 self.process(invalid)

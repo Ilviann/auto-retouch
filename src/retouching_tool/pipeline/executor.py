@@ -6,7 +6,6 @@ from pathlib import Path
 from time import perf_counter
 
 from ..errors import ResizeApprovalRequired, RetouchingError
-from .validation import retained
 from .definition import BLEND, PipelineDefinition, StageDefinition, parse_pipeline
 
 
@@ -108,7 +107,7 @@ class StageSession:
                 if desc.changes_pixels and not spec.pixel_sensitive and entry is not None and (
                         entry.spec != spec or not entry.compatible(state)):
                     raise RetouchingError("CONTEXT_INVALID", f"Regenerate {spec.key} for this image before editing pixels.")
-            # Stale optional measurements are absent.
+            # Only context from this image and coordinate frame can be consumed.
             current = replace(state, context=tuple(e for e in state.context if e.compatible(state)))
             for spec in desc.active_required_inputs(runtime.stage):
                 entry = current.entry(spec.key)
@@ -120,7 +119,7 @@ class StageSession:
             if desc.changes_pixels:
                 result = _blend_result(current, result, runtime.stage.parameter(BLEND.name), desc.provides)
             provided = {spec.key for spec in desc.provides}
-            kept = tuple(e for e in current.context if e.spec.key not in provided and retained(e.spec, desc) and e.compatible(result))
+            kept = tuple(e for e in current.context if e.spec.key not in provided and e.compatible(result))
             produced = tuple(e for e in result.context if e.spec.key in provided)
             result = replace(result, context=kept + produced)
             runtime.emit("STAGE_COMPLETED", "Image-stage unit completed", duration_ms=(perf_counter() - started) * 1000,

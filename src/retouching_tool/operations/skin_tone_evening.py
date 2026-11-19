@@ -2,7 +2,7 @@
 
 from ..imaging.skin_matte import matte_strips
 from ..pipeline.definition import IntegerParameter, OperationDescriptor, Parameter
-from ..pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, ImageState
+from ..pipeline.image_state import EXPOSED_SKIN, ImageState
 
 
 DESCRIPTOR = OperationDescriptor(
@@ -12,7 +12,7 @@ DESCRIPTOR = OperationDescriptor(
         IntegerParameter("radius", "Neighborhood radius (px)", 24, 1, 96),
         Parameter("max_shift", "Maximum color shift (% of luminance)", 6, 0, 20, preview_on_change=True),
     ),
-    requires=(EXPOSED_SKIN,), preserves=(FACE_REGIONS.key,), changes_pixels=True,
+    requires=(EXPOSED_SKIN,), changes_pixels=True,
 )
 
 TILE_SIZE = 256

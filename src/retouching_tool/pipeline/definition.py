@@ -90,7 +90,7 @@ BLEND = Parameter("blend", "Blending", 1.0, 0.0, 1.0, preview_on_change=True)
 class ContextSpec:
     key: str
     version: int = 1
-    pixel_sensitive: bool = True
+    pixel_sensitive: bool = True  # A producer must measure its final, blended pixels.
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -118,8 +118,6 @@ class OperationDescriptor:
     requires: tuple[ContextSpec, ...] = ()
     optional: tuple[ContextSpec, ...] = ()
     provides: tuple[ContextSpec, ...] = ()
-    preserves: tuple[str, ...] = ()
-    invalidates: tuple[str, ...] = ()
     changes_pixels: bool = False
     changes_geometry: bool = False
     model_refs: tuple[str, ...] = ()

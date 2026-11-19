@@ -280,10 +280,10 @@ immutable source metadata, and typed/versioned context with auxiliary artifacts
 such as masks. A stage may change pixels, context, or both. Context-only stages
 reuse unchanged pixels. Its color space, precision, shape, coordinate system,
 producer, confidence where meaningful, and dependency revisions are explicit.
-Operations declare provided/required/optional context and preservation/invalidation
-effects. Validate incompatible dependencies after stage reordering; transform or
-invalidate artifacts when geometry or relevant image content changes. Never reuse
-a stale mask only because its dimensions still match. Full rules and proposed
+Operations declare provided, required and optional context. Each image carries the
+latest output for each key across pixel edits, with its original producer and pixel
+revision. Validate dependencies after stage reordering. A geometry change requires
+new or remapped outputs in the new coordinate frame. Full rules and proposed
 initial operations are in the [Stage catalog and image state](stages.md).
 
 Import captures original EXIF before normalization. Export transfers capture and

@@ -26,14 +26,6 @@ class PipelineStatus:
         return not any(s.stage.enabled and (s.issues or s.dependency_errors) for s in self.stages)
 
 
-def retained(spec, descriptor):
-    if spec.key in descriptor.invalidates or descriptor.changes_geometry:
-        return False
-    if descriptor.changes_pixels:
-        return not spec.pixel_sensitive and spec.key in descriptor.preserves
-    return True
-
-
 def validate_pipeline(definition, registry, catalog, checkpoints, backend, pytorch_backend=None):
     available, statuses, stages = {}, [], []
     for original in definition.stages:
@@ -49,7 +41,8 @@ def validate_pipeline(definition, registry, catalog, checkpoints, backend, pytor
                 if available.get(required.key) != required:
                     errors.append(f"{required.key} version {required.version} requires a compatible enabled producer before {stage.id}; add/enable/reorder its analysis stage")
             if not errors:
-                available = {key: value for key, value in available.items() if retained(value, desc)}
+                if desc.changes_geometry:
+                    available.clear()
                 available.update((spec.key, spec) for spec in desc.provides)
         state = "unavailable" if issues else "blocked" if errors else "ready" if stage.enabled else "skipped"
         statuses.append(StageStatus(stage, desc.title, state, issues, tuple(errors), catalog.publisher_url(stage.model_ref)))

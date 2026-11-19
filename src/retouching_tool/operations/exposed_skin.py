@@ -66,7 +66,7 @@ class ExposedSkin:
         if not any(labels):
             self.runtime.emit("EXPOSED_SKIN_EMPTY", "No exposed skin was detected. Inspect the mask preview.",
                               level="WARNING")
-        return replace(state, context=tuple(e for e in state.context if e.spec != EXPOSED_SKIN) + (entry,))
+        return replace(state, context=tuple(e for e in state.context if e.spec.key != EXPOSED_SKIN.key) + (entry,))
 
     def release(self):
         self.session = None

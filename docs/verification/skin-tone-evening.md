@@ -25,6 +25,12 @@ reference. A visual comparison of a generated textured swatch showed reduced
 localized redness and retained texture. Acceptance on representative group
 portraits and the preferred Natural and Beauty settings requires user review.
 
+The pipeline retention check uses a controlled mask on a generated JPEG. It
+runs Exposed Skin Mask, Exposure and Local skin tone evening in that order.
+The stage preview changes pixels using the original mask. Sequential and staged
+exports have identical decoded pixels. Pausing the staged job after exposure
+and resuming restores the mask without another inference.
+
 ```bat
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_skin_tone_evening.py -v
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_exposed_skin.py -k local_tone_evening -v

@@ -83,6 +83,7 @@ presets rather than fixed processing paths.
 | U71 | Remember recursive source scanning, processing mode, export destination, selected format and format-specific settings across launches. Ask how to handle existing files when starting each batch that encounters them. |
 | U72 | Ask for confirmation before closing the application. Declining keeps the workspace and any running batch open. |
 | U73 | Provide separate **Skin tone smoothing (Alibaba)** and **Blemish cleanup (Alibaba)** stages. Omit the combined stage from the operation list and ignore its entries when loading pipeline JSON. |
+| U74 | Keep each stage's named output for the current photo until the pipeline ends or a later enabled stage writes the same key. Multiple later stages can read the same output across pixel edits. Spatial data must match the photo and its coordinate frame. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 
@@ -143,7 +144,7 @@ Representative coverage and visual acceptance remain unreviewed.
 | F27 | Export a local diagnostics report containing relevant logs, configuration/pipeline and runtime details with consistent path redaction. Exclude photos and model weights by default; no automatic upload. |
 | F28 | Expose toolkit-independent application commands, state snapshots, results, and events. GUI adapters call these contracts; pipeline, operations, jobs, model backends, configuration, storage, and diagnostics do not depend on Qt. |
 | F29 | Confine PySide6 widgets, Qt item models, signals, image-display objects, and UI-thread dispatch to the Qt adapter. A future toolkit switch replaces that adapter and startup wiring while retaining application and processing services. |
-| F30 | Represent analysis as typed, versioned context with producer/confidence/coordinate information. Operations declare required, optional, provided, preserved, and invalidated context. Reject missing/stale required targeting data rather than making global edits. |
+| F30 | Represent analysis as typed, versioned context with producer, confidence and coordinate information. Operations declare required, optional and provided keys. Validate the latest upstream value's type, source and geometry before use. Missing or incompatible required targeting data blocks the edit. |
 | F31 | Context-only stages preserve pixel data and offer overlay/measurement previews. Persist context and source metadata in staged artifacts and include dependency versions in cache validation. |
 | F32 | Keep EXIF preservation and final processing markers in mandatory export infrastructure. Validate required metadata after writing; report metadata loss/marker failure as export failure. |
 | F33 | Distinguish manually skipped stages, ready stages, and unavailable/error stages. Missing-model cards show the required files, expected local locations, and a recovery action with text/icon feedback. Keep parameters editable and prevent activation until all required assets are valid. |

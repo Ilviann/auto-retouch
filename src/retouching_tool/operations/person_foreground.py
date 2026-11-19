@@ -71,7 +71,7 @@ class PersonForeground:
         if not labels.count(1):
             self.runtime.emit("PERSON_FOREGROUND_EMPTY", "PP-HumanSeg found no person foreground. Inspect the analysis preview.",
                               level="WARNING")
-        return replace(state, context=tuple(e for e in state.context if e.spec != PERSON_FOREGROUND) + (entry,))
+        return replace(state, context=tuple(e for e in state.context if e.spec.key != PERSON_FOREGROUND.key) + (entry,))
 
     def release(self):
         self._session = None

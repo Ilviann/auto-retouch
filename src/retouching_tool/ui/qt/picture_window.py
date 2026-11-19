@@ -118,7 +118,7 @@ class PicturePane(QLabel):
 
 
 def statistics_text(context):
-    return "\n".join(f"Mean linear luminance {value.mean_luminance:.3f} · "
+    return "\n".join(f"Last measured mean linear luminance {value.mean_luminance:.3f} · "
                      f"Range {value.minimum:.3f}–{value.maximum:.3f} · "
                      f"Clipped {value.clipped_low:,} dark / {value.clipped_high:,} bright"
                      for entry in context if isinstance(value := entry.value, ImageStatistics))

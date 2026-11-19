@@ -63,7 +63,7 @@ strength, face targeting, scaling, blending and preview. [Model files and stage 
 For a studio set, add **White balance and color cast** before exposure. To reuse
 one correction, open the stage preview on a gray-card shot, click **Pick neutral
 from input**, click the card in the input pane, and save the settings on close.
-Add **Face detection (YuNet)** immediately before Alibaba to target each detected
+Add **Face detection (YuNet)** anywhere before Alibaba to target each detected
 face. Preview the detection stage to inspect its boxes. [Portrait stage guide](docs/stages.md#white-balance-and-color-cast).
 
 The 3b storage slice now uses uncompressed float32 TIFF intermediates with typed

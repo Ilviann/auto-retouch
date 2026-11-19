@@ -118,7 +118,7 @@ class FaceDetection:
         else:
             self.runtime.emit("FACE_DETECTION_EMPTY", "No faces detected. Inspect the preview and minimum confidence.",
                               level="WARNING")
-        return replace(state, context=tuple(e for e in state.context if e.spec != FACE_REGIONS) + (entry,))
+        return replace(state, context=tuple(e for e in state.context if e.spec.key != FACE_REGIONS.key) + (entry,))
 
     def release(self):
         self.session = None

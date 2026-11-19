@@ -206,7 +206,7 @@ class PipelineTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 ModelFile(path, hashlib.sha256(content).hexdigest())
 
-    def test_statistics_no_copy_and_exposure_precision_metadata_invalidation(self):
+    def test_statistics_survive_exposure_until_remeasured(self):
         measured = self.run_stage(stage())
         self.assertIs(measured.pixels, self.state.pixels)
         self.assertIs(measured.metadata, self.state.metadata)
@@ -220,7 +220,13 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(after.pixels.dtype, np.float32)
         self.assertEqual(after.pixel_revision, 1)
         self.assertIs(after.metadata, self.state.metadata)
-        self.assertIsNone(after.entry(LUMINANCE.key))
+        self.assertIs(after.entry(LUMINANCE.key), measured.entry(LUMINANCE.key))
+        skipped = self.run_stage(stage("disabled", enabled=False), after)
+        self.assertIs(skipped.entry(LUMINANCE.key), measured.entry(LUMINANCE.key))
+        refreshed = self.run_stage(stage("again"), skipped)
+        latest, = refreshed.context
+        self.assertEqual((latest.producer_id, latest.pixel_revision), ("again", 1))
+        self.assertGreater(latest.value.mean_luminance, stats.mean_luminance)
         np.testing.assert_array_equal(self.state.pixels[0, 1], [.25, .25, .25])
         with self.assertRaises(ValueError):
             self.state.pixels.flags.writeable = True
@@ -245,7 +251,8 @@ class PipelineTests(unittest.TestCase):
     def test_missing_stale_and_wrong_version_required_context_fail(self):
         self.register(OperationDescriptor("test.needs_stats", 1, "Consumer", requires=(LUMINANCE,)))
         measured = self.run_stage(stage())
-        for state in (self.state, replace(measured, pixel_revision=1), replace(measured, geometry_revision=1),
+        for state in (self.state, replace(measured, context=(replace(measured.context[0], pixel_revision=1),)),
+                      replace(measured, geometry_revision=1),
                       replace(measured, metadata=SourceMetadata("different-image")),
                       replace(measured, context=(replace(measured.context[0], spec=ContextSpec(LUMINANCE.key, 2)),))):
             with self.subTest(state=state.pixel_revision), self.assertRaises(RetouchingError) as error:
@@ -253,10 +260,10 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(error.exception.code, "CONTEXT_REQUIRED")
         self.assertIn("CONTEXT_REQUIRED", self.log.records[-2]["exception"])
 
-    def test_static_pixel_and_geometry_context_invalidation(self):
+    def test_static_context_survives_pixel_edits_until_geometry_changes(self):
         self.register(OperationDescriptor("test.consumer", 1, "Consumer", requires=(LUMINANCE,)))
         status = self.editor.load_data(pipeline(stage(), stage("e", "core.exposure", parameters={"stops": 1}), stage("c", "test.consumer")))
-        self.assertEqual(status.stages[-1].state, "blocked")
+        self.assertEqual(status.stages[-1].state, "ready")
         self.editor.set_enabled("e", False)
         self.assertTrue(self.editor.status.executable)
         self.editor.set_enabled("statistics", False)
@@ -264,9 +271,8 @@ class PipelineTests(unittest.TestCase):
         spatial = ContextSpec("test.spatial", pixel_sensitive=False)
         self.register(OperationDescriptor("test.spatial", 1, "Spatial provider", provides=(spatial,)))
         self.register(OperationDescriptor("test.spatial_consumer", 1, "Spatial consumer", requires=(spatial,)))
-        self.register(replace(EXPOSURE, operation="test.preserving_exposure", preserves=(spatial.key,)))
         self.register(OperationDescriptor("test.geometry", 1, "Geometry edit", changes_pixels=True, changes_geometry=True))
-        status = self.editor.load_data(pipeline(stage("s", "test.spatial"), stage("e", "test.preserving_exposure"), stage("c", "test.spatial_consumer")))
+        status = self.editor.load_data(pipeline(stage("s", "test.spatial"), stage("e", "core.exposure"), stage("c", "test.spatial_consumer")))
         self.assertTrue(status.executable)
         self.editor.add(stage("g", "test.geometry"))
         self.editor.reorder(("s", "e", "g", "c"))
@@ -310,14 +316,13 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(RetouchingError, "unknown parameters"):
             self.editor.load_data(pipeline(stage(parameters={"blend": .25})))
 
-    def test_explicit_spatial_preservation_and_geometry_invalidation_at_runtime(self):
+    def test_spatial_preservation_and_geometry_invalidation_at_runtime(self):
         spatial = ContextSpec("test.spatial", pixel_sensitive=False)
         self.register(OperationDescriptor("test.spatial", 1, "Synthetic spatial context", provides=(spatial,)))
-        self.register(replace(EXPOSURE, operation="test.preserve", preserves=(spatial.key,)), Exposure)
         context = ContextEntry(spatial, "producer", "test.spatial", 1, 0, 0, self.state.width, self.state.height, (),
                                source_id=self.state.metadata.source_id, producer_settings_hash="a" * 64)
         original = replace(self.state, context=(context,))
-        changed = self.run_stage(stage("e", "test.preserve", parameters={"stops": -1}), original)
+        changed = self.run_stage(stage("e", "core.exposure", parameters={"stops": -1}), original)
         self.assertIs(changed.entry(spatial.key), context)
         self.assertEqual(changed.pixel_revision, 1)
         class Resize(ReferenceOperation):
@@ -357,6 +362,8 @@ class PipelineTests(unittest.TestCase):
         self.register(OperationDescriptor("test.optional", 1, "Optional-context fixture", optional=(LUMINANCE,)), Fallback)
         measured = self.run_stage(stage())
         self.run_stage(stage("optional", "test.optional"), replace(measured, pixel_revision=1))
+        self.assertIs(observed[-1], measured.entry(LUMINANCE.key))
+        self.run_stage(stage("optional", "test.optional"), replace(measured, geometry_revision=1))
         self.assertIsNone(observed[-1])
         self.assertTrue(any(event["code"] == "SYNTHETIC_OPTIONAL_FALLBACK" and event["image_id"] == "image-test" for event in self.log.records))
 

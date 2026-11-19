@@ -149,9 +149,9 @@ class ContextEntry:
             raise ValueError("Context payload must be immutable typed data")
 
     def compatible(self, state):
+        """Stored outputs describe the producer's pixels in this image's coordinate frame."""
         return (self.source_id == state.metadata.source_id and self.geometry_revision == state.geometry_revision and self.width == state.width
-                and self.height == state.height and self.pixel_revision <= state.pixel_revision
-                and (not self.spec.pixel_sensitive or self.pixel_revision == state.pixel_revision))
+                and self.height == state.height and self.pixel_revision <= state.pixel_revision)
 
 
 @dataclass(frozen=True)

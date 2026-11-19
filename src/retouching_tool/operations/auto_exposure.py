@@ -3,8 +3,7 @@
 import math
 
 from ..pipeline.definition import OperationDescriptor, Parameter
-from ..pipeline.image_state import PERSON_FOREGROUND, ImageState
-from .reference import LUMINANCE
+from ..pipeline.image_state import ImageState
 
 
 DESCRIPTOR = OperationDescriptor(
@@ -13,7 +12,7 @@ DESCRIPTOR = OperationDescriptor(
         Parameter("strength", "Strength (0–1)", 0.5, 0, 1, preview_on_change=True),
         Parameter("max_stops", "Maximum correction (stops)", 1.0, 0, 2, preview_on_change=True),
     ),
-    invalidates=(LUMINANCE.key, PERSON_FOREGROUND.key), changes_pixels=True,
+    changes_pixels=True,
 )
 
 STRIP_ROWS = 64

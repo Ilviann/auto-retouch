@@ -32,7 +32,7 @@ class AutoExposureTests(unittest.TestCase):
     def event(self, code):
         return [call.kwargs for call in self.log.emit.call_args_list if call.args[0] == code][-1]
 
-    def test_dark_photo_respects_limit_preserves_color_and_invalidates_analysis(self):
+    def test_dark_photo_respects_limit_and_preserves_color_and_analysis(self):
         pixels = np.full((130, 5, 3), (0.08, 0.05, 0.03), dtype=np.float32)
         pixels[0, :4] = [(0, 0, 0), (1, 0.9, 0.7), (0.98, 0.9, 0.8), (0.95, 0.9, 0.8)]
         foreground = ContextEntry(PERSON_FOREGROUND, "foreground", "analysis.person_foreground", 1, 0, 2, 5, 130,
@@ -52,7 +52,7 @@ class AutoExposureTests(unittest.TestCase):
         self.assertGreater(edited.pixels[0, 2, 0], edited.pixels[0, 3, 0])
         self.assertLess(edited.pixels[0, 2, 0], 1)
         np.testing.assert_array_equal(measured.pixels, pixels)
-        self.assertEqual((edited.geometry_revision, edited.pixel_revision, edited.context), (2, 1, ()))
+        self.assertEqual((edited.geometry_revision, edited.pixel_revision, edited.context), (2, 1, measured.context))
         self.assertIs(measured.entry(PERSON_FOREGROUND.key), foreground)
         self.assertIsNotNone(measured.entry("image.luminance"))
         self.assertIs(edited.metadata, self.metadata)

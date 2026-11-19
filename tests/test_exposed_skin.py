@@ -140,7 +140,7 @@ class ExposedSkinTests(unittest.TestCase):
         _, stage = self.editor.resolve_scaling(self.editor.status.definition).stages
         runtime = StageRuntime(self.log, "cpu", self.editor.checkpoints, None, stage)
         with StageSession(self.editor.registry, self.editor.catalog, runtime) as session:
-            for state in (replace(state, context=(mask,), pixel_revision=1),
+            for state in (replace(state, context=(replace(mask, pixel_revision=1),)),
                           replace(state, context=(mask,), geometry_revision=1),
                           replace(state, context=(mask,), metadata=SourceMetadata("other"))):
                 with self.assertRaisesRegex(RetouchingError, "requires current skin.exposed"):
@@ -160,6 +160,24 @@ class ExposedSkinTests(unittest.TestCase):
             picture(self.index, self.image.image_id, "alone", stage_id=self.smoothing.id)
         self.editor.set_parameter(self.smoothing.id, "use_exposed_skin", False)
         self.assertTrue(self.editor.status.executable)
+
+    def test_latest_enabled_mask_replaces_previous_even_when_empty(self):
+        second = self.editor.add_operation(DESCRIPTOR.operation, 1, model_ref=MODEL.ref).stages[-1].stage
+        self.editor.reorder((self.analysis.id, second.id, self.smoothing.id))
+        self.run_model.side_effect = ([self.logits], [np.zeros_like(self.logits)])
+        picture = self.app.preview_service.picture
+        preview = picture(self.index, self.image.image_id, "new-mask", stage_id=self.smoothing.id, through_stage=True)
+        latest, = preview.context
+        self.assertEqual(latest.producer_id, second.id)
+        self.assertIn("empty", preview.stage_warning)
+        self.infer.assert_not_called()
+
+        self.editor.set_enabled(second.id, False)
+        self.run_model.side_effect = None
+        preview = picture(self.index, self.image.image_id, "first-mask", stage_id=self.smoothing.id, through_stage=True)
+        first, = preview.context
+        self.assertEqual(first.producer_id, self.analysis.id)
+        self.assertNotEqual(preview.original, preview.result)
 
     def test_disconnected_body_regions_without_a_face(self):
         self.logits.fill(0)
@@ -192,7 +210,10 @@ class ExposedSkinTests(unittest.TestCase):
         self.assertEqual(self.editor.status.stages[-1].stage.parameter("radius"), 8)
         self.editor.reorder((stage.id, self.analysis.id))
         self.assertEqual(self.editor.status.stages[0].state, "blocked")
-        self.editor.reorder((self.analysis.id, stage.id))
+        exposure = self.editor.add_operation("core.exposure", 1).stages[-1].stage
+        self.editor.set_parameter(exposure.id, "stops", -.5)
+        self.editor.reorder((self.analysis.id, exposure.id, stage.id))
+        self.assertTrue(self.editor.status.executable)
         samples = np.full((71, 119, 3), [180, 143, 125], dtype=np.uint8)
         samples[28:36, 52:60, 0] += 8
         source = self.root / "color.jpg"
@@ -204,6 +225,8 @@ class ExposedSkinTests(unittest.TestCase):
         self.assertEqual(missing.exception.code, "PREVIEW_CONTEXT_REQUIRED")
         comparison = picture(index, index.images[0].image_id, "masked", stage_id=stage.id, through_stage=True)
         self.assertNotEqual(comparison.original.rgb, comparison.result.rgb)
+        mask, = comparison.context
+        self.assertEqual((mask.producer_id, mask.pixel_revision), (self.analysis.id, 0))
         jobs = self.app.job_service
         frozen = []
         for mode in ("sequential", "staged"):
@@ -212,9 +235,23 @@ class ExposedSkinTests(unittest.TestCase):
             frozen.append(jobs.create(index, destination, mode=mode))
         self.editor.set_parameter(stage.id, "strength", 0)
         exports = []
-        for job in frozen:
+        for mode, job in zip(("sequential", "staged"), frozen, strict=True):
+            if mode == "staged":
+                control = JobControl()
+                commit = JobJournal.commit_stage
+
+                def pause_after_exposure(journal, image_id, stage_index, artifact, warnings):
+                    commit(journal, image_id, stage_index, artifact, warnings)
+                    if stage_index == 1:
+                        control.pause.set()
+
+                with patch.object(JobJournal, "commit_stage", pause_after_exposure):
+                    self.assertEqual(jobs.run(job, control=control).status, "paused")
+                self.run_model.reset_mock()
             result = jobs.run(job)
             self.assertEqual(result.status, "completed")
+            if mode == "staged":
+                self.run_model.assert_not_called()
             self.assertTrue(any(r["code"] == "SKIN_TONE_APPLIED" and r["job_id"] == job for r in self.log.records))
             with Image.open(result.images[0].output) as image:
                 exports.append(image.tobytes())

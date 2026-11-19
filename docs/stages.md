@@ -12,10 +12,9 @@ representation is normalized H×W×3 linear-sRGB float32 (12 pixel bytes per pix
 with bytes-backed read-only arrays and immutable source EXIF/profile bytes.
 Statistics carries source identity, producer/settings hash, operation/context
 versions, pixel/geometry revisions, dimensions and explicit oriented coordinates.
-Required stale/wrong-source/wrong-version context fails; stale optional context
-is absent. Pixel edits invalidate appearance measurements; spatial context can
-survive only an explicitly declared preservation, and geometry changes invalidate
-it. Source metadata bytes are retained across stages.
+Pixel edits retain each output and its original measurement revision. Required
+context must match the requested version, source and coordinate frame. A geometry
+change requires analysis in the new frame. Source metadata bytes are retained across stages.
 
 The 3b artifact slice now persists this reference representation and current typed
 statistics/measurement context in float32 TIFF plus strict JSON manifests, retaining
@@ -132,9 +131,9 @@ part of the default studio portrait pipeline.
 
 ## Exposed Skin Mask
 
-Add **Exposed Skin Mask** immediately before **Skin tone smoothing (Alibaba)** and
-select **Target exposed skin** on the smoothing card. Place blemish cleanup before
-this pair when using both retouching operations. **Preview** on the analysis stage
+Add **Exposed Skin Mask** anywhere before **Skin tone smoothing (Alibaba)** and
+select **Target exposed skin** on the smoothing card. The same mask can also guide
+**Local skin tone evening** earlier or later in the pipeline. **Preview** on the analysis stage
 shows body skin in green and face skin in magenta. **Preview in pipeline** on
 smoothing compares the actual masked edit with its input. Zoom to 100% to inspect
 hands, hairlines, clothing edges and overlapping subjects.
@@ -143,8 +142,8 @@ The stage classifies the whole oriented frame, independently of face detection.
 It stretches sRGB input to the model's 256 × 256 grid and retains the winning
 body-skin and face-skin classes. The other four classes receive zero coverage.
 It publishes a pooled `skin.exposed` v1 mask tied to the source, current pixel
-and geometry revisions, model and producer settings. Pixel edits require fresh
-analysis. Staged jobs store the labels losslessly inside the bounded manifest.
+and geometry revisions, model and producer settings. A second enabled mask stage
+replaces the first mask with a new analysis of its input. Staged jobs store the labels losslessly inside the bounded manifest.
 Preview and smoothing bilinearly sample the mask at output resolution to feather
 its edges. Smoothing evaluates the frame using its usual resize-consent rules
 and blends through the union of both skin classes in linear RGB. An empty mask
@@ -163,7 +162,7 @@ and [local verification](verification/exposed-skin.md).
 
 ## Local skin tone evening
 
-Place **Exposed Skin Mask** immediately before **Local skin tone evening** and
+Place **Exposed Skin Mask** anywhere before **Local skin tone evening** and
 choose **Preview in pipeline**. Inspect a small area of uneven cheek, neck or arm
 color at 100%. The stage adjusts local color in face and body skin, preserving
 linear luminance at each pixel so shadows, highlights and fine luminance texture
@@ -182,9 +181,9 @@ correction. The mask feathers the result. Fine facial features have no separate
 labels and touching subjects may share a neighborhood. Use a smaller radius
 where these boundaries matter. The initial settings still need portrait review.
 
-The required `skin.exposed` v1 entry must match the current pixels. An empty
-mask skips the image-stage edit and reports a warning. To follow another
-pixel-editing stage with this operation, run the mask stage after that edit.
+The **areas:skin** input uses the most recent upstream `skin.exposed` v1 mask
+for the photo's geometry. For example, exposure can run between mask analysis and
+tone evening. An empty mask skips the image-stage edit and reports a warning.
 [Verification](verification/skin-tone-evening.md).
 
 ## Alibaba skin-retouching stage
@@ -310,8 +309,8 @@ copy. A pixel-only stage carries metadata/context forward subject to invalidatio
 A stage can add or deliberately replace context entries using declared keys. It
 does not mutate an upstream cached state in place.
 
-Each operation descriptor declares context it provides, requires, optionally uses,
-preserves, or invalidates, as well as its pixel/geometry effects. Context entries
+Each operation descriptor declares context it provides, requires or optionally
+uses, as well as its pixel and geometry effects. Context entries
 record their producer, schema/model version, confidence when meaningful, source
 pixel/geometry revisions, and coordinate conventions. Use per-face/person IDs to
 associate related regions within the image; these are not identities across photos.
@@ -323,12 +322,12 @@ transform and resampling rules are explicit. Regions need pixel masks for select
 edits, not only bounding rectangles. Masks are persisted as artifacts rather than
 large JSON arrays inside pipeline settings.
 
-Crop, resize, rotation, or other geometry changes transform context correctly or
-invalidate it. Appearance-dependent measurements are invalid after relevant pixel
-edits. Spatial masks/landmarks can survive declared, validated photometric edits
-without pretending they were regenerated from the latest pixels. The producer and
-consumer contracts must specify this compatibility; uncertainty invalidates the
-entry. Parameter/model changes invalidate their context and downstream cache use.
+Crop, resize, rotation or other geometry changes require newly produced or remapped
+context. Photometric edits retain upstream masks, regions and measurements.
+For example, a luminance histogram describes the pixels at its producer. Add a
+second statistics stage to measure edited pixels and replace the histogram.
+Parameter or model changes invalidate the affected producer's cached results
+and downstream cache use.
 
 If optional context is absent, use only a documented fallback, such as computing
 cheap image statistics, or return a declared no-op with a visible warning. Precise

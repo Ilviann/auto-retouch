@@ -231,12 +231,8 @@ class StageCard(QFrame):
         effects = ["Source metadata is preserved."]
         if descriptor.changes_geometry:
             effects.append("A geometry change drops upstream context.")
-        elif descriptor.changes_pixels:
-            effects.append("Pixel edits drop pixel-dependent and unpreserved context.")
-        if descriptor.preserves:
-            effects.append(f"Can retain {', '.join(descriptor.preserves)}.")
-        if descriptor.invalidates:
-            effects.append(f"Invalidates {', '.join(descriptor.invalidates)}.")
+        else:
+            effects.append("Later stages can reuse each output until another stage writes the same key.")
         layout.addLayout(tag_row("Out", outputs, " ".join(effects)))
 
         self.parameters = {}

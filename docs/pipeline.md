@@ -38,7 +38,7 @@ Pipeline preflight checks operations, assets, and context. Batch execution also
 requires destination, path, and disk validation.
 The application catalog includes `core.auto_exposure` version 1. It is an
 independently editable CPU stage with strength and a maximum correction in stops.
-Place it before pixel-sensitive analysis stages. See the
+Place it before an analysis stage to measure the exposure-corrected pixels. See the
 [stage catalog](stages.md#initial-stage-catalog-and-image-state) for its tonal
 behavior and provisional defaults.
 The catalog includes independent person foreground and exposed-skin analysis
@@ -113,9 +113,12 @@ and use **Save JSON…** to place an editable copy in that folder.
   types, and must be unique within the pipeline.
 - Each registered operation supplies a versioned parameter schema, defaults, and
   required assets. Define a migration explicitly when a setting's meaning changes.
-- Declare required/optional/provided context keys, compatible context revisions,
-  and invalidation effects in the operation registry. Stage results preserve source
-  metadata and carry image/context forward according to those declarations.
+- Declare required, optional and provided context keys and versions in the operation
+  registry. For each photo, a stage reads the latest compatible output from an
+  earlier enabled producer. Reading a key or editing pixels keeps that value available.
+  A later producer of the same key replaces it, including when it produces an empty
+  result. Each output retains its source, producer and original pixel revision.
+  A geometry change requires outputs aligned with the new coordinate frame.
 - `model_ref` resolves to a local asset manifest containing version, checksum, and
   runtime requirements under the configured checkpoint folder. Runtime backends
   must support Python 3.14.

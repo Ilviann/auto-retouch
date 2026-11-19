@@ -24,7 +24,7 @@ DESCRIPTOR = OperationDescriptor("retouch.alibaba_skin", 1, "Alibaba skin retouc
     parameters=(Parameter("strength", "Strength", 1, 0, 1),
                 BooleanParameter("use_face_rects", "Use face rects from context", True, FACE_REGIONS.key),
                 *SCALING_PARAMETERS),
-    optional=(FACE_REGIONS,), preserves=(FACE_REGIONS.key,), changes_pixels=True,
+    optional=(FACE_REGIONS,), changes_pixels=True,
     model_refs=(MODEL.ref,), backends=MODEL.backends, inference_runtime="pytorch",
     resize_limit=ResizeLimit(MAX_INPUT_SIDE, bypass_if_zero="strength"))
 
