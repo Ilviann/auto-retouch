@@ -31,10 +31,14 @@ batch preflight, saved jobs and worker process.
   Worker errors and incomplete diagnostic delivery have their own notice.
 - **Pause** and a confirmed **Break** apply to an active worker at its next
   scheduler boundary. Escape and the processing window's close control also
-  ask before breaking an active run. A paused job can be continued, closed
-  for later, or canceled with confirmation. Closing the main application
-  requests a pause and waits for the worker to stop. **Open saved job…** lists
-  local journals by last update. **Continue** uses the frozen job settings.
+  ask before breaking an active run. **Continue** uses the paused batch's frozen
+  settings. **Discard batch** closes it and releases its journal and checkpoints.
+  Closing the application stops the worker at a safe boundary and discards the
+  batch. On relaunch, start a fresh batch and select **Skip existing files**.
+- **Export warnings and errors…** saves the messages received so far to a UTF-8
+  text file. It works while processing, while paused and with final results on
+  screen. The temporary report includes job, photo and operation context. Its
+  coverage is independent of general log rotation, severity and table limits.
 - The Qt adapter uses one background thread for scanning, preflight, freezing
   jobs, launching workers and reading journals. Application commands and
   worker transport retain their plain-Python and local process boundaries.
@@ -68,7 +72,7 @@ generated 40 × 30 JPEGs and CPU reference stages with real local worker subproc
 
 ```bat
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_desktop_batch.py -v
-.venv\Scripts\python.exe -B -m unittest discover -s tests -p test_jobs.py -v -k saved_jobs_discovers -k frozen_pipeline_compression_exif
+.venv\Scripts\python.exe -B -m unittest discover -s tests -p test_jobs.py -v -k discard_ -k frozen_pipeline_compression_exif
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_foundation.py -v -k headless_import_boundary -k static_qt_import_boundary -k explicit_settings_override
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_qt_integration.py -v
 ```
@@ -76,10 +80,12 @@ generated 40 × 30 JPEGs and CPU reference stages with real local worker subproc
 All 12 focused tests passed. The checks cover recursive scanning, explicit file selection via launch,
 unreadable headers, recursive destination rejection, a collision introduced
 after preflight, JPEG settings and capture EXIF, and unchanged source bytes.
-They also cover staged checkpoint progress, pause, reopening and resume,
-cancel, close-to-pause, frozen pipeline review, and recovery from a simulated
-worker exit. Headless checks cover frozen status metadata, read-only saved-job
-discovery with a malformed entry, and the Qt import boundary. The setup and
+The current checks cover staged checkpoint progress, pause and continue,
+cancel, discard on close, skip-existing on a fresh run, and recovery from a
+worker exit within the open batch. Text export checks cover worker and desktop
+events, more than 200 warnings, Critical-only general logging, Unicode, and a
+failed export followed by a successful retry. Headless checks cover cleanup
+after interruption and protection of other open batches and unrelated files. The setup and
 completed job layouts were inspected with Qt offscreen rendering.
 
 The desktop [pipeline editor](desktop-pipeline.md) was added in milestone 5b.

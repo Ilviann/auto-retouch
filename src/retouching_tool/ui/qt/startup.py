@@ -7,7 +7,11 @@ def run_desktop(snapshot, application) -> int:
     from PySide6.QtWidgets import QApplication
     from .main_window import MainWindow
 
+    application.job_service.discard_abandoned_jobs()
     app = QApplication([])
     window = MainWindow(snapshot, application.pipeline_service, application=application)
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        application.job_service.discard_abandoned_jobs()

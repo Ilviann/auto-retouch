@@ -15,6 +15,7 @@ from ..pipeline.assets import ModelCatalog
 from ..pipeline.definition import PipelineDefinition, parse_pipeline
 from ..pipeline.registry import application_registry
 from ..pipeline.validation import validate_pipeline
+from .state import WorkspaceState
 
 
 UNTITLED_PIPELINE = "Untitled pipeline"
@@ -32,6 +33,7 @@ class PipelineService:
                  scaling=ScalingSettings(), pytorch_backend=None, preset_folder=None):
         self.checkpoints, self.backend, self.diagnostics = checkpoints, backend, diagnostics
         self.autosave = autosave
+        self.state = WorkspaceState(autosave) if autosave is not None else None
         self.preset_folder = preset_folder if preset_folder is not None else checkpoints.parent / "pipelines"
         self.preset_path = None
         self.preset_notice = ""
@@ -63,10 +65,10 @@ class PipelineService:
         return self.registry.descriptor(stage.operation, stage.operation_version).execution_backend(
             self.backend, self.pytorch_backend)
 
-    def _commit(self, definition, *, persist=True, write_unchanged=True):
+    def _commit(self, definition, *, persist=True, write_unchanged=True, **state_fields):
         checked = validate_pipeline(definition, self.registry, self.catalog, self.checkpoints, self.backend, self.pytorch_backend)
         if persist and self.autosave is not None and (write_unchanged or checked.definition != self.status.definition):
-            self._write(self.autosave, checked.definition)
+            self._persist(checked.definition, **state_fields)
         self._apply_status(checked)
         return checked
 
@@ -96,12 +98,12 @@ class PipelineService:
         checked = validate_pipeline(previous, self.registry, self.catalog, checkpoints, self.backend, self.pytorch_backend)
         save_disabled = self.autosave is not None and checked.definition != previous
         if save_disabled:
-            self._write(self.autosave, checked.definition)
+            self._persist(checked.definition)
         try:
             yield
         except Exception:
             if save_disabled:
-                self._write(self.autosave, previous)
+                self._persist(previous)
             raise
         self.checkpoints = checkpoints
         self._apply_status(checked)
@@ -117,36 +119,38 @@ class PipelineService:
     def load(self, path: Path, *, persist=True):
         def action():
             definition = _name_untitled_pipeline(parse_pipeline(read_json(path), self.registry), path)
-            status = self._commit(definition, persist=persist)
+            checked = self._commit(definition, persist=persist, preset=str(path.absolute()))
             self.preset_path, self._saved_definition = path, definition
-            if persist:
-                self._remember_preset()
-            return status
+            self.preset_notice = ""
+            return checked
         return self._command(action, preset_path=path)
 
-    def _remember_preset(self, *, renamed=False):
+    def _persist(self, definition, **fields):
+        try:
+            self.state.update(pipeline=definition.to_json(), **fields)
+        except OSError as exc:
+            raise RetouchingError("PIPELINE_WRITE_FAILED", f"Cannot save working pipeline to {self.autosave}: {exc}") from exc
+
+    def _remember_preset(self):
         self.preset_notice = ""
         if self.autosave is None:
             return
         try:
-            # A fresh, empty pipeline can be saved before the first editor autosave.
-            if renamed or not self.autosave.exists():
-                atomic_json(self.autosave, self.status.definition.to_json())
-            atomic_json(self.autosave.with_name("last-preset.json"), str(self.preset_path.absolute()))
-        except OSError as exc:
+            self._persist(self.status.definition, preset=str(self.preset_path.absolute()))
+        except RetouchingError as exc:
             self.preset_notice = f"Cannot remember the selected preset for the next launch: {exc}"
             self.diagnostics.emit("PRESET_SELECTION_WRITE_FAILED", self.preset_notice, level="WARNING",
                                   component="pipeline", exc_info=True, preset_path=self.preset_path)
 
-    def restore(self):
+    def restore(self, data=None):
         """Restore working edits independently of the portable preset they came from."""
-        status = self.load_data(read_json(self.autosave), persist=False)
-        selection = self.autosave.with_name("last-preset.json")
+        data = self.state.read() if data is None else data
+        status = self.load_data(data["pipeline"], persist=False)
         try:
-            if selection.exists():
-                saved = read_json(selection)
+            if "preset" in data:
+                saved = data["preset"]
                 if not isinstance(saved, str) or not Path(saved).is_absolute():
-                    raise ValueError(f"Expected an absolute preset path in {selection}")
+                    raise ValueError(f"Expected an absolute preset path in {self.autosave}")
                 path = Path(saved)
                 self._saved_definition = _name_untitled_pipeline(parse_pipeline(read_json(path), self.registry), path)
                 self.preset_path = path
@@ -155,7 +159,7 @@ class PipelineService:
             self._saved_definition = None
             self.preset_notice = f"Restored the working pipeline. Its saved preset could not be read: {exc}"
             self.diagnostics.emit("PRESET_SELECTION_RESTORE_FAILED", self.preset_notice, level="WARNING",
-                                  component="pipeline", exc_info=True, selection_path=selection)
+                                  component="pipeline", exc_info=True, selection_path=self.autosave)
         return self.status
 
     def load_data(self, data, *, persist=True):
@@ -164,12 +168,16 @@ class PipelineService:
 
     def save(self, path: Path):
         definition = _name_untitled_pipeline(self.status.definition, path)
-        self._command(lambda: self._write(path, definition), preset_path=path)
+        def write_preset():
+            if self.autosave is not None and path.resolve() == self.autosave.resolve():
+                raise RetouchingError("PIPELINE_WRITE_FAILED", "Choose a preset filename separate from the desktop state file.")
+            self._write(path, definition)
+        self._command(write_preset, preset_path=path)
         renamed = definition != self.status.definition
         if renamed:
             self.status = replace(self.status, definition=definition)
         self.preset_path, self._saved_definition = path, definition
-        self._remember_preset(renamed=renamed)
+        self._remember_preset()
 
     @staticmethod
     def _write(path, definition):

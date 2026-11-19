@@ -16,7 +16,7 @@ were used for these checks.
   A corrupt JPEG, changed source, stage error or conflicting output has a durable
   per-image failure status. Other eligible images continue. `status(job_id)`
   reads job and image progress without starting processing.
-- Versioned SQLite journals live in `.state/jobs`, outside per-job scratch.
+- Versioned SQLite journals live under the configured temporary folder.
   A Windows workspace lock prevents simultaneous runners. The runner records a
   verified pending JPEG's filename, file identity and hash before the atomic
   no-overwrite rename. Recovery validates the recorded pending or published file

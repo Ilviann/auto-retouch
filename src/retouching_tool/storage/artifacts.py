@@ -115,22 +115,28 @@ class ArtifactStore:
                              level="ERROR", exc_info=True, component="storage", job_id=job_id, image_id=image_id)
             raise RetouchingError("ARTIFACT_STORE_FAILED", f"Cannot create job artifact storage: {exc}") from exc
 
+    @staticmethod
+    def read_owner(path):
+        require(path.resolve(strict=True) == path and not _linked(path), "Job directory must not be a link/junction")
+        owner = path / "owner.json"
+        require(not _linked(owner) and owner.is_file(), "Expected a regular ownership marker")
+        marker = read_json(owner, limit=4096)
+        require(isinstance(marker, dict), "Invalid job storage ownership marker")
+        fields(marker, "schema_version store_id job_id owner" + (" image_id" if "image_id" in marker else ""))
+        require(type(marker["schema_version"]) is int and marker["schema_version"] == 1
+                and marker["owner"] == "Auto ReTouch" and text(marker["job_id"])
+                and ("image_id" not in marker or text(marker["image_id"])), "Invalid job storage ownership/version")
+        ArtifactRef(marker["store_id"], "0" * 64, "0" * 64)
+        require(path.name == f"auto-retouch-job-{marker['store_id']}", "Unexpected job directory name")
+        return marker
+
     @classmethod
     def open(cls, directory, job_id, diagnostics, *, max_pixel_bytes=DEFAULT_PIXEL_LIMIT, image_id=None):
         try:
             path = Path(directory).absolute()
-            require(not _linked(path), "Job directory must not be a link/junction")
-            path = path.resolve(strict=True)
-            require(not _linked(path / "owner.json"), "Ownership marker must not be a link")
-            marker = read_json(path / "owner.json", limit=4096)
-            fields(marker, "schema_version store_id job_id owner" + (" image_id" if image_id is not None else ""))
-            require(type(marker["schema_version"]) is int and marker["schema_version"] == 1
-                    and marker["owner"] == "Auto ReTouch" and marker["job_id"] == job_id and text(job_id)
-                    and marker.get("image_id") == image_id,
-                    "Job storage ownership/version does not match")
-            # ArtifactRef also validates the store UUID.
-            ArtifactRef(marker["store_id"], "0" * 64, "0" * 64)
-            require(path.name == f"auto-retouch-job-{marker['store_id']}", "Unexpected job directory name")
+            marker = cls.read_owner(path)
+            require(marker["job_id"] == job_id and marker.get("image_id") == image_id,
+                    "Job storage ownership does not match")
             result = cls(path, marker, diagnostics, max_pixel_bytes)
             result._guard()
             return result
@@ -154,6 +160,52 @@ class ArtifactStore:
         for name in ("blobs", "states"):
             path = self.directory / name
             require(path.is_dir() and not _linked(path), "Artifact subdirectory is missing or is a link/junction")
+
+    @classmethod
+    def remove_empty_directory(cls, directory, marker, diagnostics):
+        """Called with the runner lock held after the journal releases this image store."""
+        context = dict(component="storage", job_id=marker["job_id"], image_id=marker["image_id"],
+                       store_id=marker["store_id"], directory=directory)
+        try:
+            removed = cls._remove_shell(directory, marker)
+        except (OSError, ValueError, RetouchingError):
+            diagnostics.emit("ARTIFACT_CLEANUP_FAILED", "Could not remove retired storage. Check its contents and permissions.",
+                             level="WARNING", exc_info=True, **context)
+            return False
+        else:
+            if removed:
+                diagnostics.emit("ARTIFACT_STORE_REMOVED", "Removed empty image checkpoint directory", **context)
+            else:
+                diagnostics.emit("ARTIFACT_STORE_RETAINED", "Retired directory contains other entries. Inspect it before removal.",
+                                 level="WARNING", **context)
+            return True
+
+    @classmethod
+    def _remove_shell(cls, directory, marker):
+        require("image_id" in marker and cls.read_owner(directory) == marker, "Job storage ownership changed")
+        folders = []
+        for entry in directory.iterdir():
+            if entry.name == "owner.json":
+                continue
+            if entry.name not in ("blobs", "states") or _linked(entry) or not entry.is_dir() or any(entry.iterdir()):
+                return False
+            folders.append(entry)
+        for folder in folders:
+            folder.rmdir()
+        identity = directory.stat()
+        owner = directory / "owner.json"
+        owner.unlink()
+        try:
+            directory.rmdir()
+        except OSError:
+            # A Windows directory handle can prevent rmdir after the marker was removed.
+            # Keep the same directory identifiable for a later cleanup attempt.
+            if (not _linked(directory) and directory.resolve(strict=True) == directory
+                    and os.path.samestat(identity, directory.stat())):
+                with owner.open("x", encoding="utf-8") as stream:
+                    json.dump(marker, stream)
+            raise
+        return True
 
     def _path(self, kind, name):
         # Names are always validated hashes or generated UUIDs, never source paths.

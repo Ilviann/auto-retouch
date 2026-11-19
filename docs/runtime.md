@@ -193,10 +193,15 @@ silently select another pipeline. With no explicit pipeline, restore the last va
 pipeline, falling back to a visible default only as documented in the pipeline
 contract. A successfully loaded valid pipeline becomes the current pipeline and
 participates in normal last-used persistence.
-The desktop also remembers paths after a successful source scan. Scan the
+The application-root `state.json` stores the last working pipeline, selected
+preset path and source paths. It records the normal size in logical pixels and
+maximized state separately for the main window, both preview windows and the
+batch processing dialog. When an older installation launches, it imports the
+recognized settings from `.state`. Portable pipeline files retain their existing
+format. The desktop remembers paths after a successful source scan. Scan the
 restored or command-line sources to build a fresh index. Recursion, destination,
-schedule and export options start at their setup defaults, while reopened jobs
-use their frozen settings.
+schedule and export options start at their setup defaults. Each new batch uses
+the current pipeline and export settings.
 
 Resolve relative CLI file/directory paths against the caller's working directory.
 Resolve an explicit configuration-file path the same way. Paths inside that file
@@ -276,9 +281,9 @@ The default file is `<app-root>\config.json`, with a versioned
   [disk space budget](requirements.md#disk-space-budgeting). Sum them for shared
   volumes, include declared extra artifact/write overhead, and monitor free space
   throughout execution. Do not automatically lower compression quality to fit.
-- Keep configuration, last-used pipeline/session state, and durable job metadata
-  outside disposable scratch directories. Clearing temporary data must not erase
-  the application configuration or last-used pipeline.
+- Keep configuration and last-used desktop state in the application root by
+  default. Store the open batch journal and temporary issue report under the
+  configured temporary folder, in a directory specific to this installation.
 - Application config, session state, `.venv`, checkpoints, and job artifacts are
   machine-local and excluded from source control. Version templates and dependency
   definitions. Persist config/session updates atomically.

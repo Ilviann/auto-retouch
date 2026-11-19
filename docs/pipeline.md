@@ -53,8 +53,10 @@ artifact manifests can carry optional checksummed XMP and IPTC blob references;
 earlier manifests still load. Include the decoder/color policy and relevant
 dependency versions in scheduler cache identity. Both headless schedules use
 the JPEG adapter and the same stage sessions as reference execution. The batch
-worker runs the saved snapshot using either schedule. The desktop job controls
-use that worker. See
+worker runs the frozen snapshot using either schedule. The desktop keeps that
+snapshot for the open progress dialog. Closing the dialog or exiting discards
+finished and unfinished batches. On a later run the user can skip existing
+outputs. See
 [artifact evidence](verification/lossless-artifacts.md),
 [JPEG evidence](verification/jpeg-boundary.md),
 [sequential job evidence](verification/sequential-jobs.md),
@@ -334,7 +336,7 @@ from validation; do not claim universal bitwise-identical GPU inference.
   Changing a stage invalidates that stage and all downstream cached results.
 - Store each intermediate image and its required masks/metadata as one committed
   logical state. Never mark a stage complete while its artifacts are partial.
-- Journal individual image-stage commits. On restart, validate committed artifacts
+- Journal individual image-stage commits. On worker restart within an open batch, validate committed artifacts
   and resume each image from its latest available valid dependency. If earlier
   dependencies have been reclaimed, recompute them from the source as needed.
 - Keep only dependencies needed for resume and the next stage, unless retention

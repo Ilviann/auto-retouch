@@ -24,9 +24,12 @@
   Other eligible images continue. An ownership or alias violation stops cleanup.
 - `status(job_id)` exposes mode, enabled stage IDs, and each staged image's
   completed stage count. Staged image attempts count all started stage and export
-  units. Published outputs and journals remain available after completion or
-  cancellation. Cleanup removes owned checkpoint payloads and keeps store markers
-  and unknown files.
+  units. Published outputs are kept. The desktop discards the journal when
+  the progress window closes. After retiring an image checkpoint, the runner removes its owned
+  payloads, releases its journal reference, and removes the empty store directory.
+  On launch, Auto ReTouch cleans up abandoned journals and their checkpoint
+  directories using each job's frozen scratch path and verified ownership markers.
+  Other open batches and unknown files stay in place.
 
 Staged preflight includes the full image set, source headers, TIFF/manifest
 overhead and one transactional replacement. Resume reserves additional
@@ -36,6 +39,11 @@ size before committing it, including any geometry change. Scratch and output
 reservations share a single free-space check when they use the same volume.
 
 ## Focused checks
+
+Generated-job tests verify directory removal on completion and cancellation,
+pause and restart recovery, and cleanup of older detached directories at launch.
+They also cover a busy runner, a malformed marker, foreign or nonempty stores,
+and cleanup after a simulated Windows directory lock.
 
 ```bat
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_jobs.py -v

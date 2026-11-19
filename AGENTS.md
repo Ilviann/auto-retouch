@@ -88,7 +88,9 @@ JPEG receipts. Staged jobs also recover lossless image-stage checkpoints. See
 Toolkit-free worker transport now runs and controls saved jobs from the prepared
 interpreter. See `docs/verification/worker-transport.md`. The desktop batch workflow
 now supports source selection, preflight, export settings, progress, pause, cancel,
-and saved-job resume. See `docs/verification/desktop-batch.md`.
+and continue within the open batch. The progress dialog exports warnings and
+errors to text. Discard finished and unfinished jobs when the dialog or app
+closes. Later runs can skip existing exports. See `docs/verification/desktop-batch.md`.
 No production neural stage or checkpoint has been selected. Synthetic reference
 tests do not establish portrait quality.
 

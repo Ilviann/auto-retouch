@@ -1,25 +1,26 @@
 """Create, run and resume local jobs through headless commands."""
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
+import re
 from threading import Event
 from uuid import uuid4
 
 from ..errors import ResizeApprovalRequired, RetouchingError
+from ..diagnostics.job_issues import JobIssues
 from ..imaging.scaling import fit_longest_side
 from ..imaging.export import export_image
 from ..imaging.export_settings import ExportSettings, JpegSettings, JxlSettings, require_jxl
 from ..imaging.jpeg import JpegRuntime, decode_jpeg
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import (MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError,
-                            open_journal, runner_lock, saved_job_files)
+                            open_issue_file, open_journal, runner_lock, saved_job_files, validate_job_id, workspace_key)
 from ..jobs.publication import PreparedExport, check_destination, checked_output, prepare_parent, recover_export
 from ..jobs.snapshot import FrozenInput, JobSnapshot, StageSkip, model_manifests, runtime_versions
 from ..pipeline.executor import StageRuntime, StageSession
 from ..pipeline.validation import validate_pipeline
-from ..storage.artifacts import fingerprint
-from ..storage.batch_paths import current_file_stamp, file_identity, resolve_folder, stamp_and_hash
+from ..storage.artifacts import ArtifactStore, fingerprint
+from ..storage.batch_paths import current_file_stamp, file_identity, output_path, resolve_folder, stamp_and_hash
 from .batch import BASE_SCRATCH_BYTES, BatchService, ExistingOutputs, SourceIndex, SourceRoot, volume_budgets
 from .staged_jobs import StagedRunner, validate_staged_progress
 
@@ -54,12 +55,6 @@ class JobStatus:
         return self.status in TERMINAL
 
 
-@dataclass(frozen=True)
-class SavedJob:
-    job_id: str
-    modified: datetime
-
-
 class JobControl:
     """Thread-safe requests observed between the scheduler's work units."""
 
@@ -74,30 +69,146 @@ class JobService:
         self.batch = batch
         self.pipeline = pipeline
         self.diagnostics = diagnostics
+        self.current_issues = None
+        self._used_folders = set()
 
-    def saved_jobs(self) -> tuple[SavedJob, ...]:
-        """Discover local journal IDs without opening or resuming their jobs."""
+    @property
+    def job_folder(self):
+        return self.batch.scratch / f"auto-retouch-jobs-{workspace_key(self.root)}"
+
+    def folder_for(self, job_id):
+        validate_job_id(job_id)
+        if self.current_issues is not None and job_id == self.current_issues.job_id:
+            return Path(self.current_issues.stream.name).parent
+        for folder in self._used_folders:
+            if (folder / f"{job_id}.sqlite3").is_file():
+                return folder
+        return self.job_folder
+
+    def create_current(self, index, destination, **kwargs):
+        job_id = uuid4().hex
+        if self.current_issues is not None:
+            raise RetouchingError("JOB_ALREADY_OPEN", "Close the current batch before starting another.")
         try:
-            paths = saved_job_files(self.root)
+            self.batch.validate_folders(index, destination)
+            issues = JobIssues(job_id, open_issue_file(self.job_folder, job_id))
         except (OSError, RetouchingError) as exc:
-            error = JournalError("Cannot list saved jobs. Check access to local job storage.")
-            self.diagnostics.emit(error.code, str(error), component="job", level="ERROR", exc_info=True)
-            raise error from exc
-        result = []
-        for path in paths:
-            try:
-                stamp = current_file_stamp(path)
-                modified = datetime.fromtimestamp(stamp.modified_ns / 1_000_000_000, timezone.utc)
-                result.append(SavedJob(path.stem, modified))
-            except (OSError, ValueError, OverflowError):
-                self._emit(path.stem, "JOB_DISCOVERY_SKIPPED", "Cannot inspect this saved journal. Check local job storage.",
-                           journal_path=path, level="WARNING", exc_info=True)
-        return tuple(sorted(result, key=lambda job: (job.modified, job.job_id), reverse=True))
+            self._emit(job_id, getattr(exc, "code", "JOB_CREATE_FAILED"), "Cannot open temporary storage for this batch.",
+                       level="ERROR", exc_info=True, scratch=self.batch.scratch)
+            raise
+        self.current_issues = issues
+        self.diagnostics.set_job_issues(issues)
+        try:
+            return self._create(job_id, index, destination, **kwargs)
+        except (ExistingOutputs, ResizeApprovalRequired):
+            self._release_current()
+            raise
 
-    def create(self, index, destination, *, mode="sequential", settings=JpegSettings(), selected_ids=None,
+    def _release_current(self):
+        self.diagnostics.set_job_issues(None)
+        issues = self.current_issues
+        self.current_issues = None
+        issues.stream.close()
+
+    def discard_current(self):
+        issues = self.current_issues
+        if issues is None:
+            return
+        try:
+            with runner_lock(self.root):
+                path = Path(issues.stream.name).with_suffix(".sqlite3")
+                if path.exists():  # Validation may have failed before a journal was created.
+                    self._discard_journal(path)
+        except Exception:
+            self._emit(issues.job_id, "JOB_DISCARD_FAILED", "Could not finish batch cleanup. Check access to its storage.",
+                       level="WARNING", exc_info=True)
+            raise
+        finally:
+            self._release_current()
+
+    def discard_abandoned_jobs(self):
+        """At desktop launch, remove journals whose owning desktop has exited."""
+        try:
+            legacy = self.root / ".state/jobs"
+            folders = {self.job_folder, *self._used_folders, legacy}
+            if not any(folder.exists() for folder in folders):
+                return
+            with runner_lock(self.root):
+                stores_by_root = {}
+                for path in (path for folder in folders for path in saved_job_files(folder)):
+                    if path.with_suffix(".issues").exists():
+                        continue
+                    try:
+                        self._discard_journal(path, stores_by_root)
+                    except (OSError, TypeError, ValueError, RetouchingError):
+                        self._emit(path.stem, "JOB_DISCARD_FAILED", "Could not clean up the previous batch. Check its storage.",
+                                   level="WARNING", exc_info=True)
+            if legacy.is_dir() and legacy.resolve() == legacy:
+                lock = legacy / "runner.lock"
+                if set(legacy.iterdir()) == {lock} and current_file_stamp(lock).size == 0:
+                    lock.unlink()
+                if not any(legacy.iterdir()):
+                    legacy.rmdir()
+                    if not any(legacy.parent.iterdir()):
+                        legacy.parent.rmdir()
+        except (OSError, RetouchingError) as exc:
+            if getattr(exc, "code", None) != "JOB_RUNNER_BUSY":
+                self.diagnostics.emit("JOB_DISCARD_FAILED", "Could not inspect previous batches.", component="jobs",
+                                      level="WARNING", exc_info=True)
+
+    def _discard_journal(self, path, stores_by_root=None):
+        stamp = current_file_stamp(path)
+        with open_journal(path.parent, path.stem) as journal:
+            job = self._load(journal, path.stem)
+            for item, row in zip(job.inputs, journal.images(), strict=True):
+                if row["status"] == "prepared":
+                    receipt = PreparedExport.parse(row["receipt"])
+                    check_destination(job)
+                    output, _ = output_path(job.destination, job.output_relative(item), allow_existing=True)
+                    pending = output.with_name(receipt.pending_name)
+                    if pending.exists():
+                        receipt.verify(pending)
+                        pending.unlink()
+            if job.mode == "staged":
+                if any(row["store_id"] for row in journal.images()):
+                    journal.cancel_remaining()
+                    StagedRunner(self, journal, job, JobControl()).clean_finished()
+                # Also retire detached stores before dropping their ownership evidence.
+                if job.scratch.is_dir():
+                    if stores_by_root is None:
+                        stores_by_root = {}
+                    if job.scratch not in stores_by_root:
+                        stores_by_root[job.scratch] = self._scratch_stores(job.scratch)
+                    images = {item.image_id for item in job.inputs}
+                    for directory, marker in stores_by_root[job.scratch].get(job.job_id, ()):
+                        if directory.exists() and marker["image_id"] in images:
+                            if not ArtifactStore.remove_empty_directory(directory, marker, self.diagnostics):
+                                raise JournalError("Cannot release checkpoint storage. Cleanup will retry on launch.")
+        if current_file_stamp(path).identity != stamp.identity:
+            raise JournalError("The batch journal changed during cleanup.")
+        path.unlink()
+
+    def _scratch_stores(self, scratch):
+        candidates = {}
+        for directory in scratch.iterdir():
+            if not re.fullmatch(r"auto-retouch-job-[0-9a-f]{32}", directory.name):
+                continue
+            try:
+                marker = ArtifactStore.read_owner(directory)
+            except (OSError, ValueError, RetouchingError):
+                self.diagnostics.emit("ARTIFACT_OWNER_UNVERIFIED", "Skipped directory with unverifiable ownership.",
+                                      component="storage", level="WARNING", exc_info=True, directory=directory)
+                continue
+            if "image_id" in marker:
+                candidates.setdefault(marker["job_id"], []).append((directory, marker))
+        return candidates
+
+    def create(self, index, destination, **options):
+        return self._create(uuid4().hex, index, destination, **options)
+
+    def _create(self, job_id, index, destination, *, mode="sequential", settings=JpegSettings(), selected_ids=None,
                resize_approvals=(), existing_decision=None) -> str:
         """Validate and persist a frozen job. No photos are decoded or exported here."""
-        job_id = uuid4().hex
         context = {"index_id": index.index_id, "destination_path": destination}
         try:
             if not isinstance(settings, ExportSettings):
@@ -153,7 +264,9 @@ class JobService:
                                    versions,
                                    model_manifests(definition, self.pipeline.catalog), skipped, tuple(inputs), plan.mode,
                                    self.pipeline.pytorch_backend, tuple(approvals))
-            with open_journal(self.root, job_id, create=True) as journal:
+            folder = self.job_folder
+            self._used_folders.add(folder)
+            with open_journal(folder, job_id, create=True) as journal:
                 journal.initialize(snapshot.encode(), (item.image_id for item in inputs),
                                    skipped_ids={p.source.image_id for p in plan.images if p.skip})
         except ExistingOutputs:
@@ -184,7 +297,7 @@ class JobService:
 
     def read_snapshot(self, job_id) -> tuple[JobSnapshot, JobStatus]:
         """Read the saved settings and committed results without reopening processing inputs."""
-        with open_journal(self.root, job_id) as journal:
+        with open_journal(self.folder_for(job_id), job_id) as journal:
             job = self._load(journal, job_id)
             return job, self._status(journal, job)
 
@@ -197,7 +310,7 @@ class JobService:
     def run(self, job_id, *, control: JobControl | None = None) -> JobStatus:
         """Run synchronously. A new call resumes an interrupted or paused job."""
         try:
-            with runner_lock(self.root), open_journal(self.root, job_id) as journal:
+            with runner_lock(self.root), open_journal(self.folder_for(job_id), job_id) as journal:
                 job = self._load(journal, job_id)
                 if job.mode == "staged":
                     StagedRunner(self, journal, job, control or JobControl()).run()

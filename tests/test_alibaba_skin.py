@@ -117,7 +117,7 @@ class AlibabaTests(unittest.TestCase):
                 with self.assertRaises(ResizeApprovalRequired):
                     jobs.create(index, dest, mode=mode)
                 job_id = jobs.create(index, dest, mode=mode, resize_approvals=approval)
-                with open_journal(self.root, job_id) as journal:
+                with open_journal(self.app.job_service.folder_for(job_id), job_id) as journal:
                     self.assertEqual(journal.snapshot()["resize_approvals"], list(approval))
                 result = jobs.run(job_id)
                 self.assertEqual(result.status, "completed")

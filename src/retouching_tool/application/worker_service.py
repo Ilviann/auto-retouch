@@ -8,6 +8,7 @@ from threading import Event, Lock, Thread
 from uuid import uuid4
 
 from ..diagnostics.service import MAX_EVENT_BYTES, redact
+from ..config import LOG_LEVELS
 from ..errors import RetouchingError
 from ..jobs.journal import validate_job_id
 
@@ -74,10 +75,25 @@ class WorkerRun:
         total = 0
         try:
             with self._process.stderr as stream:
-                while chunk := stream.read1(4096):
+                prefix = b"Diagnostic fallback "
+                continued = False
+                while chunk := stream.readline(MAX_EVENT_BYTES + len(prefix) + 2):
                     total += len(chunk)
                     tail.extend(chunk)
                     del tail[:-STDERR_LIMIT]
+                    if not continued and chunk.startswith(prefix) and chunk.endswith(b"\n"):
+                        try:
+                            encoded = chunk[len(prefix):].decode("utf-8").rstrip("\r\n")
+                            event = json.loads(encoded)
+                            if not isinstance(event, dict):
+                                raise ValueError("Expected a worker event")
+                            self._validate_event(event)
+                        except (ValueError, RecursionError):
+                            self._emit("WORKER_PROTOCOL_FAILED", "Could not read a fallback diagnostic.",
+                                       level="WARNING", exc_info=True)
+                        else:
+                            self._diagnostics.receive(event, encoded)
+                    continued = not chunk.endswith(b"\n")
         except OSError:
             self._emit("WORKER_STDERR_FAILED", "Could not read all worker stderr.", level="WARNING", exc_info=True)
             return total > STDERR_LIMIT, True
@@ -99,7 +115,8 @@ class WorkerRun:
     def _validate_event(self, frame):
         if (frame.get("schema_version") != 1 or frame.get("worker_run_id") != self.run_id
                 or frame.get("job_id") != self.job_id or frame.get("session_id") != self._diagnostics.session_id
-                or any(not isinstance(frame.get(key), str) for key in ("code", "severity", "message"))):
+                or frame.get("severity") not in LOG_LEVELS
+                or any(not isinstance(frame.get(key), str) for key in ("code", "message"))):
             raise ValueError("Unexpected worker diagnostic event")
 
     def _monitor(self):
@@ -168,7 +185,7 @@ class WorkerRun:
         elif exit_code:
             incomplete = True
             error_code = "WORKER_EXITED"
-            message = "Batch worker exited unexpectedly. Review its diagnostics and resume the saved job."
+            message = "Batch worker exited unexpectedly. Review its diagnostics before continuing the batch."
             self._emit(error_code, message, level="ERROR", exit_code=exit_code, **last_image)
         elif summary is None or error is not None:
             incomplete = True
@@ -190,9 +207,10 @@ class WorkerRun:
 
 
 class WorkerService:
-    def __init__(self, root, backend, diagnostics, *, pytorch_backend=None):
+    def __init__(self, root, backend, diagnostics, folder_for, *, pytorch_backend=None):
         self.root, self.backend, self.diagnostics = root, backend, diagnostics
         self.pytorch_backend = pytorch_backend
+        self.folder_for = folder_for
         self._lock = Lock()
         self._active = None
 
@@ -200,7 +218,8 @@ class WorkerService:
         return [sys.executable, "-I", "-B", "-X", "utf8", "-X", "faulthandler",
                 "-m", "retouching_tool.jobs.worker_process", str(self.root.resolve()), job_id,
                 self.backend, *(["--pytorch-backend", self.pytorch_backend] if self.pytorch_backend else []),
-                self.diagnostics.session_id, run_id, self.diagnostics.settings.level]
+                "--temporary", str(self.folder_for(job_id).parent), self.diagnostics.session_id, run_id,
+                "WARNING" if self.diagnostics.settings.level in ("ERROR", "CRITICAL") else self.diagnostics.settings.level]
 
     def start(self, job_id) -> WorkerRun:
         """Start or resume a saved job. Read progress through the existing job service."""

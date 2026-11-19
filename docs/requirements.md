@@ -75,6 +75,11 @@ presets rather than fixed processing paths.
 | U63 | Settings specifies the pipeline preset folder, defaulting to the application's `pipelines` subfolder. A picker above the stages lists its JSON presets. Ask for confirmation before loading a preset when the current pipeline has unsaved changes. |
 | U64 | Provide **Check all** and **Uncheck all** buttons for including or excluding all photos in the image list. |
 | U65 | Show elapsed processing time and estimated remaining time in the batch processing window. |
+| U66 | Generate all source thumbnails once per scan and cache them for reuse when scrolling. |
+| U67 | Clean up temporary job folders when their contents are no longer needed. Preserve checkpoints required to resume a job. |
+| U68 | Discard the batch when the progress window or application closes, including unfinished work. To continue later, start a new batch with the current pipeline and choose to skip existing output files. |
+| U69 | Provide a button in the progress dialog to export all warnings and errors for the current batch to a local text file. |
+| U70 | Store persistent desktop state in `state.json` in the application root. Restore the last pipeline, source selection, and sizes of the main, photo preview, stage preview and batch processing windows. Store job working data in the configured temporary folder. |
 
 ### Feature priorities
 
@@ -107,7 +112,7 @@ Representative coverage and visual acceptance remain unreviewed.
 | F06 | Allow per-image settings and selected-image reprocessing. |
 | F07 | Reuse a common preset for a studio setup while estimating corrections per image. Avoid normalizing distinct natural skin tones to one target tone. |
 | F08 | Show queued, running, completed, failed, and canceled work, with progress, estimated remaining time, and actionable errors. Review flags are separate from execution status. |
-| F09 | Pause after the current image-stage unit, resume, cancel remaining work, and recover interrupted jobs in either scheduling mode. |
+| F09 | Pause at a safe boundary, continue the open batch, or cancel remaining work in either scheduling mode. |
 | F10 | Continue past an isolated corrupt image or processing failure and provide a batch summary. |
 | F11 | Export settings provide format and encoder controls, original pixel dimensions by default, destination, and names. Preserve originals and handle output-name collisions explicitly. Keep export adapters separate for later WebP and AVIF support. |
 | F12 | Preserve source capture EXIF in exports and add tool/version processing provenance. Normalize orientation, dimensions, and profile-related fields to match the actual output; keep original capture time and author/copyright information. |
@@ -250,9 +255,9 @@ only faces cannot by themselves satisfy this scope.
   used by Windows and the display. Validate supported image sizes experimentally.
 - Never silently reduce exported resolution to work around memory limits.
 - Keep the interface responsive while work runs in a separate processing process.
-- Save job state, settings, and model versions locally so work can be resumed.
-- Journal progress per image and stage. Completed staged results must remain
-  recoverable after interruption without restarting every preceding stage.
+- Freeze job state, settings and model versions for the open batch.
+- Journal progress per image and stage so an open batch can continue from a
+  checkpoint. A new application session starts a fresh batch.
 - Sequential and staged execution implement the same ordered pipeline. Their
   output must agree within a documented numerical tolerance for the same inputs,
   parameters, checkpoints, precision, and seed where relevant.

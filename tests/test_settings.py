@@ -85,11 +85,14 @@ class SettingsTests(unittest.TestCase):
 
         after = app.job_service.create(index, destination)
         for job_id, config in ((before, self.config), (after, saved)):
-            with open_journal(self.root, job_id) as journal:
+            self.assertEqual(app.job_service.folder_for(job_id).parent, config.temporary)
+            with open_journal(app.job_service.folder_for(job_id), job_id) as journal:
                 job = journal.snapshot()
             self.assertEqual(Path(job["scratch"]), config.temporary)
             self.assertEqual(Path(job["checkpoints"]), config.checkpoints)
-        self.assertEqual(app.job_service.run(before).status, "completed")
+        self.assertEqual(app.job_worker.start(before).wait(30).exit_code, 0)
+        self.assertEqual(app.job_service.status(before).status, "completed")
+        self.assertFalse((self.root / ".state").exists())
         self.assertTrue((destination / "photo.jpg").is_file())
 
     def test_preset_folder_discovery_and_unsaved_changes_across_restart(self):
@@ -145,8 +148,7 @@ class SettingsTests(unittest.TestCase):
         legacy = {**editor.status.definition.to_json(), "name": "Empty foundation pipeline"}
         preset = self.config.pipelines / "Face ReTouch.json"
         atomic_json(preset, legacy)
-        atomic_json(editor.autosave, legacy)
-        atomic_json(editor.autosave.with_name("last-preset.json"), str(preset))
+        self.application.state.update(pipeline=legacy, preset=str(preset))
 
         options = LaunchOptions((), None, self.path)
         startup = self.application.startup(options, "directml")

@@ -73,7 +73,7 @@ class PipelineTests(unittest.TestCase):
         status = self.editor.load_data(data)
         snapshot = self.editor.preflight()
         self.assertEqual(snapshot.stages[1].parameter("stops"), 0)
-        self.assertEqual(parse_pipeline(read_json(self.root / "last.json"), self.registry), snapshot)
+        self.assertEqual(parse_pipeline(read_json(self.root / "last.json")["pipeline"], self.registry), snapshot)
         self.editor.set_parameters("exposure", {"stops": 1})
         self.editor.set_enabled("exposure", False)
         self.assertTrue(snapshot.stages[1].enabled)
@@ -99,7 +99,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(status.stages[-1].state, "unavailable")
         self.assertFalse(status.definition.stages[-1].enabled)
         self.assertEqual(status.definition.stages[-1].model_ref, "test-model")
-        self.assertEqual(parse_pipeline(read_json(self.root / "last.json"), self.registry), status.definition)
+        self.assertEqual(parse_pipeline(read_json(self.root / "last.json")["pipeline"], self.registry), status.definition)
         with self.assertRaises(RetouchingError):
             self.editor.add_operation("test.analysis", 1)
         self.assertIs(self.editor.status, status)
@@ -158,7 +158,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("fixture.bin", status.stages[0].issues[0].message)
         self.assertEqual(status.stages[0].model_page, "https://example.test/model")
         self.assertEqual(explicit.read_bytes(), before)
-        self.assertFalse(read_json(self.root / "last.json")["stages"][0]["enabled"])
+        self.assertFalse(read_json(self.root / "last.json")["pipeline"]["stages"][0]["enabled"])
         with self.assertRaises(RetouchingError):
             self.editor.set_enabled("model", True)
         with self.assertRaises(RetouchingError):
@@ -294,7 +294,7 @@ class PipelineTests(unittest.TestCase):
         full = self.run_stage(raw)
         partial = self.editor.set_parameter("exposure", "blend", .25).definition
         self.assertNotEqual(partial.stages[0].identity, explicit.identity)
-        self.assertEqual(parse_pipeline(read_json(self.editor.autosave), self.registry), partial)
+        self.assertEqual(parse_pipeline(read_json(self.editor.autosave)["pipeline"], self.registry), partial)
         mixed = self.run_stage(partial.to_json()["stages"][0])
         np.testing.assert_array_equal(mixed.pixels, self.state.pixels * .75 + full.pixels * .25)
         self.assertFalse(mixed.pixels.flags.writeable)

@@ -22,3 +22,14 @@ The headless import checks also passed.
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_qt_integration.py -k model_card -v
 .venv\Scripts\python.exe -B -m unittest discover -s tests -p test_foundation.py -k config -k qt_import_boundary -k headless_import_boundary -k log_rotation -k log_storage -v
 ```
+
+## Persistent desktop state
+
+Upgrade tests import the legacy pipeline edits, preset reference and source
+selection into the application-root `state.json`. Concurrent state updates
+preserve independent fields. Offscreen Qt restart tests exercise independent
+sizes for the main window, photo and stage previews, and batch processing.
+They also cover a malformed size and restoration of a maximized main window.
+A subprocess test runs a frozen job in its original configured temporary
+folder after Settings selects another folder. A cleanup test retires a journal
+from the previous `.state/jobs` layout.

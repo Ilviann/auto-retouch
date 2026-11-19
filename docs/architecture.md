@@ -171,7 +171,7 @@ These modules must import and run without a QApplication or Qt event loop.
 
 The application layer exposes typed plain-Python commands and results for source
 indexing, folder validation, configuration editing/validation/save, pipeline
-edits/load/save, previews, batch start/pause/cancel/resume, history, and diagnostics.
+edits/load/save, previews, batch start/pause/cancel/continue, and diagnostics.
 Use dataclasses and small protocols where
 they clarify contracts; do not build a generic abstraction for every widget.
 Validate actions in application services so rules are consistent for any GUI.
@@ -332,8 +332,10 @@ committed. Bounded rolling storage can keep predecessor/current stage frontiers
 instead of every historical intermediate.
 
 Both headless schedules run through `ApplicationService.job_service`.
-It stores one versioned SQLite journal per job under `.state/jobs`, with a workspace
-runner lock. It freezes source hashes, pipeline, compression, backend/package
+It stores one versioned SQLite journal per job in an installation-specific
+directory under the configured temporary folder. A transient workspace lock in
+the Windows temp folder serializes runners and AI previews across configuration
+changes. The journal freezes source hashes, pipeline, compression, backend/package
 versions and checkpoint manifests before processing. Each sequential image is a
 restart unit. The runner prepares and releases one stage at a time, checks free
 space before starting the next image, and records a receipt after JPEG verification
@@ -355,9 +357,9 @@ Readers use job status for durable progress. The workspace lock serializes
 execution across processes. The parent drains worker diagnostics and stderr in
 the background. The worker reads processing inputs from the saved job and
 artifact stores. The desktop adapter schedules indexing, preflight, job
-creation, saved-job discovery and status reads on a single background thread.
-It displays committed progress and waits for a safe pause when the window is
-closed during an active run. See [worker evidence](verification/worker-transport.md)
+creation, text report export, status reads and batch cleanup on a background thread.
+It displays committed progress. Closing the application stops the worker at a
+safe boundary and discards the batch. See [worker evidence](verification/worker-transport.md)
 and [desktop batch evidence](verification/desktop-batch.md).
 
 ## Previews and configuration persistence
@@ -498,7 +500,7 @@ lock also covers neural previews. See the
   work units when supported. Otherwise report the failure and continue. Never
   retry indefinitely or silently select a weaker quality mode.
 - Export to a temporary file in the destination directory. Validate and finalize
-  it before recording success. On restart, reconcile outputs with persisted item
+  it before recording success. On worker restart in an open batch, reconcile outputs with persisted item
   revisions so interruption between finalization and database commit is safe.
 - Verify actual model-resource release at staged boundaries. If the runtime keeps
   GPU allocations alive, destroy its sessions or recycle the worker before loading

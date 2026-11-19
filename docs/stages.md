@@ -295,7 +295,7 @@ the source photographer's author/copyright metadata. Append an editing/export
 provenance record with processing time, tool version and the pipeline snapshot's
 SHA-256 in XMP history. Preserve prior history and
 retain a previous Software value in provenance rather than silently discarding it.
-Keep full pipeline settings and checkpoint details in job history/diagnostics;
+Keep full pipeline settings and checkpoint details in current-job diagnostics;
 do not embed face coordinates, dense masks, or machine-local paths by default.
 
 The adapter checks capture tags and provenance by reopening the temporary export.

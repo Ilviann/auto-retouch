@@ -131,7 +131,7 @@ and captures stderr where the failing process can still produce it.
 - End each batch with counts of successes, images with warnings, failures,
   canceled/unprocessed inputs, retries, and grouped warning/error reasons. Expose
   affected files and distinguish completion with warnings or partial failure from
-  clean success. Retain these summaries with job history.
+  clean success. Show the summary until the current progress dialog closes.
 
 ## Event context
 
@@ -233,9 +233,11 @@ the app or recursively flood another logger.
 Proposed configuration: `paths.logs`, `logging.level`, `logging.max_file_mb`,
 `logging.max_total_mb`, and `logging.retention_days`. Defaults are INFO, 10 MB per
 file, 200 MB total retained logs, and 14 days. Apply size/age rotation to owned logs
-and bootstrap files, and report retention failures. Preserve durable job summaries
-separately from rotated event logs. Cleanup never targets images, checkpoints,
-pipeline JSON, or job-recovery metadata.
+and bootstrap files, and report retention failures. The open batch collects
+warnings and errors separately in a temporary file. **Export warnings and
+errors…** saves a readable local copy with the original event details. Closing
+the batch releases its journal and temporary report. General diagnostic logs
+continue to follow their configured retention policy.
 
 If logs cannot be persisted because of permissions or disk exhaustion, show a
 persistent diagnostics warning and use console plus a bounded in-memory fallback.

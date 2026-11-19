@@ -3,8 +3,12 @@
 The workspace places source and destination controls above the pipeline editor
 and photo grid. Source selection, recursion changes, and restored sources trigger
 a header scan. **Rescan source folder** refreshes the current index. Clicking a tile
-selects it for viewing. Its checkbox controls batch inclusion. Thumbnails
-decode locally one at a time, and the grid releases offscreen icons.
+selects it for viewing. Its checkbox controls batch inclusion. The grid generates
+thumbnails for all readable headers in scan order, with one local decode in
+flight. It keeps each finished 108 × 88 icon in RAM until the scan changes or
+the window closes. A failed decode shows a warning until the next scan.
+Offscreen Qt tests count one decode attempt per photo across repeated scrolling
+and exercise a source change while an old decode is still running.
 
 The batch summary shows indexed temporary and JPEG output estimates before a
 destination is set. Changing inclusion or schedule recalculates the estimates.

@@ -1,4 +1,5 @@
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import os
@@ -116,7 +117,7 @@ class FoundationTests(unittest.TestCase):
             snapshot.backend = "cuda"
 
     def test_explicit_invalid_pipeline_never_falls_back_or_persists(self):
-        saved = self.write(".state/last-pipeline.json", DEFAULT_PIPELINE)
+        saved = self.write("state.json", {"schema_version": 1, "pipeline": DEFAULT_PIPELINE})
         before = saved.read_bytes()
         for data in ({"bad": True}, {**DEFAULT_PIPELINE, "stages": [{"operation": "unknown"}]}):
             explicit = self.write("bad.json", data)
@@ -124,8 +125,31 @@ class FoundationTests(unittest.TestCase):
                 self.service().startup(self.options(pipeline=explicit), "cpu")
             self.assertEqual(saved.read_bytes(), before)
 
+    def test_legacy_state_migrates_working_edits_preset_and_sources_once(self):
+        source = self.root / "фото"
+        source.mkdir()
+        preset = self.write("preset.json", {**DEFAULT_PIPELINE, "name": "Original preset"})
+        working = {**DEFAULT_PIPELINE, "name": "Edited pipeline"}
+        self.write(".state/session.json", {"schema_version": 1, "sources": [str(source)]})
+        self.write(".state/last-pipeline.json", working)
+        self.write(".state/last-preset.json", str(preset))
+        app = self.service()
+        snapshot = app.startup(self.options(), "cpu")
+        self.assertEqual((snapshot.sources, snapshot.pipeline_name), ((source,), "Edited pipeline"))
+        self.assertEqual(app.pipeline_service.preset_path, preset)
+        self.assertTrue(app.pipeline_service.has_unsaved_changes)
+        self.assertFalse((self.root / ".state").exists())
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            def remember(name):
+                self.service().state.update(windows={name: {"width": 640, "height": 480, "maximized": False}})
+            list(pool.map(remember, ("main", "photo_preview", "stage_preview", "processing")))
+        state = read_json(self.root / "state.json")
+        self.assertEqual(set(state["windows"]), {"main", "photo_preview", "stage_preview", "processing"})
+        self.assertEqual((state["sources"], state["preset"], state["pipeline"]), ([str(source)], str(preset), working))
+        self.assertFalse((self.root / "state.json.lock").exists())
+
     def test_invalid_restore_visible_and_original_preserved(self):
-        path = self.write(".state/last-pipeline.json", {"bad": True})
+        path = self.write("state.json", {"schema_version": 1, "pipeline": {"bad": True}})
         before = path.read_bytes()
         snapshot = self.service().startup(self.options(), "cpu")
         self.assertTrue(any("invalid or unsupported" in notice for notice in snapshot.notices))

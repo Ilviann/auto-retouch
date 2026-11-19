@@ -129,6 +129,7 @@ def main():
     parser.add_argument("job_id")
     parser.add_argument("backend")
     parser.add_argument("--pytorch-backend", choices=("cpu", "cuda"))
+    parser.add_argument("--temporary", type=Path, required=True)
     parser.add_argument("session_id")
     parser.add_argument("run_id")
     parser.add_argument("level")
@@ -146,7 +147,7 @@ def main():
     result = None
     running_job = False
     try:
-        batch = BatchService(args.root / ".work", diagnostics)
+        batch = BatchService(args.temporary, diagnostics)
         pipeline = PipelineService(args.root / "models", args.backend, diagnostics, pytorch_backend=args.pytorch_backend)
         jobs = JobService(args.root, batch, pipeline, diagnostics)
         diagnostics.emit("WORKER_READY", "Opened batch worker", component="worker", backend=args.backend,

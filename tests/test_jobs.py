@@ -21,7 +21,7 @@ from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
 from retouching_tool.imaging.export_settings import JpegSettings, PngSettings, TiffSettings, parse_settings
-from retouching_tool.jobs.journal import MAX_ATTEMPTS, JobJournal, JournalError, open_journal, runner_lock
+from retouching_tool.jobs.journal import MAX_ATTEMPTS, JobJournal, JournalError, open_journal, runner_lock, saved_job_files
 from retouching_tool.operations.reference import Exposure, ReferenceOperation
 from retouching_tool.pipeline.definition import OperationDescriptor
 from retouching_tool.storage.artifacts import ArtifactStore, MANIFEST_LIMIT
@@ -143,7 +143,7 @@ with fault:
         return result
 
     def checkpoint_directories(self, job_id):
-        with open_journal(self.root, job_id) as journal:
+        with open_journal(self.jobs.folder_for(job_id), job_id) as journal:
             scratch = Path(journal.snapshot()["scratch"])
             return {row["image_id"]: scratch / f"auto-retouch-job-{row['store_id']}"
                     for row in journal.images() if row["store_id"] is not None}
@@ -304,7 +304,7 @@ with fault:
             self.assertFalse(original_tiff.exists())
             result = self.open_app().job_service.run(job_id)
         self.assertEqual(result.status, "completed")
-        self.assertEqual(list((directory / "blobs").iterdir()), [])
+        self.assertFalse(directory.exists())
 
     def test_staged_real_process_exit_on_either_side_of_the_checkpoint_commit(self):
         self.jpeg("a.jpg")
@@ -321,7 +321,7 @@ with fault:
                 self.assertEqual(len(list((directory / "states").glob("*.json"))), 2)
                 result = self.open_app().job_service.run(job_id)
                 self.assertEqual((result.status, result.images[0].attempts), ("completed", final_attempts))
-                self.assertEqual(list((directory / "blobs").iterdir()), [])
+                self.assertFalse(directory.exists())
 
     def test_staged_damaged_intermediate_rebuilds_only_affected_input(self):
         self.jpeg("a.jpg")
@@ -455,10 +455,94 @@ with fault:
         self.assertEqual([image.status for image in result.images], ["canceled", "canceled"])
         self.assertEqual([image.attempts for image in result.images], [1, 0])
         self.assertTrue(all(not image.output.exists() for image in result.images))
-        self.assertEqual(list((directory / "states").iterdir()), [])
+        self.assertFalse(directory.exists())
         self.assertEqual(unrelated.read_bytes(), b"keep")
         self.assertEqual(self.jobs.run(job_id), result)
         self.assertEqual(first.images[0].completed_stages, 1)
+
+    def test_startup_reclaims_detached_empty_stores_and_abandoned_checkpoints(self):
+        self.jpeg("a.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        paused = self.pause_after_checkpoint(job_id)
+        image_id = paused.images[0].image_id
+        active = self.checkpoint_directories(job_id)[image_id]
+
+        def detached(owner=job_id):
+            return ArtifactStore.create(active.parent, owner, self.log, image_id=image_id).directory
+
+        old = detached()
+        partial = detached()
+        (partial / "states").rmdir()
+        foreign = detached("0" * 32)
+        with_files = detached()
+        note = with_files / "states" / "notes.txt"
+        note.write_bytes(b"keep")
+        invalid = detached()
+        (invalid / "owner.json").write_text("{}")
+        with runner_lock(self.root):
+            self.jobs.discard_abandoned_jobs()
+            self.assertTrue(old.exists())
+        self.open_app().job_service.discard_abandoned_jobs()
+        self.assertFalse(old.exists())
+        self.assertFalse(partial.exists())
+        self.assertFalse(active.exists())
+        self.assertTrue(foreign.is_dir())
+        self.assertTrue(invalid.is_dir())
+        self.assertTrue(any(event["code"] == "ARTIFACT_OWNER_UNVERIFIED" and "Traceback" in event["exception"]
+                            for event in self.log.records))
+        self.assertEqual(note.read_bytes(), b"keep")
+        self.assertFalse(paused.images[0].output.exists())
+
+    def test_locked_retired_directory_is_removed_on_next_startup(self):
+        self.jpeg("a.jpg")
+        self.load_staged_reference()
+        job_id = self.create(mode="staged")
+        self.pause_after_checkpoint(job_id)
+        directory, = self.checkpoint_directories(job_id).values()
+        rmdir = Path.rmdir
+
+        def locked(path):
+            if path == directory:
+                raise PermissionError("fixture open directory handle")
+            rmdir(path)
+
+        with patch.object(Path, "rmdir", locked):
+            result = self.jobs.run(job_id)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(ArtifactStore.read_owner(directory)["job_id"], job_id)
+        event = next(e for e in self.log.records if e["code"] == "ARTIFACT_CLEANUP_FAILED")
+        self.assertIn("fixture open directory handle", event["exception"])
+        self.assertEqual(event["image_id"], result.images[0].image_id)
+        self.open_app().job_service.discard_abandoned_jobs()
+        self.assertFalse(directory.exists())
+
+    def test_discard_abandoned_batches_preserves_exports_and_another_open_batch(self):
+        self.jpeg("a.jpg")
+        self.load_staged_reference()
+        paused = self.create(mode="staged")
+        self.pause_after_checkpoint(paused)
+        checkpoint, = self.checkpoint_directories(paused).values()
+        index = self.app.batch_service.index((self.source,))
+        live = self.jobs.create_current(index, self.destination)
+        self.addCleanup(self.jobs.discard_current)
+        finished = self.create()
+        output = self.jobs.run(finished).images[0].output
+        expected = output.read_bytes()
+        self.open_app().job_service.discard_abandoned_jobs()
+        self.assertEqual([path.stem for path in saved_job_files(self.jobs.job_folder)], [live])
+        self.assertFalse(checkpoint.exists())
+        self.assertEqual(output.read_bytes(), expected)
+
+    def test_discard_interrupted_prepared_export_removes_only_its_pending_file(self):
+        self.jpeg("a.jpg")
+        job_id = self.create()
+        self.interrupted_worker(job_id, "before")
+        unrelated = self.destination / ".auto-retouch-other.pending"
+        unrelated.write_bytes(b"keep")
+        self.jobs.discard_abandoned_jobs()
+        self.assertEqual(list(self.destination.iterdir()), [unrelated])
+        self.assertEqual(saved_job_files(self.jobs.job_folder), ())
 
     def test_staged_empty_pipeline_and_isolated_stage_failure(self):
         a = self.jpeg("a.jpg")
@@ -538,22 +622,33 @@ with fault:
         self.assertTrue(result.terminal)
         self.assertEqual(self.jobs.run(job_id), result)
 
-    def test_saved_jobs_discovers_existing_journals_without_running_them(self):
-        folder = self.root / ".state" / "jobs"
-        self.assertEqual(self.jobs.saved_jobs(), ())
-        self.assertFalse(folder.exists())
+    def test_discard_only_removes_verified_journals(self):
         self.jpeg("a.jpg")
         job_id = self.create()
-        (folder / "unrelated.sqlite3").touch()
+        folder = self.jobs.job_folder
+        unrelated = folder / "unrelated.sqlite3"
+        unrelated.write_bytes(b"keep")
         invalid = "f" * 32
         (folder / f"{invalid}.sqlite3").mkdir()
-        reopened = self.open_app().job_service
-        self.assertEqual([job.job_id for job in reopened.saved_jobs()], [job_id])
-        self.assertEqual(reopened.status(job_id).status, "queued")
-        self.assertEqual(list(self.destination.iterdir()), [])
-        warning = next(event for event in self.log.records if event["code"] == "JOB_DISCOVERY_SKIPPED")
+        self.jobs.discard_abandoned_jobs()
+        self.assertFalse((folder / f"{job_id}.sqlite3").exists())
+        self.assertEqual(unrelated.read_bytes(), b"keep")
+        self.assertTrue((folder / f"{invalid}.sqlite3").is_dir())
+        warning = next(event for event in self.log.records if event["code"] == "JOB_DISCARD_FAILED")
         self.assertEqual(warning["job_id"], invalid)
         self.assertIn("Traceback", warning["exception"])
+
+    def test_previous_version_job_directory_is_retired_on_upgrade(self):
+        self.jpeg("a.jpg")
+        job_id = self.create()
+        legacy = self.root / ".state/jobs"
+        legacy.mkdir(parents=True)
+        journal = self.jobs.job_folder / f"{job_id}.sqlite3"
+        journal.rename(legacy / journal.name)
+        (legacy / "runner.lock").touch()
+        self.jobs.discard_abandoned_jobs()
+        self.assertFalse((self.root / ".state").exists())
+        self.assertEqual(list(self.destination.iterdir()), [])
 
     def test_bad_entropy_and_valid_neighbor_are_both_accounted_for(self):
         broken = self.jpeg("a-truncated.jpg")
@@ -737,7 +832,7 @@ with fault:
                 destination = self.root / mode
                 destination.mkdir()
                 job_id = self.jobs.create(index, destination, mode=mode)
-                with open_journal(self.root, job_id) as journal:
+                with open_journal(self.jobs.folder_for(job_id), job_id) as journal:
                     snapshot = journal.snapshot()
                 self.assertEqual((snapshot["backend"], snapshot["pytorch_backend"]), ("directml", "cpu"))
                 self.assertIn("pytorch", snapshot["versions"])
@@ -752,7 +847,7 @@ with fault:
         self.jpeg("portrait.jpg")
         self.load_staged_reference()
         job_id = self.create(mode="staged")
-        with open_journal(self.root, job_id) as journal:
+        with open_journal(self.jobs.folder_for(job_id), job_id) as journal:
             self.assertNotIn("pytorch_backend", journal.snapshot())
         self.pause_after_checkpoint(job_id)
         self.app.pipeline_service.pytorch_backend = "cpu"
@@ -800,7 +895,7 @@ with fault:
     def test_corrupt_snapshot_is_rejected_with_no_export(self):
         self.jpeg("portrait.jpg")
         job_id = self.create()
-        with open_journal(self.root, job_id) as journal, journal.connection:
+        with open_journal(self.jobs.folder_for(job_id), job_id) as journal, journal.connection:
             journal.connection.execute("UPDATE job SET snapshot = '{}' WHERE id = 1")
         event = self.failure("JOB_JOURNAL_FAILED", lambda: self.jobs.run(job_id))
         self.assertIn("checksum", event["message"])

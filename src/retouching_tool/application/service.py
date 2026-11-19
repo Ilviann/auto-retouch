@@ -12,13 +12,14 @@ from ..errors import RetouchingError
 from ..imaging.export_settings import encode_settings
 from ..jobs.journal import validate_job_id
 from ..jobs.snapshot import model_manifests, runtime_versions
-from ..json_io import atomic_json, read_json
+from ..json_io import atomic_json
 from ..storage.batch_paths import probe_writable, resolve_folder
 from .batch import BatchService
 from .contracts import StartupSnapshot
 from .job_service import JobService
 from .pipeline_service import PipelineService, UNTITLED_PIPELINE
 from .preview import PreviewService
+from .state import WorkspaceState
 from .worker_service import WorkerService
 
 DEFAULT_PIPELINE = {"schema_version": 1, "name": UNTITLED_PIPELINE, "stages": []}
@@ -30,28 +31,36 @@ class ApplicationService:
         self.batch_service = BatchService(config.temporary, diagnostics)
         self.diagnostic_history = DiagnosticHistory(diagnostics, root / "logs")
         self._source_index = None
+        self.state = WorkspaceState(root / "state.json")
+        self.window_state_warning = ""
+        if config.file == self.state.path:
+            raise RetouchingError("CONFIG_INVALID", "state.json is reserved for desktop state. Choose a different config file.")
 
     def startup(self, options: LaunchOptions, backend: str, *, pytorch_backend=None) -> StartupSnapshot:
         notices = []
-        state = self.root / ".state"
+        try:
+            self.state.migrate(self.diagnostics)
+            data = self.state.read()
+        except (OSError, RetouchingError) as exc:
+            self.diagnostics.emit("STATE_RESTORE_FAILED", "Could not restore desktop state.", component="application",
+                                  level="WARNING", exc_info=True, state_path=self.state.path)
+            notices.append(f"Could not restore desktop state: {exc}")
+            data = {}
         editor = PipelineService(self.config.checkpoints, backend, self.diagnostics,
                                  preset_folder=self.config.pipelines,
-                                 autosave=state / "last-pipeline.json", scaling=self.config.scaling, pytorch_backend=pytorch_backend)
+                                 autosave=self.state.path, scaling=self.config.scaling, pytorch_backend=pytorch_backend)
         self.pipeline_service = editor
         self.preview_service = PreviewService(self.root, editor, self.diagnostics)
         self.job_service = JobService(self.root, self.batch_service, editor, self.diagnostics)
-        self.job_worker = WorkerService(self.root, backend, self.diagnostics, pytorch_backend=pytorch_backend)
+        self.job_worker = WorkerService(self.root, backend, self.diagnostics, self.job_service.folder_for,
+                                        pytorch_backend=pytorch_backend)
         if options.sources:
             sources = options.sources
         else:
-            session = state / "session.json"
             sources = ()
-            if session.exists():
+            if "sources" in data:
                 try:
-                    data = read_json(session)
-                    if (not isinstance(data, dict) or set(data) != {"schema_version", "sources"}
-                            or type(data["schema_version"]) is not int or data["schema_version"] != 1
-                            or not isinstance(data["sources"], list)
+                    if (not isinstance(data["sources"], list)
                             or any(not isinstance(p, str) or not Path(p).is_absolute() for p in data["sources"])):
                         raise RetouchingError("SESSION_INVALID", "Invalid restored source selection")
                     sources = tuple(dict.fromkeys(Path(p).resolve() for p in data["sources"]))
@@ -65,11 +74,10 @@ class ApplicationService:
             pipeline = editor.load(options.pipeline).definition.to_json()
             origin = str(options.pipeline)
         else:
-            previous = state / "last-pipeline.json"
-            if previous.exists():
+            if "pipeline" in data:
                 try:
-                    pipeline = editor.restore().definition.to_json()
-                    origin = str(previous)
+                    pipeline = editor.restore(data).definition.to_json()
+                    origin = str(self.state.path)
                 except RetouchingError as exc:
                     self.diagnostics.emit("PIPELINE_RESTORE_FAILED", str(exc), level="WARNING", exc_info=True)
                     notices.append("Last-used pipeline is invalid or unsupported. Open a preset or add operations to start again.")
@@ -82,12 +90,12 @@ class ApplicationService:
             notices.append(self.diagnostics.failure)
         # Persist only a successfully selected pipeline, never replace a corrupt autosave on fallback.
         try:
-            if options.pipeline is None and origin == str(state / "last-pipeline.json"):
-                atomic_json(state / "last-pipeline.json", pipeline)
+            if options.pipeline is None and origin == str(self.state.path) and pipeline != data["pipeline"]:
+                self.state.update(pipeline=pipeline)
             if options.sources:
                 self._save_sources(sources)
         except OSError as exc:
-            raise RetouchingError("STATE_WRITE_FAILED", f"Cannot save last-used settings in {state}; check permissions/free space: {exc}") from exc
+            raise RetouchingError("STATE_WRITE_FAILED", f"Cannot save last-used settings in {self.state.path}: {exc}") from exc
         if editor.preset_notice:
             notices.append(editor.preset_notice)
         self.diagnostics.emit("STARTUP_STATE_READY", "Startup settings loaded; no processing started", component="application",
@@ -139,7 +147,7 @@ class ApplicationService:
         index = self.batch_service.index(sources, recursive=recursive)
         try:
             self._save_sources(sources)
-        except OSError as exc:
+        except (OSError, RetouchingError) as exc:
             error = RetouchingError("SOURCE_SELECTION_WRITE_FAILED",
                                     "Cannot save the source selection. Check access to local application state.")
             self.diagnostics.emit(error.code, str(error), component="application", level="ERROR", exc_info=True,
@@ -202,8 +210,7 @@ class ApplicationService:
             raise error from exc
 
     def _save_sources(self, sources):
-        atomic_json(self.root / ".state" / "session.json",
-                    {"schema_version": 1, "sources": [str(Path(p).absolute()) for p in sources]})
+        self.state.update(sources=[str(Path(p).absolute()) for p in sources])
 
     @staticmethod
     def _validate_sources(sources):

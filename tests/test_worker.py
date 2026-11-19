@@ -290,6 +290,9 @@ class WorkerTests(unittest.TestCase):
         self.assertGreater(events["WORKER_LOG_DROPPED"]["dropped"]["INFO"], 0)
         self.assertGreater(events["WORKER_LOG_DROPPED"]["dropped"]["WARNING"], 0)
         self.assertIn("Diagnostic fallback", events["WORKER_STDERR"]["stderr_tail"])
+        warnings = [event["message"] for event in self.persisted_records()
+                    if event.get("worker_run_id") == run.run_id and event["code"] == "WORKER_TEST_WARNING"]
+        self.assertCountEqual(warnings, [f"Warning {number}" for number in range(20)])
 
     def test_run_failure_returns_actionable_code_and_preserves_child_traceback(self):
         job_id = self.create("sequential")

@@ -7,6 +7,7 @@ from .batch_panel import BatchPanel
 from .diagnostics_dialog import DiagnosticsDialog
 from .pipeline_panel import PipelinePanel
 from .settings_dialog import SettingsDialog
+from .window_size import WindowSize
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
         if application is None:
             layout.addWidget(self.pipeline_page)
         else:
+            WindowSize(self, "main", application)
             self.batch_panel = BatchPanel(snapshot.sources, application, self.pipeline_page)
             diagnostics = QPushButton("Diagnostics…", objectName="openDiagnostics")
             diagnostics.clicked.connect(lambda: self._diagnostics())
@@ -48,9 +50,11 @@ class MainWindow(QMainWindow):
             warning.setWordWrap(True)
             layout.addWidget(warning)
             diagnostics_timer = QTimer(self, interval=500)
-            diagnostics_timer.timeout.connect(lambda: warning.setText(application.diagnostics.failure or ""))
+            def update_warning():
+                warning.setText("\n".join(filter(None, (application.diagnostics.failure, application.window_state_warning))))
+            diagnostics_timer.timeout.connect(update_warning)
             diagnostics_timer.start()
-            warning.setText(application.diagnostics.failure or "")
+            update_warning()
         self.setCentralWidget(content)
 
     def _diagnostics(self, job_id=""):

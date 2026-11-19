@@ -216,7 +216,7 @@ class QtIntegrationTests(unittest.TestCase):
 
                 invalid = root / "invalid.json"
                 invalid.write_text("{", encoding="utf-8")
-                autosave = root / ".state" / "last-pipeline.json"
+                autosave = root / "state.json"
                 before = autosave.read_bytes()
                 with patch.object(QMessageBox, "question") as confirm:
                     select_file("openPipeline", invalid)

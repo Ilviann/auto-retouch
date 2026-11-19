@@ -1,15 +1,17 @@
 """Versioned SQLite checkpoints for local jobs. One runner owns the workspace."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import sqlite3
+import tempfile
 
 from ..errors import RetouchingError
-from ..storage.batch_paths import current_file_stamp, output_path
+from ..json_io import exclusive_file
+from ..storage.batch_paths import current_file_stamp, is_reparse
 
 MAX_ATTEMPTS = 3
 TERMINAL = ("completed", "completed_with_errors", "canceled")
@@ -51,38 +53,39 @@ class JournalError(RetouchingError):
         super().__init__("JOB_JOURNAL_FAILED", message)
 
 
-def _jobs_folder(root: Path, *, create=False) -> Path:
-    root = root.resolve(strict=True)
-    relative = Path(".state/jobs/job")
-    folder = root
-    for name in relative.parts[:-1]:
-        folder /= name
-        if create:
-            folder.mkdir(exist_ok=True)
-        else:
-            folder.lstat()
-        # Validate existing components before creating descendants.
-        output_path(root, folder.relative_to(root) / "job", allow_existing=True)
+def _jobs_folder(folder: Path, *, create=False) -> Path:
+    if folder.resolve() != folder:
+        raise JournalError(f"Job storage resolves elsewhere: {folder}")
+    if create:
+        folder.mkdir(parents=True, exist_ok=True)
+    info = folder.lstat()
+    if is_reparse(info) or not folder.is_dir():
+        raise JournalError(f"Expected a regular job directory at {folder}")
     return folder
+
+
+def workspace_key(root):
+    return hashlib.sha256(os.path.normcase(str(root.resolve())).encode("utf-8")).hexdigest()[:24]
 
 
 @contextmanager
 def runner_lock(root):
     import msvcrt
-
-    directory = _jobs_folder(root, create=True)
-    lock = directory / "runner.lock"
-    try:
-        with lock.open("xb"):
-            pass
-    except FileExistsError:
-        current_file_stamp(lock)
-    with lock.open("r+b") as stream:
+    # Serialize one installation across different scratch/config choices.
+    lock = Path(tempfile.gettempdir()) / f"auto-retouch-runner-{workspace_key(root)}.lock"
+    with ExitStack() as stack:
         try:
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as exc:
+            stack.enter_context(exclusive_file(lock))
+        except FileExistsError as exc:
             raise RetouchingError("JOB_RUNNER_BUSY", "Another batch or AI preview is processing. Retry after it stops.") from exc
-        # Closing the handle also releases the region on worker termination.
+        legacy = root / ".state/jobs/runner.lock"
+        if legacy.exists():
+            current_file_stamp(legacy)
+            stream = stack.enter_context(legacy.open("r+b"))
+            try:
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise RetouchingError("JOB_RUNNER_BUSY", "Another batch or AI preview is processing.") from exc
         yield
 
 
@@ -91,22 +94,29 @@ def validate_job_id(job_id):
         raise JournalError("Invalid job ID. Select a job saved by Auto ReTouch.")
 
 
-def saved_job_files(root):
+def saved_job_files(folder):
     try:
-        directory = _jobs_folder(root)
+        directory = _jobs_folder(folder)
     except FileNotFoundError:
         return ()
     return tuple(path for path in directory.iterdir()
                  if re.fullmatch(r"[0-9a-f]{32}\.sqlite3", path.name))
 
 
+def open_issue_file(folder, job_id):
+    validate_job_id(job_id)
+    path = _jobs_folder(folder, create=True) / (job_id + ".issues")
+    # Windows releases the session's ownership marker and report together, even on process exit.
+    return open(path, "x+b", opener=lambda name, flags: os.open(name, flags | os.O_TEMPORARY))
+
+
 @contextmanager
-def open_journal(root, job_id, *, create=False):
+def open_journal(folder, job_id, *, create=False):
     validate_job_id(job_id)
     connection = None
     try:
         try:
-            path = _jobs_folder(root, create=create) / (job_id + ".sqlite3")
+            path = _jobs_folder(folder, create=create) / (job_id + ".sqlite3")
             if create:
                 with path.open("xb"):
                     pass

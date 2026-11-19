@@ -1,11 +1,31 @@
 """Strict, bounded JSON reads and atomic writes for local settings."""
 
 import json
+from contextlib import contextmanager
 import os
 import tempfile
+from time import monotonic, sleep
 from pathlib import Path
 
 from .errors import RetouchingError
+
+
+@contextmanager
+def exclusive_file(path, *, wait=0):
+    """A transient Windows lock released by the OS even on abrupt process exit."""
+    deadline = monotonic() + wait
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_TEMPORARY)
+            break
+        except (FileExistsError, PermissionError):
+            if monotonic() >= deadline:
+                raise
+            sleep(0.02)
+    try:
+        yield
+    finally:
+        os.close(fd)
 
 
 def _unique(pairs):
@@ -51,7 +71,7 @@ def read_json(path: Path, *, limit: int = 1_048_576):
         raise RetouchingError("JSON_INVALID", f"Cannot read {path}: {exc}") from exc
 
 
-def atomic_json(path: Path, data) -> None:
+def atomic_json(path: Path, data, *, limit=None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -61,6 +81,8 @@ def atomic_json(path: Path, data) -> None:
             json.dump(data, stream, indent=2, ensure_ascii=False, allow_nan=False)
             stream.write("\n")
             stream.flush()
+            if limit is not None and os.fstat(stream.fileno()).st_size > limit:
+                raise RetouchingError("JSON_TOO_LARGE", f"Cannot save {path}: JSON exceeds {limit} bytes.")
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:

@@ -46,7 +46,7 @@ class StagedRunner:
 
     def run(self):
         if self.journal.status() in TERMINAL:
-            self._clean_finished()
+            self.clean_finished()
             return
         for item, row in self._rows():
             if row["status"] == "prepared":
@@ -65,7 +65,7 @@ class StagedRunner:
             self.journal.set_status("running")
             self._run_passes()
         if not self._pending() and self.journal.status() != "canceled":
-            self._clean_finished()
+            self.clean_finished()
             failed = any(row["status"] == "failed" for _, row in self._rows())
             self.journal.set_status("completed_with_errors" if failed else "completed")
         self.service._emit_accounting(self.journal, self.job)
@@ -79,7 +79,7 @@ class StagedRunner:
     def _stop_requested(self):
         if self.control.cancel.is_set():
             self.journal.cancel_remaining()
-            self._clean_finished()
+            self.clean_finished()
             return True
         if self.control.pause.is_set():
             self.journal.set_status("paused")
@@ -108,7 +108,7 @@ class StagedRunner:
             raise RetouchingError("JOB_FOLDER_CHANGED", "Checkpoint path resolves elsewhere. Restore it before resuming.")
         return store
 
-    def _clean_finished(self):
+    def clean_finished(self):
         for item, row in self._rows():
             if row["status"] not in ACTIVE and row["store_id"] is not None:
                 self._retire(item, row, self._store(item, row))
@@ -118,11 +118,13 @@ class StagedRunner:
             stage_index = max(0, row["next_stage"] - 1)
             runtime = self._runtime(item, stage_index, row["unit_attempts"], self.service.diagnostics)
             store.retain_image_checkpoint(None, runtime=runtime)
-        if row["store_id"] is not None:
+            self.journal.clear_store(item.image_id, store.marker["store_id"])
+            store.remove_empty_directory(store.directory, store.marker, self.service.diagnostics)
+        elif row["store_id"] is not None:
             self.journal.clear_store(item.image_id, row["store_id"])
 
     def _prepare_checkpoints(self):
-        self._clean_finished()
+        self.clean_finished()
         for item, row in self._pending():
             try:
                 checked_output(self.job, item)

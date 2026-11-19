@@ -70,8 +70,8 @@ publishing exports. Both headless schedules support restart recovery. Staged
 execution keeps a lossless checkpoint for each active image and encodes the selected format
 after the final stage releases its resources. Both modes run in a local worker
 process. The desktop workspace keeps the pipeline editor, source and destination
-paths, photo thumbnails, and export settings on one screen. **Job progress and
-history** opens the monitor below the batch controls. See
+paths, photo thumbnails, and export settings on one screen. **Start processing**
+opens the progress dialog. See
 [JPEG verification](docs/verification/jpeg-boundary.md),
 [staged job verification](docs/verification/staged-jobs.md), and
 [desktop workspace verification](docs/verification/desktop-workspace.md).
@@ -130,9 +130,18 @@ Choose a destination and set the schedule and JPEG options. Disk status updates
 automatically when you select folders, rescan, change the included photos, or
 switch schedules. Select **Start processing** when the batch is ready.
 The processing window shows progress and per-photo results. **Pause** waits for
-the current unit to finish. **Continue** resumes the saved job. **Break** asks
+the current unit to finish. **Continue** resumes the open batch. **Break** asks
 for confirmation before canceling the remaining work and keeps completed exports.
-To resume after relaunching, choose **Open saved job…** and then **Continue**.
+Use **Export warnings and errors…** to save the current batch's messages to a
+UTF-8 text file before closing the progress window. Closing the window or the
+application discards the batch. To finish a shoot later, start a fresh batch
+with the same destination and choose **Skip existing files**.
+
+Auto ReTouch keeps the working pipeline, selected preset, source selection and
+window sizes in `state.json` in the application root, next to the default
+`config.json`. The main window, photo preview, stage preview and batch progress
+dialog remember their sizes independently. Job files use the temporary folder
+selected in Settings. Older installations migrate their desktop settings on launch.
 
 Run focused desktop batch checks in the existing environment:
 

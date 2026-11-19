@@ -83,6 +83,7 @@ class EventLogger:
 class Diagnostics(EventLogger):
     def __init__(self, directory: Path, settings: LoggingSettings | None = None, *, session_id=None, console=None):
         self.settings = settings or LoggingSettings()
+        self.job_issues = None
         super().__init__(session_id or uuid.uuid4().hex, self.settings.level)
         self.console = console if console is not None else sys.stderr
         self.records = deque(maxlen=100)
@@ -93,6 +94,13 @@ class Diagnostics(EventLogger):
         self._size = 0
         self._part = 0
         self._open()
+
+    def _set_level(self, level):
+        super()._set_level(min(getattr(logging, level), logging.WARNING))
+
+    def set_job_issues(self, issues):
+        with self._handler.lock:
+            self.job_issues = issues
 
     def _fallback(self, exc):
         self.failure = f"LOG_WRITE_FAILED: Diagnostic records could not be saved to {self.path}: {redact(str(exc))}"
@@ -179,6 +187,16 @@ class Diagnostics(EventLogger):
                 stream.close()
 
     def _store(self, event, encoded):
+        if self.job_issues is not None:
+            try:
+                self.job_issues.record(event)
+            except OSError:
+                self.failure = self.job_issues.failure
+                self._console(self.failure)
+                self.emit("JOB_ISSUE_WRITE_FAILED", self.failure, level="ERROR", exc_info=True,
+                          component="diagnostics", affected_job_id=self.job_issues.job_id)
+        if getattr(logging, event["severity"]) < getattr(logging, self.settings.level):
+            return
         self.records.append(event)
         self._console(f"{event['severity']} {event['code']}: {event['message']}")
         if self.stream is None:

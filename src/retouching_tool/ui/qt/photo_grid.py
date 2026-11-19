@@ -1,4 +1,4 @@
-"""Visible JPEG thumbnails, with one background decode at a time."""
+"""In-memory thumbnails for the current scan, with one background decode at a time."""
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -40,22 +40,18 @@ class PhotoGrid(QListWidget):
         self._placeholder = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
         self._warning = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)
         self._index = None
-        self._loaded = {}
-        self._errors = set()
+        self._next_row = 0
         self._future = None
         self._closing = False
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desktop-thumbnail")
-        self._timer = QTimer(self, interval=45, singleShot=True)
-        self._timer.timeout.connect(self._load_visible)
-        self.verticalScrollBar().valueChanged.connect(self._schedule)
-        self.model().layoutChanged.connect(self._schedule)
+        self._timer = QTimer(self, interval=10, singleShot=True)
+        self._timer.timeout.connect(self._load_next)
 
     def set_index(self, index):
         with QSignalBlocker(self):
             self.clear()
             self._index = index
-            self._loaded.clear()
-            self._errors.clear()
+            self._next_row = 0
             if index is not None:
                 for image in index.images:
                     item = QListWidgetItem(self._warning if image.issue else self._placeholder, image.path.name, self)
@@ -66,18 +62,7 @@ class PhotoGrid(QListWidget):
                     item.setToolTip(f"{image.path}\n{details}" + ("" if image.issue else "\nDouble-click to preview"))
             if self.count():
                 self.setCurrentRow(0)
-        self._schedule()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._schedule()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._schedule()
-
-    def _schedule(self):
-        if not self._closing and not self._timer.isActive():
+        if not self._closing:
             self._timer.start()
 
     def _thumbnail_icon(self, display):
@@ -92,11 +77,11 @@ class PhotoGrid(QListWidget):
         painter.end()
         return QIcon(tile)
 
-    def _load_visible(self):
+    def _load_next(self):
         if self._future is not None:
             index, row, future = self._future
             if not future.done():
-                self._schedule()
+                self._timer.start()
                 return
             self._future = None
             item = self.item(row) if index is self._index else None
@@ -104,7 +89,6 @@ class PhotoGrid(QListWidget):
                 display = future.result()
             except RetouchingError as exc:
                 if item is not None:
-                    self._errors.add(row)
                     with QSignalBlocker(self):
                         item.setIcon(self._warning)
                         item.setToolTip(f"{item.toolTip()}\n{exc}")
@@ -112,24 +96,24 @@ class PhotoGrid(QListWidget):
                 if item is not None:
                     with QSignalBlocker(self):
                         item.setIcon(self._thumbnail_icon(display))
-                    self._loaded[row] = item
-        if self._index is None or not self.isVisible():
-            return
-        viewport = self.viewport().rect()
-        visible = [row for row in range(self.count()) if viewport.intersects(self.visualItemRect(self.item(row)))]
-        with QSignalBlocker(self):
-            for row in self._loaded.keys() - set(visible):
-                self._loaded.pop(row).setIcon(self._placeholder)
-        for row in visible:
+        while self._next_row < self.count():
+            row = self._next_row
+            self._next_row += 1
             image = self._index.images[row]
-            if row not in self._loaded and row not in self._errors and image.header is not None:
+            if image.header is not None:
                 self._future = (self._index, row, self._executor.submit(self.preview_service.thumbnail, image))
-                self._schedule()
+                self._timer.start()
                 break
 
     def shutdown(self):
         if not self._closing:
             self._closing = True
             self._timer.stop()
+            with QSignalBlocker(self):
+                for row in range(self.count()):
+                    self.item(row).setIcon(self._placeholder)
             self._executor.shutdown(wait=False, cancel_futures=True)
-        return self._future is None or self._future[2].done()
+        if self._future is not None and not self._future[2].done():
+            return False
+        self._future = None
+        return True
