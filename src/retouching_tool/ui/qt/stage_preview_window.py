@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLa
 from ...errors import ResizeApprovalRequired, RetouchingError
 from ...pipeline.definition import BooleanParameter, MaskTargetParameter
 from .picture_window import PictureComparison, RenderProgressDialog, statistics_text
-from .stage_card import ChoiceControl, add_parameter_row, parameter_control
+from .stage_card import ChoiceControl, add_parameter_row, parameter_control, update_choice_dependents
 
 
 def confirm_resize(parent, message):
@@ -23,6 +23,7 @@ class StagePreviewWindow(QDialog):
         self.setWindowTitle(f"{descriptor.title} · {filename}")
         self.resize(1050, 720)
         self._submit, self._save = submit, save
+        self.descriptor = descriptor
         self._neutral_settings = neutral_settings
         self._original = dict(stage.parameters)
         self._draft = self._original.copy()
@@ -70,6 +71,7 @@ class StagePreviewWindow(QDialog):
                             region = self._controls[option.name]
                             region.setDisabled(toggle.isChecked())
                             toggle.toggled.connect(region.setDisabled)
+            update_choice_dependents(descriptor, self._controls)
             if descriptor.neutral_picker:
                 self.pick_neutral = QPushButton("Pick neutral from input", checkable=True, autoDefault=False)
                 self.pick_neutral.setToolTip("Click a gray card or neutral midtone to reuse this correction across photos.")
@@ -80,6 +82,10 @@ class StagePreviewWindow(QDialog):
             layout.addWidget(settings)
 
         self.feedback = QLabel(objectName="stagePreviewFeedback", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
+        self.feedback.setMinimumHeight(self.feedback.fontMetrics().height())
+        policy = self.feedback.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self.feedback.setSizePolicy(policy)
         self.feedback.hide()
         layout.addWidget(self.feedback)
         actions = QHBoxLayout()
@@ -121,6 +127,7 @@ class StagePreviewWindow(QDialog):
         self.pick_neutral.setChecked(False)
 
     def _change(self, parameter, value, initial):
+        update_choice_dependents(self.descriptor, self._controls)
         name = parameter.name
         self._draft[name] = self._original[name] if value == initial else value
         if parameter.preview_on_change:

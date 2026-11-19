@@ -64,7 +64,7 @@ presets rather than fixed processing paths.
 | U52 | Application settings provide independent methods for downscaling and upscaling. Every stage that scales images can override either method on its own stage card. |
 | U53 | Each stage card shows the algorithm name, implementation version, enable checkbox, tagged In and Out rows, stage-specific controls, both stage previews, and move, remove and settings actions. Required and optional inputs are visually distinct. The Alibaba settings menu opens the publisher page and checks required model files. |
 | U54 | Stages that return changed pixels offer a blending slider from 0.0 to 1.0 to mix their input pixels with their result. |
-| U55 | Every **Run pipeline** in the main photo preview shows a modal progress dialog while processing. Automatic stage preview updates use a fixed-size progress bar that stays visible while idle. Explicit stage updates use a modal or overlay progress panel. Showing progress keeps the comparison panes and settings in place. |
+| U55 | Every **Run pipeline** in the main photo preview shows a modal progress dialog with the current stage and overall elapsed time. Automatic stage preview updates use a fixed-size progress bar that stays visible while idle. Explicit stage updates use a modal or overlay progress panel. Showing progress keeps the comparison panes and settings in place. |
 | U56 | Update batch disk status automatically when the user chooses a source folder, chooses a destination folder, or rescans the source. |
 | U57 | **Start processing** opens a modal window showing progress, **Pause**, **Continue**, and **Break**. Ask for confirmation before breaking processing. |
 | U58 | Support zoom and pan in every image preview. Keep both comparison panes at the same zoom and position and preserve the view when holding or releasing Shift in Overlay. |
@@ -83,6 +83,13 @@ presets rather than fixed processing paths.
 | U71 | Remember recursive source scanning, processing mode, export destination, selected format and format-specific settings across launches. Ask how to handle existing files when starting each batch that encounters them. |
 | U72 | Ask for confirmation before closing the application. Declining keeps the workspace and any running batch open. |
 | U73 | Provide separate **Skin tone smoothing (Alibaba)** and **Blemish cleanup (Alibaba)** stages. Omit the combined stage from the operation list and ignore its entries when loading pipeline JSON. |
+
+### Desktop workflow refinements approved on 2026-11-19
+
+- Rescanning the same source preserves inclusion, the viewed photo and grid position for surviving files and reports additions and removals.
+- Keep stage cards expandable, summarize export settings and keep the included count, readiness and Start processing visible in the workspace. When no stages are enabled, indicate export-only processing and offer a preset shortcut.
+- Provide Previous and Next in the photo preview with the current position, synchronized zoom and comparison mode. Show stage-specific pipeline warnings with access to the affected stage. Enable fixed white-balance adjustments in Fixed mode.
+- Inspect the affected photo or frozen operation from batch diagnostics and return to the open batch. The progress window offers filters for failures and warnings and an action to open the export destination after processing.
 
 ### Feature priorities
 

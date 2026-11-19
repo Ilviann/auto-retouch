@@ -39,6 +39,7 @@ class PicturePreview:
     context: tuple[ContextEntry, ...] = ()
     result_caption: str | None = None
     stage_warning: str | None = None
+    pipeline_warnings: tuple[tuple[str, str, str], ...] = ()
 
 
 class _PreviewDiagnostics(ImageDiagnostics):
@@ -46,10 +47,14 @@ class _PreviewDiagnostics(ImageDiagnostics):
         super().__init__(diagnostics)
         self.stage_id = stage_id
         self.stage_warning = None
+        self.stage_messages = {}
 
     def emit(self, code, message, **details):
-        if self.stage_id and details.get("stage_instance_id") == self.stage_id and details.get("level") == "WARNING":
-            self.stage_warning = message
+        producer = details.get("stage_instance_id")
+        if producer and details.get("level") == "WARNING":
+            self.stage_messages[producer, message] = None
+            if producer == self.stage_id:
+                self.stage_warning = message
         super().emit(code, message, **details)
 
 
@@ -162,7 +167,8 @@ class PreviewService:
                                        through_stage=through_stage))
 
     def picture(self, index: SourceIndex, image_id, request_id, *, process=False, stage_id=None,
-                through_stage=False, parameters=None, _comparison=None, resize_approvals=()) -> PicturePreview:
+                through_stage=False, parameters=None, _comparison=None, resize_approvals=(),
+                on_pipeline_progress=None) -> PicturePreview:
         """Display the original, run the enabled pipeline, or compare a selected stage in memory."""
         log = _PreviewDiagnostics(self.diagnostics, stage_id)
         runtime = JpegRuntime(log, image_id, preview_request_id=request_id)
@@ -178,7 +184,8 @@ class PreviewService:
             title, stages = self._stages(stage_id, through_stage, parameters)
             lock = runner_lock(self.root) if any(stage.model_ref is not None for stage in stages) else nullcontext()
             with lock:
-                return self._render(image, stages, runtime, title, stage_id, through_stage, _comparison, resize_approvals)
+                return self._render(image, stages, runtime, title, stage_id, through_stage, _comparison,
+                                    resize_approvals, on_pipeline_progress if stage_id is None else None)
         except ResizeApprovalRequired:
             raise
         except Exception as exc:
@@ -190,7 +197,8 @@ class PreviewService:
                 raise
             raise RetouchingError(code, message) from exc
 
-    def _render(self, image, stages, runtime, title, stage_id, through_stage, comparison, resize_approvals):
+    def _render(self, image, stages, runtime, title, stage_id, through_stage, comparison, resize_approvals,
+                on_pipeline_progress):
         from PIL import Image
 
         prefix, remaining = (stages[:-1], stages[-1:]) if through_stage else ((), stages)
@@ -201,6 +209,8 @@ class PreviewService:
         if baseline is not None and baseline[0] == baseline_key:
             _, state, original = baseline
         else:
+            if on_pipeline_progress:
+                on_pipeline_progress("Loading photo…")
             state = decode_source(image.path, source_id=image.image_id, runtime=runtime)
             _check_source(image)
             for stage in prefix:
@@ -209,8 +219,13 @@ class PreviewService:
             if comparison is not None:
                 comparison._baseline = (baseline_key, state, original)
         initial_revision = state.pixel_revision
-        for stage in remaining:
+        for number, stage in enumerate(remaining, 1):
+            if on_pipeline_progress:
+                descriptor = self.editor.registry.descriptor(stage.operation, stage.operation_version)
+                on_pipeline_progress(f"Stage {number} of {len(remaining)} · {descriptor.title}")
             state = self._process_stage(state, stage, runtime, resize_approvals)
+        if on_pipeline_progress:
+            on_pipeline_progress("Preparing comparison…")
         _check_source(image)
         result = (original if state.pixel_revision == initial_revision else
                   _full_display(Image.fromarray(encode_rgb_samples(state))))
@@ -227,8 +242,11 @@ class PreviewService:
         if faces is not None and faces.producer_id == stage_id:
             result = _face_overlay(result, faces.value.regions)
             caption = f"Detected faces · {len(faces.value.regions)}"
+        titles = {stage.id: self.editor.registry.descriptor(stage.operation, stage.operation_version).title
+                  for stage in stages}
+        warnings = tuple((key, titles[key], message) for key, message in runtime.diagnostics.stage_messages if key in titles)
         return PicturePreview(runtime.preview_request_id, f"{title} · {image.path.name}", original, result,
-                              state.context, caption, runtime.diagnostics.stage_warning)
+                              state.context, caption, runtime.diagnostics.stage_warning, warnings)
 
     def _process_stage(self, state, stage, runtime, resize_approvals):
         stage_runtime = StageRuntime(runtime.diagnostics, self.editor.stage_backend(stage), self.editor.checkpoints,

@@ -10,8 +10,8 @@ DESCRIPTOR = OperationDescriptor(
     "core.white_balance", 1, "White balance and color cast",
     parameters=(
         ChoiceParameter("mode", "Correction", "Automatic", ("Automatic", "Fixed"), preview_on_change=True),
-        Parameter("red_stops", "Fixed red adjustment (stops)", 0, -2, 2, preview_on_change=True),
-        Parameter("blue_stops", "Fixed blue adjustment (stops)", 0, -2, 2, preview_on_change=True),
+        Parameter("red_stops", "Fixed red adjustment (stops)", 0, -2, 2, preview_on_change=True, active_choice=("mode", "Fixed")),
+        Parameter("blue_stops", "Fixed blue adjustment (stops)", 0, -2, 2, preview_on_change=True, active_choice=("mode", "Fixed")),
     ),
     changes_pixels=True, neutral_picker=True, preserves=(FACE_REGIONS.key,),
     invalidates=(LUMINANCE.key, PERSON_FOREGROUND.key),

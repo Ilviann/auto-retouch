@@ -34,6 +34,33 @@ exported files, scratch artifacts, or saved jobs.
 Processing previews are available while the batch worker is idle. Queued GPU
 previews and neural-stage visual acceptance are pending.
 
+## Shoot curation and batch inspection
+
+Rescanning the same source retains the inclusion choices for surviving paths,
+the viewed photo if still present, and the grid scroll position. New photos
+start included. The scan reports additions and removals. Expanding a stage
+shows its inputs, outputs, settings and preview commands. Its header and
+availability status stay visible when collapsed. The export settings button
+summarizes the schedule and encoding. The footer shows batch readiness and the
+included count, with a preset shortcut when the pipeline is export-only.
+
+Previous and Next step through readable indexed photos, including excluded
+photos. A source preview opens the adjacent source. A pipeline comparison
+runs the pipeline on the adjacent photo and retains zoom, pan and comparison
+mode. Stage warnings in the result link to the corresponding stage comparison.
+Fixed red and blue adjustments become editable in Fixed white-balance mode.
+
+Within job diagnostics, Show photo and Show operation open read-only details
+under the processing window. Back to batch returns to the open job. Operation
+details use the frozen job settings. The processing window filters failed
+photos or photos with warnings and opens the destination after the run ends.
+
+A Windows offscreen check with the six-stage Beauty preset and generated JPEGs
+showed five complete collapsed cards at 1024 × 640. Start processing stayed
+visible at 1180 × 760, 1024 × 640 and 900 × 590. Expanding each stage in turn
+produced no horizontal scrolling at these sizes. A staged-worker test inspected
+both diagnostic links while paused and then continued to two verified exports.
+
 ## Focused verification
 
 On 2026-11-18, verification used the prepared DirectML environment on Windows 11,

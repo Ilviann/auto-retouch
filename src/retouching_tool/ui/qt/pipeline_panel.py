@@ -166,6 +166,7 @@ class PipelinePanel(QWidget):
         if (card is None or (event.operation and card.descriptor.operation != event.operation)
                 or (event.operation_version is not None and card.descriptor.version != event.operation_version)):
             return False
+        card.expand.setChecked(True)
         self.scroll.ensureWidgetVisible(card)
         card.toggle.setFocus()
         return True
@@ -204,6 +205,7 @@ class PipelinePanel(QWidget):
             card.show_status(status, can_move_up=index > 0, can_move_down=index + 1 < len(stages))
             card.set_preview_available(self.preview_available)
         if self.reveal_stage in self.stage_cards:
+            self.stage_cards[self.reveal_stage].expand.setChecked(True)
             self.cards.activate()
             self.scroll.ensureWidgetVisible(self.stage_cards[self.reveal_stage])
         self.reveal_stage = None

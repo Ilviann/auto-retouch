@@ -1,5 +1,6 @@
 """Qt controls for preparing and monitoring the current batch."""
 
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from math import ceil
@@ -7,7 +8,8 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGroupBox,
                               QHBoxLayout, QHeaderView, QLabel, QLayout, QLineEdit,
                               QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
@@ -120,6 +122,11 @@ class BatchPanel(QWidget):
         self.application = application
         self._sources = sources
         self._index = None
+        self._indexed_sources = ()
+        self._scan_selection = None
+        self._picture_id = None
+        self._navigating = False
+        self.pipeline = pipeline
         self._plan = None
         self._plan_revision = 0
         self._space_check_after = None
@@ -159,7 +166,14 @@ class BatchPanel(QWidget):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([430, 790])
         workspace.addWidget(splitter, 1)
+        self.readiness = _label("batchReadiness")
+        self.choose_preset = _button("Choose a preset…", "choosePreset", pipeline.presets.showPopup)
+        self.start = _button("Start processing", "startBatch", self._create)
+        footer = _row(self.readiness, self.choose_preset, self.start)
+        footer.setStretch(0, 1)
+        workspace.addLayout(footer)
         self._restore_preferences()
+        self._update_export_summary()
         self._preferences_timer = QTimer(self, singleShot=True, interval=300)
         self._preferences_timer.timeout.connect(self._save_preferences)
         self.recursive.toggled.connect(self._scan)
@@ -223,7 +237,12 @@ class BatchPanel(QWidget):
         self.images.itemActivated.connect(self._view_original)
         layout.addWidget(self.images, 1)
 
+        self.export_toggle = QPushButton(checkable=True, objectName="toggleExportSettings")
+        self.export_toggle.setAccessibleName("Expand or collapse batch and export settings")
+        layout.addWidget(self.export_toggle)
         self.export = QGroupBox("Batch and export settings")
+        self.export_toggle.toggled.connect(self.export.setVisible)
+        self.export.hide()
         form = QFormLayout(self.export)
         self.mode = QComboBox()
         self.mode.setObjectName("batchMode")
@@ -276,8 +295,6 @@ class BatchPanel(QWidget):
         self.setup_message = _label("batchSetupMessage")
         for label in (self.pipeline_summary, self.space, self.setup_message):
             layout.addWidget(label)
-        self.start = _button("Start processing", "startBatch", self._create)
-        layout.addWidget(self.start)
         self._build_monitor()
         return setup
 
@@ -311,11 +328,74 @@ class BatchPanel(QWidget):
         for widget in (self.job_metadata, self.job_progress, self.job_timing, self.job_counts,
                        self.worker_warning, self.job_message):
             layout.addWidget(widget)
+        self.result_filter = "all"
+        self.result_buttons = {}
+        filters = QHBoxLayout()
+        for key, title in (("all", "All photos"), ("failed", "Failed"), ("warnings", "With warnings")):
+            button = QPushButton(title, checkable=True, autoDefault=False)
+            button.clicked.connect(lambda _, value=key: self._filter_results(value))
+            self.result_buttons[key] = button
+            filters.addWidget(button)
+        self.result_buttons["all"].setChecked(True)
+        filters.addStretch()
+        self.open_destination = _button("Open destination folder", "openDestination", self._open_destination)
+        filters.addWidget(self.open_destination)
+        layout.addLayout(filters)
         self.results = _table("jobImages", ("Source photo", "Result", "Attempts", "Warnings", "Stages"), 0)
         layout.addWidget(self.results, 1)
         layout.addLayout(_row(self.refresh, self.pause, self.resume, self.cancel, monitor.close_button))
         for button in monitor.findChildren(QPushButton):
             button.setAutoDefault(False)
+
+    def _filter_results(self, value):
+        self.result_filter = value
+        for key, button in self.result_buttons.items():
+            button.setChecked(key == value)
+        if self._status:
+            for row, image in enumerate(self._status.images):
+                hidden = (value == "failed" and image.status != "failed") or (value == "warnings" and not image.warnings)
+                self.results.setRowHidden(row, hidden)
+
+    def _open_destination(self):
+        destination = self._status.destination
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(destination))):
+            message = f"Cannot open {destination}. Check that the folder is accessible."
+            self.job_message.setText(message)
+            self.application.diagnostics.emit("OUTPUT_FOLDER_OPEN_FAILED", message, component="desktop",
+                                              level="WARNING", job_id=self._job_id, destination=destination)
+
+    def _inspect_job_detail(self, title, details, icon=None):
+        dialog = QDialog(self.monitor)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
+        if icon is not None:
+            thumbnail = QLabel()
+            thumbnail.setPixmap(icon.pixmap(self.images.iconSize()))
+            layout.addWidget(thumbnail)
+        text = QPlainTextEdit(readOnly=True)
+        text.setPlainText(details)
+        layout.addWidget(text)
+        back = QPushButton("Back to batch")
+        back.clicked.connect(dialog.accept)
+        layout.addWidget(back)
+        dialog.resize(500, 320)
+        dialog.finished.connect(dialog.deleteLater)
+        dialog.open()
+
+    def inspect_job_operation(self, event):
+        if self._status is None or self._status.job_id != event.job_id:
+            return False
+        for stage in self._status.stages:
+            if stage.id == event.stage_id:
+                descriptor = self.application.pipeline_service.registry.descriptor(stage.operation, stage.operation_version)
+                details = [f"{descriptor.title} · v{descriptor.version}", f"Pipeline: {self._status.pipeline_name}",
+                           f"Stage: {stage.id}", "Enabled" if stage.enabled else "Off"]
+                values = dict(stage.parameters)
+                details.extend(f"{param.label}: {values[param.name]}" for param in descriptor.editable_parameters
+                               if param.name in values)
+                self._inspect_job_detail("Batch operation", "\n".join(details))
+                return True
+        return False
 
     def _monitor_closed(self):
         if self.application.job_service.current_issues is not None and self._task is None:
@@ -404,6 +484,14 @@ class BatchPanel(QWidget):
     def _scan(self):
         if self._task is not None or self._run is not None:
             return
+        if self._index is not None:
+            self._scan_selection = None
+            if self._sources == self._indexed_sources:
+                states = {image.path: self.images.item(i).checkState() for i, image in enumerate(self._index.images)}
+                current = self._current_image()
+                self._scan_selection = states, current.path if current else None, self.images.verticalScrollBar().value()
+        if self._sources != self._indexed_sources:
+            self._scan_selection = None
         self._invalidate_index()
         if not self._sources:
             return
@@ -412,14 +500,31 @@ class BatchPanel(QWidget):
 
     def _show_index(self, index):
         self._index = index
+        self._indexed_sources = self._sources
         self.images.set_index(index)
+        changes = ""
+        if self._scan_selection is not None:
+            states, current, scroll = self._scan_selection
+            paths = {image.path for image in index.images}
+            with QSignalBlocker(self.images):
+                for row, image in enumerate(index.images):
+                    if image.path in states:
+                        self.images.item(row).setCheckState(states[image.path])
+                    if image.path == current:
+                        self.images.setCurrentRow(row)
+                self.images.doItemsLayout()
+                self.images.verticalScrollBar().setValue(scroll)
+            changes = f"Rescan complete · {len(paths - states.keys())} added · {len(states.keys() - paths)} removed"
+        self._scan_selection = None
         self.name_error.setPlainText(index.name_error)
         self.name_error.setVisible(bool(index.name_conflicts))
         self._invalidate_plan()
+        messages = [changes]
         if not index.images:
-            self.setup_message.setText("No photos found. Choose another source or include subfolders.")
+            messages.append("No photos found. Choose another source or include subfolders.")
         elif any(image.issue for image in index.images):
-            self.setup_message.setText("Repair unreadable photos and rescan, or uncheck them to exclude them from this batch.")
+            messages.append("Repair unreadable photos and rescan, or uncheck them to exclude them from this batch.")
+        self.setup_message.setText("\n".join(filter(None, messages)))
 
     def _restore_preferences(self):
         try:
@@ -444,7 +549,12 @@ class BatchPanel(QWidget):
         self.tiff_compression.setCurrentText(settings["TIFF"].compression)
         self.bmp_dpi.setValue(settings["BMP"].dpi)
 
+    def _update_export_summary(self):
+        settings = self._export_settings()
+        self.export_toggle.setText(f"{self.mode.currentData().title()} · {settings.description()} · Export settings…")
+
     def _preferences_changed(self):
+        self._update_export_summary()
         self._preferences_dirty = True
         self._preferences_timer.start()
 
@@ -557,11 +667,19 @@ class BatchPanel(QWidget):
         return None
 
     def show_diagnostic_photo(self, event):
-        if self._index is not None and (not self.monitor.isVisible() or self.monitor.close_button.isEnabled()):
+        if self.monitor.isVisible() and self._status and self._status.job_id == event.job_id:
+            for image in self._status.images:
+                if image.image_id == event.image_id:
+                    matches = self.images.findItems(image.source.name, Qt.MatchFlag.MatchExactly)
+                    icon = next((item.icon() for item in matches if item.data(Qt.ItemDataRole.UserRole) == image.image_id), None)
+                    details = [str(image.source), f"Output: {image.output}", f"Status: {image.status}",
+                               f"Warnings: {image.warnings}", image.message or ""]
+                    self._inspect_job_detail("Batch photo", "\n".join(details), icon)
+                    return True
+            return False
+        if self._index is not None and not self.monitor.isVisible():
             for row, image in enumerate(self._index.images):
                 if image.image_id == event.image_id:
-                    if self.monitor.isVisible():
-                        self.monitor.reject()
                     self.images.setCurrentRow(row)
                     self.images.scrollToItem(self.images.item(row))
                     self.setup_scroll.ensureWidgetVisible(self.images)
@@ -615,24 +733,49 @@ class BatchPanel(QWidget):
         self.pipeline_locked.emit(False)
         self._update_controls()
 
+    def _navigate_picture(self, offset):
+        target = self._picture_row + offset
+        if self._task is None and 0 <= target < len(self._viewable):
+            self._navigating = True
+            self._request_picture(self._picture_index, self._viewable[target],
+                                  process=self._picture_window.processed)
+
+    def _edit_preview_stage(self, stage_id):
+        if self._task is None and self._picture_index is self._index:
+            self.images.setCurrentRow(self._picture_grid_rows[self._picture_row])
+            self.preview_stage(stage_id, True)
+
     def _request_picture(self, index, image_id, *, process, resize_approvals=()):
         request_id = uuid4().hex
         self._preview_target = index, image_id, request_id
         self._resize_approvals = resize_approvals
+        on_progress = None
         if process:
             self.pipeline_locked.emit(True)
             self._picture_window.feedback.clear()
+            if not resize_approvals:
+                self._preview_started_at = monotonic()
+            # The worker writes only to this request's mailbox, even if the window closes.
+            self._preview_messages = deque(["Preparing preview…"], maxlen=1)
+            on_progress = self._preview_messages.append
+            self._update_preview_progress()
             self._picture_window.render_dialog.open()
+        elif self._picture_window is not None:
+            self._picture_window.feedback.setText("Opening photo…")
         else:
             self.setup_message.setText("Opening original…")
         self._submit("preview" if process else "original", partial(
             self.application.preview_service.picture, index, image_id, request_id, process=process,
-            resize_approvals=resize_approvals))
+            resize_approvals=resize_approvals, on_pipeline_progress=on_progress))
+
+    def _update_preview_progress(self):
+        elapsed = _duration(int(monotonic() - self._preview_started_at))
+        self._picture_window.render_dialog.message.setText(f"{self._preview_messages[-1]}\nElapsed: {elapsed}")
 
     def _preview_still_current(self, action):
         if self._closing:
             return False
-        if action == "preview":
+        if action == "preview" or self._navigating:
             return self._picture_window is not None
         index, image_id, _ = self._preview_target
         image = self._current_image()
@@ -641,13 +784,25 @@ class BatchPanel(QWidget):
     def _show_picture(self, preview):
         if preview.request_id != self._preview_target[2]:
             return
+        index, image_id, _ = self._preview_target
+        if self._picture_window is None:
+            self._picture_index = index
+            self._picture_grid_rows = [row for row, img in enumerate(index.images) if img.header is not None]
+            self._viewable = [index.images[row].image_id for row in self._picture_grid_rows]
+        self._picture_id = image_id
+        self._picture_row = self._viewable.index(image_id)
         if self._picture_window is not None:
             self._picture_window.display(preview)
+            self._picture_window.feedback.clear()
+            if self._navigating and index is self._index:
+                self.images.setCurrentRow(self._picture_grid_rows[self._picture_row])
             return
         self._picture_window = window = PictureWindow(self.window(), preview)
         WindowSize(window, "photo_preview", self.application)
-        index, image_id, _ = self._preview_target
-        window.run_pipeline.clicked.connect(partial(self._request_picture, index, image_id, process=True))
+        window.run_pipeline.clicked.connect(lambda: self._request_picture(self._picture_index, self._picture_id, process=True))
+        window.previous.clicked.connect(lambda: self._navigate_picture(-1))
+        window.next.clicked.connect(lambda: self._navigate_picture(1))
+        window.edit_stage.connect(self._edit_preview_stage)
         if not self.application.pipeline_service.status.executable:
             window.feedback.setText("Resolve blocked operations in the pipeline to preview its result.")
         window.finished.connect(self._finish_picture)
@@ -656,6 +811,8 @@ class BatchPanel(QWidget):
 
     def _finish_picture(self):
         self._picture_window = None
+        self._picture_index = self._picture_id = None
+        self._viewable = self._picture_grid_rows = ()
 
     def _create(self, *, resize_approvals=(), existing_decision=None):
         args, options = self._plan_args()
@@ -671,6 +828,9 @@ class BatchPanel(QWidget):
 
         self.pipeline_locked.emit(True)
         self._status = self._job_id = None
+        self._filter_results("all")
+        self.result_buttons["failed"].setText("Failed")
+        self.result_buttons["warnings"].setText("With warnings")
         self._elapsed = None
         self._update_timing()
         self.job_heading.setText("Preparing job")
@@ -740,14 +900,16 @@ class BatchPanel(QWidget):
         images = status.images
         if previous is None or previous.images != images:
             self._show_results(images, previous, status)
+            self._filter_results(self.result_filter)
         completed = sum(image.status == "completed" for image in images)
         failed = sum(image.status == "failed" for image in images)
         canceled = sum(image.status == "canceled" for image in images)
         warning_count = sum(image.warnings > 0 for image in images)
         skipped_images = sum(image.status == "skipped" for image in images)
         waiting = len(images) - completed - failed - canceled - skipped_images
-        self.job_counts.setText(f"{completed} exported · {skipped_images} skipped · {failed} failed · {canceled} canceled · "
-                                f"{waiting} unfinished · {warning_count} with warnings")
+        self.job_counts.setText(f"{completed} exported · {skipped_images} skipped · {canceled} canceled · {waiting} unfinished")
+        self.result_buttons["failed"].setText(f"Failed ({failed})")
+        self.result_buttons["warnings"].setText(f"With warnings ({warning_count})")
         units = len(status.stage_ids) + 1 if status.mode == "staged" else 1
         done = sum(units if image.status in ("completed", "failed", "canceled", "skipped")
                    else (image.completed_stages or 0) for image in images)
@@ -815,6 +977,8 @@ class BatchPanel(QWidget):
         current = not picture or self._preview_still_current(action)
         retrying = False
         feedback = self.setup_message if action in ("scan", "create", "discard") or picture else self.job_message
+        if self._navigating and self._picture_window is not None:
+            feedback = self._picture_window.feedback
         if action == "preview" and self._picture_window is not None:
             self._picture_window.render_dialog.accept()
             if current:
@@ -896,6 +1060,8 @@ class BatchPanel(QWidget):
                 case "refresh" | "poll" | "break":
                     self._show_status(result)
         finally:
+            if picture and not retrying:
+                self._navigating = False
             if action in ("create", "preview") and not retrying:
                 self.pipeline_locked.emit(False)
 
@@ -916,6 +1082,8 @@ class BatchPanel(QWidget):
         self._update_space_check()
         if self._task and self._task[1].done():
             self._finish_task()
+        elif self._task and self._task[0] == "preview" and self._picture_window is not None:
+            self._update_preview_progress()
         if self._task is None and self._run is not None:
             outcome = self._run.poll()
             if outcome is not None:
@@ -945,6 +1113,7 @@ class BatchPanel(QWidget):
                                      and (self._task is None or self._task[0] == "poll"))
         selected = len(self._selected_ids())
         self.folders.setEnabled(idle)
+        self.export_toggle.setEnabled(idle)
         self.export.setEnabled(idle)
         choosing_preview = self._task is not None and self._task[0] in ("original", "preview")
         self.images.setEnabled(idle or (not self._closing and choosing_preview))
@@ -953,10 +1122,32 @@ class BatchPanel(QWidget):
         self.scan.setEnabled(idle and bool(self._sources))
         executable = self.application.pipeline_service.status.executable
         self.start.setEnabled(idle and self._plan is not None and executable)
+        export_only = not any(stage.stage.enabled for stage in self.application.pipeline_service.status.stages)
+        self.choose_preset.setVisible(export_only)
+        self.choose_preset.setEnabled(idle and self.pipeline.presets.isEnabled())
+        if not selected:
+            readiness = "Choose photos to include"
+        elif self._index.name_conflicts:
+            readiness = "Resolve duplicate names and rescan"
+        elif not self.destination.text().strip():
+            readiness = "Choose a destination"
+        elif not executable:
+            readiness = "Resolve blocked operations"
+        elif self._plan is None:
+            readiness = "Checking batch…" if self._space_check_after or self._space_check else "Review batch setup"
+        else:
+            readiness = "Ready" if self._plan.ready else "Review available disk space"
+        intent = " · Export only · 0 enabled stages" if export_only else ""
+        self.readiness.setText(f"{selected} included · {readiness}{intent}")
         image = self._current_image()
         can_view = idle and image is not None and image.header is not None
         if self._picture_window is not None:
-            self._picture_window.run_pipeline.setEnabled(idle and executable)
+            window = self._picture_window
+            window.run_pipeline.setEnabled(idle and executable)
+            navigable = idle and (executable or not window.processed)
+            window.previous.setEnabled(navigable and self._picture_row > 0)
+            window.next.setEnabled(navigable and self._picture_row + 1 < len(self._viewable))
+            window.position.setText(f"{self._picture_row + 1} of {len(self._viewable)}")
         if can_view != self._preview_available:
             self._preview_available = can_view
             self.operation_preview_available.emit(can_view)
@@ -970,6 +1161,7 @@ class BatchPanel(QWidget):
         creating = self._task is not None and self._task[0] in ("create", "discard")
         self.export_issues.setEnabled(self.application.job_service.current_issues is not None and not creating
                                       and not self._closing and self._report is None)
+        self.open_destination.setVisible(bool(self._status and self._status.terminal and self._status.destination))
         self.job_diagnostics.setEnabled(not self._closing and bool(self._job_id))
         self.refresh.setVisible(idle or self._poll_failed)
         self.refresh.setEnabled(bool(self._job_id) and (idle or (running and self._poll_failed and self._task is None)))

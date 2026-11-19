@@ -21,7 +21,7 @@ from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QLabel,
-                               QMessageBox, QProgressBar, QPushButton, QSlider, QToolButton)
+                               QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSlider, QToolButton)
 
 from retouching_tool.application.service import ApplicationService
 from retouching_tool.application.batch import BASE_SCRATCH_BYTES
@@ -282,11 +282,74 @@ class DesktopBatchTests(unittest.TestCase):
         panel.pause.click()
         self.until(panel.resume.isEnabled, "worker did not pause")
         self.assertTrue(panel.cancel.isEnabled())
+        job = panel._status
+        self.log.emit("PAUSED_INSPECTION", "Inspect this checkpoint", level="WARNING", job_id=job.job_id,
+                      image_id=job.images[0].image_id, stage_instance_id=job.stage_ids[0])
+        for button_name, title in (("photo", "Batch photo"), ("operation", "Batch operation")):
+            panel.job_diagnostics.click()
+            dialog = self.qt.activeModalWidget()
+            self.until(lambda: dialog.pending is None, "diagnostics search did not finish")
+            row = next(i for i, event in enumerate(dialog.events) if event.code == "PAUSED_INSPECTION")
+            dialog.table.selectRow(row)
+            getattr(dialog, button_name).click()
+            detail = self.qt.activeModalWidget()
+            self.assertEqual(detail.windowTitle(), title)
+            detail.findChild(QPushButton).click()
+            self.assertIs(self.qt.activeModalWidget(), panel.monitor)
+            self.assertTrue(panel.resume.isEnabled())
+            self.assertIsNotNone(panel.application.job_service.current_issues)
         panel.resume.click()
         self.until(lambda: "2 exported" in panel.job_counts.text(), "could not resume with the frozen paths")
         self.assertFalse((self.root / "future scratch").exists())
         records = [json.loads(line) for line in self.log.path.read_text(encoding="utf-8").splitlines()]
         self.assertTrue(any(event.get("worker_run_id") and event.get("job_id") == panel._job_id for event in records))
+
+    def test_rescan_keeps_curation_and_preview_navigation(self):
+        for i in range(41):
+            Image.new("RGB", (64, 64), (65, 82, 110)).save(self.source / f"study-{i:02}.jpg")
+        window, panel = self.open_window((self.source,))
+        window.resize(1024, 640)
+        self.wait_for_scan(panel, 42)
+        self.assertTrue(panel.start.visibleRegion().contains(panel.start.rect().center()))
+        self.assertIn("Export only", panel.readiness.text())
+        self.assertTrue(panel.choose_preset.isVisible())
+        grid = panel.images
+        grid.setCurrentRow(33)
+        grid.currentItem().setCheckState(Qt.CheckState.Unchecked)
+        grid.scrollToItem(grid.currentItem())
+        self.qt.processEvents()
+        scroll = grid.verticalScrollBar().value()
+        self.assertGreater(scroll, 0)
+        name = grid.currentItem().text()
+        (self.source / "study-00.jpg").rename(self.source / "z.jpg")
+        panel.scan.click()
+        self.wait_for_scan(panel, 42)
+        self.assertEqual(name, grid.currentItem().text())
+        self.assertEqual(grid.currentItem().checkState(), Qt.CheckState.Unchecked)
+        self.assertEqual(grid.verticalScrollBar().value(), scroll)
+        self.assertIn("1 added · 1 removed", panel.setup_message.text())
+        self.double_click_thumbnail(panel)
+        self.until(lambda: panel._picture_window is not None, "source preview did not open")
+        photo = panel._picture_window
+        position = photo.position.text()
+        photo.run_pipeline.click()
+        self.until(lambda: photo.processed, "comparison did not render")
+        view = photo.comparison
+        view.mode.setCurrentIndex(view.OVERLAY)
+        view.zoom(2)
+        scale = view.scale()
+        photo.next.click()
+        self.until(lambda: panel._task is None, "next photo did not render")
+        self.assertTrue(photo.processed)
+        self.assertTrue(photo.windowTitle().endswith(grid.currentItem().text()))
+        self.assertNotEqual(photo.position.text(), position)
+        self.assertEqual(view.mode.currentIndex(), view.OVERLAY)
+        self.assertEqual(view.scale(), scale)
+        photo.previous.click()
+        self.until(lambda: panel._task is None, "previous photo did not render")
+        self.assertTrue(photo.windowTitle().endswith(name))
+        self.assertEqual(photo.position.text(), position)
+        self.assertEqual(grid.currentItem().checkState(), Qt.CheckState.Unchecked)
 
     def test_bulk_photo_checks_preserve_preview_selection_and_recheck_space_once(self):
         _, panel = self.open_window(tuple(self.originals))
@@ -382,6 +445,7 @@ class DesktopBatchTests(unittest.TestCase):
         self.wait_for_scan(panel, 1)
         panel.destination.setText(str(self.destination))
         self.wait_for_space(panel)
+        panel.export_toggle.click()
         panel.format.setCurrentText("JPEG XL")
         self.assertTrue(panel.jxl_effort.isVisible())
         panel.jxl_lossless.setChecked(True)
@@ -624,8 +688,23 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertEqual(self.log.records[-1]["job_id"], job_id)
         dialog.photo.click()
         self.assertFalse(dialog.isVisible())
-        self.assertEqual(panel.images.currentItem().text(), "bright.jpg")
-
+        detail = self.qt.activeModalWidget()
+        self.assertEqual(detail.windowTitle(), "Batch photo")
+        self.assertIn("bright.jpg", detail.findChild(QPlainTextEdit).toPlainText())
+        detail.findChild(QPushButton).click()
+        self.assertIs(self.qt.activeModalWidget(), panel.monitor)
+        self.assertEqual(panel._job_id, job_id)
+        panel.result_buttons["failed"].click()
+        self.assertTrue(all(panel.results.isRowHidden(i) for i in range(2)))
+        panel.result_buttons["warnings"].click()
+        self.assertEqual([not panel.results.isRowHidden(i) for i in range(2)],
+                         [image.warnings > 0 for image in panel._status.images])
+        panel.result_buttons["all"].click()
+        self.assertFalse(any(panel.results.isRowHidden(i) for i in range(2)))
+        with patch.object(QDesktopServices, "openUrl", return_value=True) as opener:
+            panel.open_destination.click()
+            self.assertEqual(Path(opener.call_args.args[0].toLocalFile()), self.destination)
+        panel.monitor.close_button.click()
         self.until(lambda: panel._task is None, "finished job was not discarded")
         self.assertFalse(saved_job_files(panel.application.job_service.job_folder))
 
@@ -955,6 +1034,9 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertTrue(window.pipeline_page.isVisible())
         self.assertTrue(panel.images.isVisible())
         self.assertTrue(panel.destination.isVisible())
+        self.assertTrue(panel.export_toggle.isVisible())
+        self.assertFalse(panel.export.isVisible())
+        panel.export_toggle.click()
         self.assertTrue(panel.export.isVisible())
         self.assertFalse(panel.destination.text())
         self.assertIsNone(panel.findChild(QPushButton, "viewOriginal"))
@@ -1029,6 +1111,37 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertIsNone(panel._picture_window)
         self.assertEqual(list(self.destination.iterdir()), [])
         self.assertFalse(saved_job_files(panel.application.job_service.job_folder))
+
+    def test_pipeline_progress_names_active_stage_and_times_each_run(self):
+        _, panel = self.open_window((self.source,), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 1)
+        self.double_click_thumbnail(panel)
+        self.until(lambda: panel._picture_window is not None, "photo preview did not open")
+        photo = panel._picture_window
+        message = photo.render_dialog.message
+        service = panel.application.preview_service
+        process_stage = service._process_stage
+        release = Event()
+
+        def hold_second_stage(state, stage, *args):
+            if stage.id == "statistics-after" and not release.wait(10):
+                raise TimeoutError("Test did not release the preview stage")
+            return process_stage(state, stage, *args)
+
+        with patch.object(service, "_process_stage", side_effect=hold_second_stage):
+            photo.run_pipeline.click()
+            try:
+                self.assertTrue(message.isVisible())
+                self.assertEqual(message.text(), "Preparing preview…\nElapsed: 0:00:00")
+                self.until(lambda: message.text().startswith("Stage 2 of 2 · Image statistics (reference)"),
+                           "running stage was not shown")
+                self.until(lambda: "Elapsed: 0:00:00" not in message.text(), "elapsed clock did not advance")
+            finally:
+                release.set()
+            self.until(photo.run_pipeline.isEnabled, "pipeline preview did not finish")
+        photo.run_pipeline.click()
+        self.assertEqual(message.text(), "Preparing preview…\nElapsed: 0:00:00")
+        self.until(photo.run_pipeline.isEnabled, "second pipeline preview did not finish")
 
     def test_preview_zoom_pan_and_overlay_preserve_displayed_detail(self):
         path = self.source / "detail.jpg"
@@ -1195,9 +1308,17 @@ class DesktopBatchTests(unittest.TestCase):
         wb = editor.status.stages[-1].stage
         self.until(lambda: wb.id in page.stage_cards, "white balance card did not appear")
         panel.images.setCurrentRow(0)
-        page.stage_cards[wb.id].preview.click()
+        self.double_click_thumbnail(panel)
+        self.until(lambda: panel._picture_window is not None, "source preview did not open")
+        photo = panel._picture_window
+        photo.run_pipeline.click()
+        self.until(photo.warning_panel.isVisible, "pipeline warning missing")
+        self.assertIn("Insufficient consistent neutrals", photo.warning_text.text())
+        photo.edit_warning.click()
         dialog = panel._stage_preview
         self.until(dialog.pick_neutral.isEnabled, "no white balance input")
+        self.assertFalse(dialog._controls["red_stops"].isEnabled())
+        self.assertFalse(page.stage_cards[wb.id].parameters["blue_stops"].isEnabled())
         self.assertIn("Insufficient consistent neutrals", dialog.feedback.text())
         dialog.comparison.actual_size()
         self.qt.processEvents()
@@ -1210,6 +1331,7 @@ class DesktopBatchTests(unittest.TestCase):
         QTest.keyRelease(dialog.pick_neutral, Qt.Key.Key_Shift)
         self.until(lambda: dialog._submitted["mode"] == "Fixed" and dialog._future is None,
                    "the sampled correction did not render")
+        self.assertTrue(dialog._controls["red_stops"].isEnabled())
         self.assertLess(dialog._draft["red_stops"], 0)
         self.assertGreater(dialog._draft["blue_stops"], 0)
         self.assertEqual(editor.status.stages[-1].stage.parameter("mode"), "Automatic")

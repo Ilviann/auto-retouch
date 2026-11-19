@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import SCALING_METHODS
-from ...pipeline.definition import BLEND, BooleanParameter, ChoiceParameter, IntegerParameter, MaskTargetParameter, ScalingParameter
+from ...pipeline.definition import BLEND, BooleanParameter, ChoiceParameter, IntegerParameter, MaskTargetParameter, Parameter, ScalingParameter
 from ...pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, PERSON_FOREGROUND
 
 
@@ -134,6 +134,13 @@ def tag_row(label, entries, hint):
     return row
 
 
+def update_choice_dependents(descriptor, controls):
+    for parameter in descriptor.parameters:
+        if isinstance(parameter, Parameter) and parameter.active_choice:
+            name, value = parameter.active_choice
+            controls[parameter.name].setEnabled(controls[name].value() == value)
+
+
 class StageCard(QFrame):
     def __init__(self, stage_id, descriptor, *, on_enable, on_parameter, on_recheck, on_move, on_remove, on_preview):
         super().__init__(objectName=f"stage-{stage_id}")
@@ -169,6 +176,24 @@ class StageCard(QFrame):
         version.setToolTip(f"Implementation version {descriptor.version}\nStage ID {stage_id}")
         header.addWidget(version)
         header.addStretch()
+        self.expand = QToolButton(checkable=True, accessibleName=f"Expand {descriptor.title}")
+        self.expand.setArrowType(Qt.ArrowType.RightArrow)
+        header.addWidget(self.expand)
+        layout.addLayout(header)
+        self.status_label = QLabel(objectName="stageStatus", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.status_label)
+        body = QWidget()
+        layout.addWidget(body)
+        body.hide()
+        self.expand.toggled.connect(body.setVisible)
+        self.expand.toggled.connect(lambda opened: self.expand.setArrowType(
+            Qt.ArrowType.DownArrow if opened else Qt.ArrowType.RightArrow))
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        header = QHBoxLayout()
+        header.addStretch()
         icon = QStyle.StandardPixmap
         self.move_up = self._action("Move up", "moveStageUp", icon.SP_ArrowUp)
         self.move_up.clicked.connect(lambda: on_move(stage_id, -1))
@@ -195,10 +220,6 @@ class StageCard(QFrame):
         header.addWidget(self.settings)
         layout.addLayout(header)
 
-        self.status_label = QLabel(objectName="stageStatus", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
-        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.status_label)
         inputs = [("pixels", None, False)]
         inputs.extend((spec.key, spec.version, False) for spec in descriptor.requires)
         inputs.extend((p.mask.key, p.mask.version, False) for p in descriptor.parameters
@@ -296,6 +317,7 @@ class StageCard(QFrame):
             with QSignalBlocker(control):
                 control.setValue(value)
             self.displayed_values[name] = control.value()
+        update_choice_dependents(self.descriptor, self.parameters)
         self.model_page = status.model_page
         if self.descriptor.model_refs:
             self.link.setEnabled(bool(self.model_page))

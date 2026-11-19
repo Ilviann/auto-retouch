@@ -58,7 +58,11 @@ class PreviewTests(unittest.TestCase):
 
         self.editor.set_parameter("exposure-reference", "stops", 1)
         with patch.object(self.app.batch_service, "preflight") as preflight:
-            pipeline = self.service.picture(self.index, self.item.image_id, "whole", process=True)
+            progress = []
+            pipeline = self.service.picture(self.index, self.item.image_id, "whole", process=True,
+                                            on_pipeline_progress=progress.append)
+            self.assertEqual(progress, ["Loading photo…", "Stage 1 of 2 · Image statistics (reference)",
+                                        "Stage 2 of 2 · Image statistics (reference)", "Preparing comparison…"])
             self.assertEqual(pipeline.original, pipeline.result)
             self.assertEqual(pipeline.context[0].producer_id, "statistics-after")
             isolated = self.service.picture(self.index, self.item.image_id, "operation", stage_id="exposure-reference")

@@ -297,6 +297,8 @@ class RenderProgressDialog(QDialog):
 
 
 class PictureWindow(QDialog):
+    edit_stage = Signal(str)
+
     def __init__(self, parent, preview):
         super().__init__(parent)
         self.resize(850, 650)
@@ -305,7 +307,25 @@ class PictureWindow(QDialog):
         layout.addWidget(self.comparison, 1)
         self.statistics = QLabel(objectName="previewStatistics", wordWrap=True)
         layout.addWidget(self.statistics)
+        self.warning_panel = QWidget()
+        warning_actions = QHBoxLayout(self.warning_panel)
+        warning_actions.setContentsMargins(0, 0, 0, 0)
+        self.warning_picker = QComboBox(accessibleName="Stage warning")
+        warning_actions.addWidget(self.warning_picker)
+        self.warning_text = QLabel(wordWrap=True, textFormat=Qt.TextFormat.PlainText)
+        warning_actions.addWidget(self.warning_text, 1)
+        self.edit_warning = QPushButton("Edit stage…", autoDefault=False)
+        self.edit_warning.clicked.connect(lambda: self.edit_stage.emit(self.warning_picker.currentData()[0]))
+        warning_actions.addWidget(self.edit_warning)
+        self.warning_picker.currentIndexChanged.connect(self._show_warning)
+        layout.addWidget(self.warning_panel)
         actions = QHBoxLayout()
+        self.previous = QPushButton("Previous", autoDefault=False)
+        self.position = QLabel()
+        self.next = QPushButton("Next", autoDefault=False)
+        for widget in (self.previous, self.position, self.next):
+            actions.addWidget(widget)
+        self.processed = False
         self.feedback = QLabel(wordWrap=True, textFormat=Qt.TextFormat.PlainText)
         actions.addWidget(self.feedback, 1)
         self.run_pipeline = QPushButton("Run pipeline", objectName="runPreviewPipeline", autoDefault=False)
@@ -314,11 +334,23 @@ class PictureWindow(QDialog):
         self.display(preview)
         self.render_dialog = RenderProgressDialog(self)
         self.render_dialog.setWindowTitle("Pipeline preview")
-        self.render_dialog.message.setText("Running pipeline…")
+        self.render_dialog.message.setTextFormat(Qt.TextFormat.PlainText)
         self.finished.connect(self.render_dialog.hide)
         self.finished.connect(self.comparison.clear)
 
+    def _show_warning(self, index):
+        if index >= 0:
+            _, title, message = self.warning_picker.itemData(index)
+            self.warning_text.setText(f"{title} · {message}")
+
     def display(self, preview):
+        self.processed = preview.result is not None
+        warnings = preview.pipeline_warnings
+        self.warning_picker.clear()
+        for i, warning in enumerate(warnings, 1):
+            self.warning_picker.addItem(f"Warning {i} of {len(warnings)}", warning)
+        self.warning_picker.setVisible(len(warnings) > 1)
+        self.warning_panel.setVisible(bool(warnings))
         self.setWindowTitle(preview.title)
         self.comparison.display(preview)
         measurements = statistics_text(preview.context)

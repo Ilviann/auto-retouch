@@ -236,8 +236,10 @@ and place them at the paths shown on the card under the configured model folder
 
 Double-clicking a thumbnail opens its source in a modal window. **Run pipeline**
 opens a window-modal progress dialog immediately and displays the completed
-comparison in the same photo window. If a stage needs resize approval, progress
-yields to the prompt and reopens for the approved retry. Whole-pipeline
+comparison in the same photo window. The dialog names the running stage, shows
+its position among enabled stages, and displays elapsed time since **Run pipeline**.
+If a stage needs resize approval, progress yields to the prompt and reopens for
+the approved retry with the same elapsed clock. Whole-pipeline
 and stage comparisons start in **Side-by-side**. In **Overlay**, the result fills
 the pane. Holding Shift shows the comparison input until the user releases it.
 All photo and stage previews support wheel zoom around the pointer and drag

@@ -19,6 +19,7 @@ from ..jobs.journal import (MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, Journ
                             open_issue_file, open_journal, runner_lock, saved_job_files, validate_job_id, workspace_key)
 from ..jobs.publication import PreparedExport, check_destination, checked_output, prepare_parent, recover_export
 from ..jobs.snapshot import FrozenInput, JobSnapshot, StageSkip, model_manifests, runtime_versions
+from ..pipeline.definition import StageDefinition
 from ..pipeline.executor import StageRuntime, StageSession
 from ..pipeline.validation import validate_pipeline
 from ..storage.artifacts import ArtifactStore, fingerprint
@@ -51,6 +52,7 @@ class JobStatus:
     pipeline_name: str = ""
     destination: Path | None = None
     settings: ExportSettings = JpegSettings()
+    stages: tuple[StageDefinition, ...] = ()
 
     @property
     def terminal(self) -> bool:
@@ -350,7 +352,7 @@ class JobService:
                        for item, row in zip(job.inputs, rows, strict=True))
         return JobStatus(job.job_id, status, images, job.skipped, job.mode,
                          tuple(stage.id for stage in job.pipeline.stages if stage.enabled),
-                         job.pipeline.name, job.destination, job.settings)
+                         job.pipeline.name, job.destination, job.settings, job.pipeline.stages)
 
     def _validate_run(self, job):
         check_destination(job)
