@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from ... import APP_AUTHOR, PRODUCT_NAME, __version__
 from ...application.contracts import StartupSnapshot
@@ -51,7 +51,8 @@ class MainWindow(QMainWindow):
             layout.addWidget(warning)
             diagnostics_timer = QTimer(self, interval=500)
             def update_warning():
-                warning.setText("\n".join(filter(None, (application.diagnostics.failure, application.window_state_warning))))
+                warning.setText("\n".join(filter(None, (application.diagnostics.failure, application.window_state_warning,
+                                                       self.batch_panel.preferences_warning))))
             diagnostics_timer.timeout.connect(update_warning)
             diagnostics_timer.start()
             update_warning()
@@ -87,6 +88,16 @@ class MainWindow(QMainWindow):
         if any(dialog.pending is not None for dialog in self.findChildren(SettingsDialog)):
             event.ignore()
             return
+        if self.batch_panel is None or not self.batch_panel.closing:
+            message = f"Close {PRODUCT_NAME}?"
+            if self.batch_panel is not None and self.batch_panel.monitor.isVisible():
+                message += "\n\nClosing discards the current batch and its report. Completed exports are kept."
+            choice = QMessageBox.question(self, f"Close {PRODUCT_NAME}", message,
+                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                          QMessageBox.StandardButton.No)
+            if choice != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
         if self.batch_panel is not None and not self.batch_panel.request_close():
             event.ignore()
             return

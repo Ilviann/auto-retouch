@@ -165,7 +165,7 @@ pipelines. Existing job snapshots with omitted methods replay bilinear sampling.
 The choice of image filter is independent of the model's required tensor shape.
 Categorical masks need label-preserving sampling when mapped between grids.
 
-The Alibaba skin-retouching stage applies its effective filters when resizing
+The two Alibaba stages apply their respective effective filters when resizing
 RGB inputs and predicted smoothing maps. The blemish mask uses the publisher's
 nearest-neighbor mapping. Resize consent belongs to a preview or a frozen job
 stage and is independent of the portable pipeline.

@@ -49,9 +49,9 @@ are implemented. The Qt window shows startup settings and loaded stage cards wit
 on/off controls, numeric parameters, asset errors, and dependency status. Headless
 services support add/remove/reorder, atomic JSON save/load, and last-used restore.
 CPU statistics and manual exposure are contract references. Natural and Beauty
-presets remain pending. To try the local CPU retouching model, add **Alibaba skin
-retouching** and use its preview to compare the original and edited image. The
-stage offers strength and scaling controls. [Model files and stage behavior](docs/stages.md#alibaba-skin-retouching-stage).
+presets remain pending. Add **Blemish cleanup (Alibaba)** for localized repairs
+and **Skin tone smoothing (Alibaba)** for tonal adjustments. Each has its own
+strength, face targeting, scaling, blending and preview. [Model files and stage behavior](docs/stages.md#alibaba-skin-retouching-stage).
 
 For a studio set, add **White balance and color cast** before exposure. To reuse
 one correction, open the stage preview on a gray-card shot, click **Pick neutral
@@ -134,11 +134,13 @@ the current unit to finish. **Continue** resumes the open batch. **Break** asks
 for confirmation before canceling the remaining work and keeps completed exports.
 Use **Export warnings and errors…** to save the current batch's messages to a
 UTF-8 text file before closing the progress window. Closing the window or the
-application discards the batch. To finish a shoot later, start a fresh batch
-with the same destination and choose **Skip existing files**.
+application discards the batch. Auto ReTouch asks for confirmation when you
+close the application. To finish a shoot later, reopen it, start a fresh batch
+with the restored settings and choose **Skip existing files**.
 
-Auto ReTouch keeps the working pipeline, selected preset, source selection and
-window sizes in `state.json` in the application root, next to the default
+Auto ReTouch keeps the working pipeline, selected preset, source selection,
+recursion checkbox, destination, processing mode, export format, each format's
+options and window sizes in `state.json` in the application root, next to the default
 `config.json`. The main window, photo preview, stage preview and batch progress
 dialog remember their sizes independently. Job files use the temporary folder
 selected in Settings. Older installations migrate their desktop settings on launch.

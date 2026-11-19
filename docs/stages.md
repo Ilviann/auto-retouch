@@ -87,7 +87,7 @@ detections are suppressed. The preview and downstream stages receive the same bo
 the longest side is respectively above or below 640 pixels. The photo keeps its
 original resolution.
 
-Place the stage immediately before **Alibaba skin retouching**. The detector
+Place the stage before **Blemish cleanup (Alibaba)** or **Skin tone smoothing (Alibaba)**. The detector
 leaves pixels unchanged and publishes `face.regions` v1, including an empty
 set when detection succeeds with zero faces. With **Use face rects from context**
 checked, Alibaba passes through an image with zero detected faces. If no upstream
@@ -133,11 +133,27 @@ part of the default studio portrait pipeline.
 
 ## Alibaba skin-retouching stage
 
-Choose **Alibaba skin retouching** in the operation list and add it to the
-pipeline. Version 1 of `retouch.alibaba_skin` runs on PyTorch CPU. Strength
-blends the result in linear RGB from 0 (pass through) to 1 (full edit).
-The initial value of 1 is for evaluation. Preview and both batch modes use the
-same implementation. Portrait quality and preset strengths await user review.
+Choose either operation in the Add menu. Both run on PyTorch CPU. When using both,
+put cleanup before smoothing to apply the tone adjustment to the repaired pixels.
+
+| Operation | Effect | Required file |
+| --- | --- | --- |
+| **Blemish cleanup (Alibaba)** (`retouch.alibaba_blemish_cleanup` v1) | Detects and repairs localized blemishes in each input region. | `joint_20210926.pth` |
+| **Skin tone smoothing (Alibaba)** (`retouch.alibaba_skin_tone_smoothing` v1) | Applies a feathered RGB tone adjustment to the incoming image or face crop. | `pytorch_model.pt` |
+
+Each card has its own enable switch and settings.
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Strength | 1.0 | Mixes the edit with the model input in linear RGB, from 0 (pass through) to 1 (full edit). |
+| Use face rects from context | On | Applies the operation to upstream face regions when available. Turning it off selects the whole image. |
+| Downscaling / Upscaling | Use app setting | Independently select the app setting, bilinear, or nearest neighbor in each direction. |
+| Blending | 1.0 | Mixes the finished stage output with its full-resolution input, from 0 to 1. |
+
+The working pipeline, imported presets and launch overrides skip the retired
+`retouch.alibaba_skin` v1 entry and preserve the order of the other stages.
+Each new stage must be added explicitly. Previously frozen jobs retain their
+original execution contract. Portrait quality and preset strengths await user review.
 
 For local evaluation, place the following two source checkpoints under
 `alibaba-skin-retouching/16c8351a/` in the configured checkpoint folder.
@@ -157,17 +173,17 @@ The runtime package pins still validated and `pip check` passed.
 Repeat the native CPU check with
 `.venv\Scripts\python.exe -B tools\verify_alibaba_pytorch.py`.
 The app includes the required Apache-2.0 network definitions from ModelScope
-1.40.3 and the associated license. It loads both local checkpoints with strict
+1.40.3 and the associated license. Each operation loads its checkpoint with strict
 state-dictionary checks and weights-only loading. ModelScope sign-in and the
 ModelScope Python package are unnecessary for this stage. The publisher lists
 the model repository under Apache License 2.0 in its
 [repository metadata](https://www.modelscope.ai/api/v1/models/iic/cv_unet_skin_retouching_torch)
 and [README](https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/README.md).
 
-The node encodes linear pixels to sRGB for the networks, detects blemishes at
-768 × 768, and runs the repair network one 512-pixel tile at a time with a
-32-pixel halo. The 512 × 512 generator predicts a feathered tone adjustment
-for the repaired crop. Output returns to linear float32. The separate upstream
+Both operations encode linear pixels to sRGB for inference. Cleanup detects blemishes at
+768 × 768 and runs the repair network one 512-pixel tile at a time with a
+32-pixel halo. Smoothing uses a 512 × 512 generator to predict a feathered tone
+adjustment for its input. Output returns to linear float32. The separate upstream
 RetinaFace and TensorFlow whitening models are outside this implementation.
 
 | Checkpoint | Bytes | SHA-256 |
@@ -211,6 +227,12 @@ with the real checkpoints. Focused checks in `tests/test_alibaba_skin.py`
 also cover missing files, mask persistence, repair tile edges, stale targeting,
 and job-scoped resize consent. The local before-and-after comparison is in
 `.test-work/alibaba-portrait-comparison.jpg`, outside source control.
+The split-stage comparison in `.test-work/alibaba-split-comparison.png`
+shows a 572 × 768 study face crop, each stage alone, and cleanup followed by
+smoothing. Cleanup selected no pixels on this crop. Smoothing made a small
+tonal adjustment. With both strengths at 1, the two-stage result matched the
+combined model on this crop. The two new stages also produced matching decoded
+JPEG exports in sequential and staged worker runs on a generated input.
 Skin-texture retention, background effects on whole images, face-crop quality,
 and coverage of exposed skin beyond the face still need visual evaluation.
 See the [publisher model card](https://modelscope.cn/models/damo/cv_unet_skin_retouching_torch/summary)

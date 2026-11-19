@@ -17,7 +17,9 @@ from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import ResizeApprovalRequired, RetouchingError
 from retouching_tool.jobs.journal import open_journal
-from retouching_tool.operations.alibaba_skin import DESCRIPTOR, MODEL
+from retouching_tool.operations.alibaba_skin import (
+    BLEMISH, BLEMISH_MODEL, DESCRIPTOR, MODEL, SMOOTHING, SMOOTHING_MODEL,
+)
 from retouching_tool.pipeline.assets import ModelCatalog
 from retouching_tool.pipeline.executor import StageRuntime, StageSession
 from retouching_tool.pipeline.image_state import ContextEntry, FACE_REGIONS, FaceRegion, FaceRegions, ImageState, SourceMetadata
@@ -38,23 +40,23 @@ class AlibabaTests(unittest.TestCase):
         self.app = ApplicationService(self.root, load_config(self.root), self.log)
         self.app.startup(LaunchOptions((), None, None), "directml", pytorch_backend="cpu")
         self.editor = self.app.pipeline_service
-        self.stage = self.editor.add_operation(DESCRIPTOR.operation, 1, model_ref=MODEL.ref).stages[-1].stage
+        self.stage = self.editor.add_operation(SMOOTHING.operation, 1, model_ref=SMOOTHING_MODEL.ref).stages[-1].stage
 
     def install_fixture(self):
         files = []
-        for f in MODEL.files:
+        for f in SMOOTHING_MODEL.files:
             path = self.editor.checkpoints / f.relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(path.name.encode())
             files.append(replace(f, sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
-        self.editor.catalog = ModelCatalog((replace(MODEL, files=tuple(files)),))
+        self.editor.catalog = ModelCatalog((replace(SMOOTHING_MODEL, files=tuple(files)), BLEMISH_MODEL))
         self.editor.recheck()
         self.editor.set_enabled(self.stage.id, True)
         self.stage, = self.editor.resolve_scaling(self.editor.status.definition).stages
 
     def test_assets_mask_codec_and_targeted_output(self):
         status, = self.editor.status.stages
-        self.assertEqual({issue.path for issue in status.issues}, {self.editor.checkpoints / f.relative_path for f in MODEL.files})
+        self.assertEqual({issue.path for issue in status.issues}, {self.editor.checkpoints / SMOOTHING_MODEL.files[0].relative_path})
         self.assertEqual(status.model_page, MODEL.publisher_url)
         self.install_fixture()
         state = ImageState.from_pixels(np.zeros((4, 6000, 3), np.float32), SourceMetadata("source"))
@@ -67,6 +69,8 @@ class AlibabaTests(unittest.TestCase):
         with patch("retouching_tool.operations.alibaba_inference.SkinNetworks") as networks:
             networks.return_value.apply.side_effect = lambda rgb, *_: np.ones_like(rgb)
             with StageSession(self.editor.registry, self.editor.catalog, runtime) as session:
+                networks.assert_called_once_with(generator_file=self.editor.checkpoints / SMOOTHING_MODEL.files[0].relative_path,
+                                                 joint_file=None)
                 result = session.process(state, image_id="source")
                 self.assertEqual(networks.return_value.apply.call_count, 2)
                 expected = np.zeros_like(result.pixels)
@@ -133,6 +137,8 @@ class AlibabaTests(unittest.TestCase):
         self.editor.checkpoints = checkpoints
         self.editor.recheck()
         self.editor.set_enabled(self.stage.id, True)
+        blemish = self.editor.add_operation(BLEMISH.operation, 1, model_ref=BLEMISH_MODEL.ref).stages[-1].stage
+        self.editor.reorder((blemish.id, self.stage.id))
         source = self.root / "fixture.jpg"
         samples = np.random.default_rng(2).integers(40, 230, (80, 120, 3), dtype=np.uint8)
         Image.fromarray(samples).save(source)
@@ -149,6 +155,23 @@ class AlibabaTests(unittest.TestCase):
             with Image.open(status.images[0].output) as image:
                 results.append(image.tobytes())
         self.assertEqual(results[0], results[1])
+
+    def test_separate_assets_and_retired_preset_entry(self):
+        self.install_fixture()
+        added = self.editor.add_operation(BLEMISH.operation, 1, model_ref=BLEMISH_MODEL.ref)
+        smoothing, blemish = added.stages
+        self.assertTrue(smoothing.stage.enabled)
+        self.assertFalse(blemish.stage.enabled)
+        self.assertEqual([issue.path for issue in blemish.issues],
+                         [self.editor.checkpoints / BLEMISH_MODEL.files[0].relative_path])
+        data = added.definition.to_json()
+        data["stages"].insert(1, dict(data["stages"][0], id="old", operation=DESCRIPTOR.operation, model_ref=MODEL.ref))
+        restored = self.editor.load_data(data)
+        self.assertEqual(restored.definition.to_json(), added.definition.to_json())
+        self.assertNotIn(DESCRIPTOR, self.editor.registry.descriptors())
+        data["stages"][1]["operation"] = "unknown.stage"
+        with self.assertRaises(RetouchingError):
+            self.editor.load_data(data)
 
     def test_inpainting_uses_original_halos_and_blends_only_detected_pixels(self):
         import torch
@@ -170,3 +193,22 @@ class AlibabaTests(unittest.TestCase):
         self.assertEqual(len(patches), 2)
         torch.testing.assert_close(patches[0][0][:, :, :, 512:], patches[1][0][:, :, :, :64])
         self.assertEqual(patches[1][0].shape, (1, 3, 576, 576))
+
+    def test_cleanup_strength_affects_only_detected_pixels(self):
+        import torch
+        from retouching_tool.config import ScalingSettings
+        from retouching_tool.operations.alibaba_inference import SkinNetworks
+
+        nets = SkinNetworks.__new__(SkinNetworks)
+        nets.generator = None
+        def detect(tensor):
+            logits = torch.full_like(tensor[:, :1], -20)
+            logits[:, :, :384] = 20
+            return logits
+
+        nets.detector = detect
+        nets.repair = lambda masked, keep: torch.ones_like(masked)
+        pixels = np.random.default_rng(17).uniform(.03, .8, (8, 5, 3)).astype(np.float32)
+        output = nets.apply(pixels, ScalingSettings(), .4)
+        np.testing.assert_allclose(output[:4], pixels[:4] + .4 * (1 - pixels[:4]), atol=1e-6)
+        np.testing.assert_array_equal(output[4:], pixels[4:])

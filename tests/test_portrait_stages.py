@@ -147,7 +147,7 @@ class PortraitStageTests(unittest.TestCase):
         raw = PipelineDefinition("Studio", tuple(StageDefinition(m.MODEL.ref, m.DESCRIPTOR.operation, 1, True,
             model_ref=m.MODEL.ref) for m in (detector, alibaba_skin))).to_json()
         legacy = parse_pipeline(raw, legacy_registry)
-        current = parse_pipeline(legacy.to_json(), self.registry)
+        current = parse_pipeline(legacy.to_json(), self.registry, frozen=True)
         self.assertEqual(current.to_json(), legacy.to_json())
         self.assertEqual([s.identity for s in current.stages], [s.identity for s in legacy.stages])
 
@@ -163,11 +163,11 @@ class PortraitStageTests(unittest.TestCase):
                 data = current.to_json()
                 data["stages"][index]["parameters"][key] = value
                 with self.subTest(key=key, value=value), self.assertRaises(RetouchingError):
-                    parse_pipeline(data, self.registry)
+                    parse_pipeline(data, self.registry, frozen=True)
         updated = current.to_json()
         updated["stages"][0]["parameters"]["expand_pixels"] = 30
         updated["stages"][1]["parameters"]["use_face_rects"] = False
-        parsed = parse_pipeline(updated, self.registry)
+        parsed = parse_pipeline(updated, self.registry, frozen=True)
         self.assertEqual(parsed.to_json(), updated)
         self.assertNotEqual(digests(current, self.registry), digests(parsed, self.registry))
 

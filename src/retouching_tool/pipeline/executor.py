@@ -61,7 +61,8 @@ class StageSession:
     """Always releases attempted preparation, preserving the original failure."""
 
     def __init__(self, registry, catalog, runtime):
-        validated = parse_pipeline(PipelineDefinition("Execution validation", (runtime.stage,)).to_json(), registry).stages[0]
+        validated = parse_pipeline(PipelineDefinition("Execution validation", (runtime.stage,)).to_json(),
+                                   registry, frozen=True).stages[0]
         self.registry, self.catalog, self.runtime = registry, catalog, replace(runtime, stage=validated)
         self.descriptor = registry.descriptor(validated.operation, validated.operation_version)
         self.operation = None

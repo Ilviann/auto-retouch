@@ -155,6 +155,7 @@ class StageCard(QFrame):
         layout.setSpacing(6)
 
         header = QHBoxLayout()
+        header.setSpacing(3)
         self.toggle = QCheckBox(descriptor.title, objectName="stageEnabled")
         self.toggle.setAccessibleName(f"Enable {descriptor.title}")
         font = self.toggle.font()

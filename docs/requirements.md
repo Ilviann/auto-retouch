@@ -80,6 +80,9 @@ presets rather than fixed processing paths.
 | U68 | Discard the batch when the progress window or application closes, including unfinished work. To continue later, start a new batch with the current pipeline and choose to skip existing output files. |
 | U69 | Provide a button in the progress dialog to export all warnings and errors for the current batch to a local text file. |
 | U70 | Store persistent desktop state in `state.json` in the application root. Restore the last pipeline, source selection, and sizes of the main, photo preview, stage preview and batch processing windows. Store job working data in the configured temporary folder. |
+| U71 | Remember recursive source scanning, processing mode, export destination, selected format and format-specific settings across launches. Ask how to handle existing files when starting each batch that encounters them. |
+| U72 | Ask for confirmation before closing the application. Declining keeps the workspace and any running batch open. |
+| U73 | Provide separate **Skin tone smoothing (Alibaba)** and **Blemish cleanup (Alibaba)** stages. Omit the combined stage from the operation list and ignore its entries when loading pipeline JSON. |
 
 ### Feature priorities
 

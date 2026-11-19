@@ -1,6 +1,7 @@
 """Machine-local desktop settings, merged atomically across commands and launches."""
 
 from ..errors import RetouchingError
+from ..imaging.export_settings import FORMATS, parse_settings
 from ..json_io import atomic_json, exclusive_file, read_json
 from ..storage.batch_paths import current_file_stamp
 
@@ -20,7 +21,7 @@ class WorkspaceState:
             return {"schema_version": 1}
         data = read_json(self.path, limit=STATE_LIMIT)
         if (not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 1
-                or data.keys() - {"schema_version", "pipeline", "preset", "sources", "windows"}):
+                or data.keys() - {"schema_version", "pipeline", "preset", "sources", "windows", "batch"}):
             raise RetouchingError("STATE_INVALID", f"Unsupported desktop state in {self.path}. Check its format.")
         return data
 
@@ -89,3 +90,24 @@ class WorkspaceState:
                 or type(size.get("maximized")) is not bool):
             raise RetouchingError("WINDOW_SIZE_INVALID", f"Invalid saved size for {name} in {self.path}")
         return size
+
+    def batch_preferences(self):
+        saved = self.read().get("batch", {})
+        try:
+            if not isinstance(saved, dict):
+                raise ValueError("Expected a batch settings object")
+            recursive = saved.get("recursive", False)
+            destination = saved.get("destination", "")
+            mode = saved.get("mode", "sequential")
+            fmt = saved.get("format", "JPEG")
+            options = saved.get("options", {})
+            if (type(recursive) is not bool or not isinstance(destination, str)
+                    or mode not in ("sequential", "staged") or fmt not in FORMATS or not isinstance(options, dict)):
+                raise ValueError("Invalid source recursion, destination, processing mode or export format")
+            settings = {name: parse_settings(options[name]) if name in options else cls()
+                        for name, cls in FORMATS.items()}
+            if any(item.format != name for name, item in settings.items()):
+                raise ValueError("Saved export options do not match their format")
+        except (TypeError, ValueError) as exc:
+            raise RetouchingError("BATCH_SETTINGS_INVALID", f"Invalid batch settings in {self.path}: {exc}") from exc
+        return recursive, destination, mode, fmt, settings

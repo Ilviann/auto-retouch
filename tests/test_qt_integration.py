@@ -25,7 +25,7 @@ from retouching_tool.application.service import ApplicationService
 from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
-from retouching_tool.operations.alibaba_skin import DESCRIPTOR as ALIBABA_SKIN, MODEL as ALIBABA_MODEL
+from retouching_tool.operations.alibaba_skin import BLEMISH, BLEMISH_MODEL, SMOOTHING, SMOOTHING_MODEL
 from retouching_tool.operations.face_detection import DESCRIPTOR as DETECTOR, MODEL as DETECTOR_MODEL
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
 from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS
@@ -37,6 +37,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class QtIntegrationTests(unittest.TestCase):
+    def close_window(self, window):
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            window.close()
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -67,7 +71,7 @@ class QtIntegrationTests(unittest.TestCase):
             self.assertIn("Auto ReTouch", window.windowTitle())
             self.assertTrue(QFontMetrics(window.font()).inFontUcs4(ord("A")))
         finally:
-            window.close()
+            self.close_window(window)
 
     def test_pipeline_editor_actions_json_dialogs_and_restart(self):
         artifacts = ROOT / ".test-work"
@@ -240,7 +244,7 @@ class QtIntegrationTests(unittest.TestCase):
                 self.assertEqual(reopened.pipeline_service.status.definition, editor.status.definition)
                 self.assertTrue(window.grab().save(str(artifacts / "pipeline-editor.png")))
             finally:
-                window.close()
+                self.close_window(window)
                 window.deleteLater()
                 self.app.processEvents()
 
@@ -337,7 +341,7 @@ class QtIntegrationTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertIn("LOG_WRITE_FAILED", window.findChild(QLabel, "pipelineCommandError").text())
             finally:
-                window.close()
+                self.close_window(window)
                 window.deleteLater()
                 self.app.processEvents()
                 log.close()
@@ -349,10 +353,10 @@ class QtIntegrationTests(unittest.TestCase):
             log = Diagnostics(root / "logs", console=io.StringIO())
             resources.callback(log.close)
             editor = PipelineService(root / "models", "directml", log, pytorch_backend="cpu")
-            stage = editor.add_operation(ALIBABA_SKIN.operation, 1, model_ref=ALIBABA_MODEL.ref).stages[0].stage
+            stage = editor.add_operation(SMOOTHING.operation, 1, model_ref=SMOOTHING_MODEL.ref).stages[0].stage
             snapshot = StartupSnapshot((), "Pipeline", "test", "directml", root, root, root, ())
             window = MainWindow(snapshot, editor)
-            resources.callback(window.close)
+            resources.callback(self.close_window, window)
             window.resize(460, 760)
             window.show()
             self.app.processEvents()
@@ -380,7 +384,7 @@ class QtIntegrationTests(unittest.TestCase):
             expansion.editingFinished.emit()
             self.assertEqual(editor.status.stages[-1].stage.parameter("expand_pixels"), 20)
             for item, desc, widget, key, value in (
-                    (stage, ALIBABA_SKIN, QCheckBox, "use_face_rects", False),
+                    (stage, SMOOTHING, QCheckBox, "use_face_rects", False),
                     (editor.status.stages[-1].stage, DETECTOR, QSpinBox, "expand_pixels", 40)):
                 dialog = StagePreviewWindow(window, item, desc, "fixture", through_stage=True, submit=None, save=None)
                 control = dialog.findChild(widget, f"parameter-{key}")
@@ -392,11 +396,17 @@ class QtIntegrationTests(unittest.TestCase):
                 self.assertTrue(dialog.apply_preview.isEnabled())
                 dialog.deleteLater()
             self.assertEqual(card.findChild(QLabel, "tag-Out-pixels").text(), "pixels")
-            for item in ALIBABA_MODEL.files:
-                self.assertIn(str(editor.checkpoints / item.relative_path), card.status_label.text())
+            self.assertIn(str(editor.checkpoints / SMOOTHING_MODEL.files[0].relative_path), card.status_label.text())
+            self.assertNotIn(BLEMISH_MODEL.files[0].relative_path.split("/")[-1], card.status_label.text())
             self.assertEqual([a.text() for a in card.settings.menu().actions()],
                              ["Open model page in browser", "Check required model files"])
             self.assertLessEqual(card.minimumSizeHint().width(), 420)
+            cleanup = window.pipeline_page._command(editor.add_operation, BLEMISH.operation, 1,
+                                                    model_ref=BLEMISH_MODEL.ref).stages[-1].stage
+            self.app.processEvents()
+            cleanup_card = window.pipeline_page.stage_cards[cleanup.id]
+            self.assertEqual(cleanup_card.toggle.text(), "Blemish cleanup (Alibaba)")
+            self.assertIn(str(editor.checkpoints / BLEMISH_MODEL.files[0].relative_path), cleanup_card.status_label.text())
 
 
 if __name__ == "__main__":

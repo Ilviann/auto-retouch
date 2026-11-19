@@ -1,6 +1,6 @@
 """Input geometry and compositing for the Alibaba skin-retouching adapter."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..errors import ResizeApprovalRequired, RetouchingError
 from ..config import ScalingSettings
@@ -26,6 +26,13 @@ DESCRIPTOR = OperationDescriptor("retouch.alibaba_skin", 1, "Alibaba skin retouc
     optional=(FACE_REGIONS,), preserves=(FACE_REGIONS.key,), changes_pixels=True,
     model_refs=(MODEL.ref,), backends=MODEL.backends, inference_runtime="pytorch",
     resize_limit=ResizeLimit(MAX_INPUT_SIDE, bypass_if_zero="strength"))
+
+SMOOTHING_MODEL = replace(MODEL, ref="alibaba-skin-tone-smoothing", files=(MODEL.files[0],))
+BLEMISH_MODEL = replace(MODEL, ref="alibaba-blemish-cleanup", files=(MODEL.files[1],))
+SMOOTHING = replace(DESCRIPTOR, operation="retouch.alibaba_skin_tone_smoothing",
+                    title="Skin tone smoothing (Alibaba)", model_refs=(SMOOTHING_MODEL.ref,))
+BLEMISH = replace(DESCRIPTOR, operation="retouch.alibaba_blemish_cleanup",
+                  title="Blemish cleanup (Alibaba)", model_refs=(BLEMISH_MODEL.ref,))
 
 
 @dataclass(frozen=True)
@@ -78,7 +85,8 @@ class FaceCrop:
             raise RetouchingError("FACE_REGION_INVALID", "Supply a boolean face mask aligned to its crop.")
 
 
-def retouch_regions(pixels, face_crops, *, methods, resize_approved, infer, emit, stage_id=None):
+def retouch_regions(pixels, face_crops, *, methods, resize_approved, infer, emit, stage_id=None,
+                   title=DESCRIPTOR.title):
     """Run a linear-RGB crop processor against full resolution or validated upstream regions.
 
     The caller owns the model and supplies the stage-scoped approval and diagnostic emitter.
@@ -96,7 +104,7 @@ def retouch_regions(pixels, face_crops, *, methods, resize_approved, infer, emit
     for index, crop in enumerate(crops):
         if crop.processing_size != crop.size:
             details = dict(region_index=index, input_size=crop.size, processing_size=crop.processing_size)
-            message = (f"Alibaba skin retouching: resize {crop.size[0]} × {crop.size[1]} to {crop.processing_size[0]} × "
+            message = (f"{title}: resize {crop.size[0]} × {crop.size[1]} to {crop.processing_size[0]} × "
                        f"{crop.processing_size[1]} for retouching and restore the original dimensions. "
                        "Fine detail may be lost.")
             if resize_approved is not True:
@@ -140,7 +148,9 @@ def retouch_regions(pixels, face_crops, *, methods, resize_approved, infer, emit
 
 
 class AlibabaSkin:
-    def __init__(self, stage):
+    def __init__(self, stage, descriptor=DESCRIPTOR, model=MODEL):
+        self.descriptor = descriptor
+        self.model = model
         self.strength = stage.parameter("strength")
         self.use_face_rects = stage.parameter("use_face_rects")
         params = stage.portable_parameters()
@@ -152,12 +162,16 @@ class AlibabaSkin:
         self.runtime = runtime
         if self.strength:
             try:
-                self.networks = SkinNetworks(*(runtime.checkpoints / f.relative_path for f in MODEL.files))
+                self.networks = SkinNetworks(
+                    generator_file=runtime.checkpoints / SMOOTHING_MODEL.files[0].relative_path
+                    if SMOOTHING_MODEL.files[0] in self.model.files else None,
+                    joint_file=runtime.checkpoints / BLEMISH_MODEL.files[0].relative_path
+                    if BLEMISH_MODEL.files[0] in self.model.files else None)
             except Exception as exc:
-                raise RetouchingError("AI_SESSION_FAILED", "Could not load the Alibaba checkpoints on PyTorch CPU. "
+                raise RetouchingError("AI_SESSION_FAILED", f"Could not load {self.descriptor.title} on PyTorch CPU. "
                                       "Check the model files and technical details.") from exc
-            runtime.emit("AI_SESSION_READY", "Loaded the Alibaba smoothing, blemish detection and repair networks.",
-                         model_version=MODEL.version, precision="float32")
+            runtime.emit("AI_SESSION_READY", f"Loaded {self.descriptor.title} on PyTorch CPU.",
+                         model_version=self.model.version, precision="float32")
 
     def process(self, state):
         if not self.strength:
@@ -172,11 +186,11 @@ class AlibabaSkin:
             pixels = retouch_regions(state.pixels, crops, methods=self.methods,
                                      resize_approved=self.runtime.resize_approved,
                                      infer=lambda rgb: self.networks.apply(rgb, self.methods, self.strength),
-                                     emit=self.runtime.emit, stage_id=self.runtime.stage.id)
+                                     emit=self.runtime.emit, stage_id=self.runtime.stage.id, title=self.descriptor.title)
         except RetouchingError:
             raise
         except Exception as exc:
-            raise RetouchingError("AI_INFERENCE_FAILED", "Alibaba skin retouching failed on CPU. "
+            raise RetouchingError("AI_INFERENCE_FAILED", f"{self.descriptor.title} failed on CPU. "
                                   "Inspect the stage diagnostics and available memory.") from exc
         if pixels is state.pixels:
             return state

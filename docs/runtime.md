@@ -198,10 +198,11 @@ preset path and source paths. It records the normal size in logical pixels and
 maximized state separately for the main window, both preview windows and the
 batch processing dialog. When an older installation launches, it imports the
 recognized settings from `.state`. Portable pipeline files retain their existing
-format. The desktop remembers paths after a successful source scan. Scan the
-restored or command-line sources to build a fresh index. Recursion, destination,
-schedule and export options start at their setup defaults. Each new batch uses
-the current pipeline and export settings.
+format. The desktop remembers paths after a successful source scan. Before
+scanning restored or command-line sources, the desktop restores the recursion
+checkbox, destination, processing mode, active export format and each format's
+options from `state.json`. The first launch uses the setup defaults. A new
+batch rechecks the destination and asks how to handle existing outputs.
 
 Resolve relative CLI file/directory paths against the caller's working directory.
 Resolve an explicit configuration-file path the same way. Paths inside that file

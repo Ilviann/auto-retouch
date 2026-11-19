@@ -33,8 +33,10 @@ batch preflight, saved jobs and worker process.
   scheduler boundary. Escape and the processing window's close control also
   ask before breaking an active run. **Continue** uses the paused batch's frozen
   settings. **Discard batch** closes it and releases its journal and checkpoints.
-  Closing the application stops the worker at a safe boundary and discards the
-  batch. On relaunch, start a fresh batch and select **Skip existing files**.
+  Closing the application asks for confirmation, with **No** selected by default.
+  Confirming stops the worker at a safe boundary and discards the batch. On
+  relaunch, the first scan and preflight use the saved recursion, destination,
+  processing mode and export settings. Start a fresh batch and select **Skip existing files**.
 - **Export warnings and errors…** saves the messages received so far to a UTF-8
   text file. It works while processing, while paused and with final results on
   screen. The temporary report includes job, photo and operation context. Its
@@ -44,6 +46,13 @@ batch preflight, saved jobs and worker process.
   worker transport retain their plain-Python and local process boundaries.
 
 ## Focused verification
+
+A restart test declined application closure during a staged PNG batch, confirmed
+the worker was still active, then closed the application with one confirmation.
+After relaunch, the desktop indexed the nested JPEG using the restored settings.
+Choosing **Skip existing files** preserved one existing PNG and exported the
+remaining photo. A second restart check changed settings for all five formats
+and immediately closed the workspace, then checked every restored control.
 
 On 2026-11-19, five focused Qt integration tests passed for bulk photo
 selection, sequential export, staged timing, pause/continue and worker exit.

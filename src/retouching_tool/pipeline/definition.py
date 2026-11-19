@@ -187,7 +187,7 @@ class PipelineDefinition:
              **({"model_ref": s.model_ref} if s.model_ref is not None else {})} for s in self.stages]}
 
 
-def parse_pipeline(data, registry) -> PipelineDefinition:
+def parse_pipeline(data, registry, *, frozen=False) -> PipelineDefinition:
     def fail(message):
         raise RetouchingError("PIPELINE_INVALID", message)
 
@@ -207,6 +207,9 @@ def parse_pipeline(data, registry) -> PipelineDefinition:
             fail(f"Stage {index + 1}: id must be a unique nonempty string of at most 100 characters")
         if not isinstance(raw["operation"], str) or type(raw["operation_version"]) is not int:
             fail(f"Stage {raw['id']}: operation and integer operation_version are required")
+        # Presets and working copies omit retired operations. A saved job keeps its exact contract.
+        if not frozen and registry.is_retired(raw["operation"], raw["operation_version"]):
+            continue
         descriptor = registry.descriptor(raw["operation"], raw["operation_version"])
         if type(raw["enabled"]) is not bool or not isinstance(raw["parameters"], dict):
             fail(f"Stage {raw['id']}: enabled must be boolean and parameters an object")

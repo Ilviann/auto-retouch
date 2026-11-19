@@ -28,52 +28,74 @@ class SkinNetworks:
         from .alibaba_networks.detection_model.detection_unet_in import DetectionUNet
         from .alibaba_networks.inpainting_model.inpainting_unet import RetouchingNet
 
-        self.generator = UNet(3, 3, init_weights=False)
-        self.detector = DetectionUNet(3, 1, init_weights=False)
-        self.repair = RetouchingNet(4, 3, init_weights=False)
-        self.generator.load_state_dict(torch.load(generator_file, map_location="cpu", weights_only=True)["generator"])
-        joint = torch.load(joint_file, map_location="cpu", weights_only=True)
-        self.detector.load_state_dict(joint["detection_net"])
-        self.repair.load_state_dict(joint["inpainting_net"])
-        for network in (self.generator, self.detector, self.repair):
-            network.eval()
+        self.generator = self.detector = self.repair = None
+        if generator_file is not None:
+            self.generator = UNet(3, 3, init_weights=False)
+            self.generator.load_state_dict(torch.load(generator_file, map_location="cpu", weights_only=True)["generator"])
+            self.generator.eval()
+        if joint_file is not None:
+            joint = torch.load(joint_file, map_location="cpu", weights_only=True)
+            self.detector = DetectionUNet(3, 1, init_weights=False)
+            self.repair = RetouchingNet(4, 3, init_weights=False)
+            self.detector.load_state_dict(joint["detection_net"])
+            self.repair.load_state_dict(joint["inpainting_net"])
+            self.detector.eval()
+            self.repair.eval()
+
+    def _blemish_weights(self, roi, methods):
+        import torch
+        import torch.nn.functional as F
+
+        detection = self.detector(_sample(roi, (768, 768), methods, align_corners=True)).sigmoid()
+        if not detection.isfinite().all():
+            raise RetouchingError("AI_MODEL_CONTRACT_INVALID", "Alibaba returned invalid blemish probabilities.")
+        weight = torch.where(detection < .35, 0., torch.where(detection >= .5, 1., detection))
+        return F.interpolate(weight, roi.shape[-2:], mode="nearest")
+
+    def _tone_maps(self, roi, methods):
+        import torch
+        import torch.nn.functional as F
+
+        size = roi.shape[-2:]
+        gain = self.generator(_sample(roi, (512, 512), methods))
+        # The publisher feathers the gain towards neutral over the outer 4% of the crop.
+        axis = torch.arange(500, dtype=torch.float32)
+        ramp = torch.minimum(axis, 500 - axis).div_(20).clamp_(0, 1)
+        feather = torch.minimum(ramp[:, None], ramp[None, :])[None, None]
+        return _sample(gain, size, methods), F.interpolate(feather, size, mode="bilinear", align_corners=False)
 
     def apply(self, pixels, methods, strength):
         import torch
-        import torch.nn.functional as F
+        import numpy as np
 
         height, width = pixels.shape[:2]
         # Keep model calculations in normalized nonlinear RGB, retaining float precision at both boundaries.
         encoded = resize_rgb(pixels, (width, height), methods, encode_srgb=True)
         roi = torch.from_numpy(encoded).permute(2, 0, 1).unsqueeze(0).mul_(2).sub_(1)
         with torch.inference_mode():
-            detection = self.detector(_sample(roi, (768, 768), methods, align_corners=True)).sigmoid()
-            if not detection.isfinite().all():
-                raise RetouchingError("AI_MODEL_CONTRACT_INVALID", "Alibaba returned invalid blemish probabilities.")
-            weight = torch.where(detection < .35, 0., torch.where(detection >= .5, 1., detection))
-            weight = F.interpolate(weight, (height, width), mode="nearest")
-            repaired = self._repair_tiles(roi, weight)
-            del weight, roi, encoded
-            gain = self.generator(_sample(repaired, (512, 512), methods))
-            # The publisher feathers the gain towards neutral over the outer 4% of the crop.
-            axis = torch.arange(500, dtype=torch.float32)
-            ramp = torch.minimum(axis, 500 - axis).div_(20).clamp_(0, 1)
-            feather = torch.minimum(ramp[:, None], ramp[None, :])[None, None]
-            feather = F.interpolate(feather, (height, width), mode="bilinear", align_corners=False)
-            gain = _sample(gain, (height, width), methods)
-            rgb = repaired.add_(1).mul_(.5)
-            result = torch.empty((height, width, 3), dtype=torch.float32)
+            del encoded
+            weight = None
+            if self.detector is not None:
+                weight = self._blemish_weights(roi, methods)
+                roi = self._repair_tiles(roi, weight)
+            if self.generator is not None:
+                weight = None
+                gain, feather = self._tone_maps(roi, methods)
+            rgb = roi.add_(1).mul_(.5)
+            output = np.empty_like(pixels)
             for y in range(0, height, 64):
                 rows = slice(y, y + 64)
                 base = rgb[:, :, rows]
-                correction = (gain[:, :, rows] * 2 - 1) * feather[:, :, rows]
-                smooth = (base + correction * base * (1 - base)).clamp_(0, 1)
-                linear = torch.where(smooth <= .04045, smooth / 12.92, ((smooth + .055) / 1.055).pow(2.4))
-                result[rows] = linear[0].permute(1, 2, 0)
-            output = result.numpy()
-            if strength != 1:
-                for y in range(0, height, 64):
-                    rows = slice(y, y + 64)
+                if self.generator is not None:
+                    correction = (gain[:, :, rows] * 2 - 1) * feather[:, :, rows]
+                    base = base + correction * base * (1 - base)
+                base = base.clamp(0, 1)
+                linear = torch.where(base <= .04045, base / 12.92, ((base + .055) / 1.055).pow(2.4))
+                output[rows] = linear[0].permute(1, 2, 0).numpy()
+                if weight is not None:
+                    # Keep untouched pixels bit-exact through the sRGB round trip.
+                    np.copyto(output[rows], pixels[rows], where=(weight[0, 0, rows].numpy() == 0)[:, :, None])
+                if strength != 1:
                     output[rows] = pixels[rows] + strength * (output[rows] - pixels[rows])
             return output
 

@@ -83,8 +83,11 @@ class DesktopBatchTests(unittest.TestCase):
         return window, window.batch_panel
 
     def close_window(self, window):
-        window.close()
-        self.until(lambda: not window.isVisible(), "window did not close")
+        if window.isVisible():
+            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes) as confirm:
+                window.close()
+                self.until(lambda: not window.isVisible(), "window did not close")
+            confirm.assert_called_once()
 
     def dispose_window(self, window):
         panel = window.batch_panel
@@ -708,28 +711,82 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertEqual(list(self.destination.iterdir()), [])
 
     def test_close_discards_active_staged_job_and_next_run_skips_exports(self):
-        window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
+        window, panel = self.open_window((self.source,), pipeline=ROOT / "examples/pipelines/reference.json")
+        self.wait_for_scan(panel, 1)
+        panel.recursive.setChecked(True)
         self.wait_for_scan(panel, 2)
         panel.destination.setText(str(self.destination))
         panel.mode.setCurrentIndex(panel.mode.findData("staged"))
+        panel.format.setCurrentText("PNG")
+        panel.png_compression.setValue(2)
         self.wait_for_space(panel)
         self.start_at_checkpoint(panel, "cancel", panel.start)
         jobs = panel.application.job_service
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as decline:
+            self.assertFalse(window.close())
+        self.assertEqual(decline.call_args.args[-1], QMessageBox.StandardButton.No)
+        self.assertTrue(window.isVisible() and panel.monitor.isVisible() and panel.pause.isEnabled())
+        self.assertIsNone(panel._request_sent)
         self.close_window(window)
         self.assertEqual(saved_job_files(panel.application.job_service.job_folder), ())
         self.assertFalse(list(jobs.batch.scratch.glob("auto-retouch-job-*")))
-        existing = self.destination / "a.jpg"
+        existing = self.destination / "a.png"
         existing.write_bytes(b"already exported")
         _, panel = self.open_window()
         self.wait_for_scan(panel, 2)
         self.assertIsNone(panel.findChild(QPushButton, "openSavedJob"))
-        panel.destination.setText(str(self.destination))
+        self.assertTrue(panel.recursive.isChecked())
+        self.assertEqual(panel.destination.text(), str(self.destination))
+        self.assertEqual(panel.mode.currentData(), "staged")
+        self.assertEqual(panel.format.currentText(), "PNG")
+        self.assertEqual(panel.png_compression.value(), 2)
         self.wait_for_space(panel)
         with self.choose_existing("Skip existing files", existing):
             panel.start.click()
             self.until(lambda: "1 exported" in panel.job_counts.text(), "fresh job did not finish")
         self.assertIn("1 skipped", panel.job_counts.text())
         self.assertEqual(existing.read_bytes(), b"already exported")
+
+    def test_restart_restores_options_for_each_export_format_on_immediate_close(self):
+        window, panel = self.open_window()
+        panel.quality.setValue(79)
+        panel.chroma.setCurrentText("4:2:0")
+        panel.progressive.setChecked(True)
+        panel.jxl_quality.setValue(74)
+        panel.jxl_lossless.setChecked(True)
+        panel.jxl_effort.setValue(4)
+        panel.png_compression.setValue(1)
+        panel.tiff_compression.setCurrentText("None")
+        panel.bmp_dpi.setValue(144)
+        panel.format.setCurrentText("JPEG XL")
+        self.close_window(window)
+        _, panel = self.open_window()
+        self.assertEqual(panel.format.currentText(), "JPEG XL")
+        self.assertFalse(panel.jxl_quality.isEnabled())
+        self.assertEqual((panel.quality.value(), panel.chroma.currentText(), panel.progressive.isChecked()),
+                         (79, "4:2:0", True))
+        self.assertEqual((panel.jxl_quality.value(), panel.jxl_lossless.isChecked(), panel.jxl_effort.value()),
+                         (74, True, 4))
+        self.assertEqual((panel.png_compression.value(), panel.tiff_compression.currentText(), panel.bmp_dpi.value()),
+                         (1, "None", 144))
+
+    def test_invalid_batch_preferences_and_write_failure_are_visible(self):
+        path = self.root / "state.json"
+        path.write_text(json.dumps({"schema_version": 1, "batch": {"recursive": "no"}}), encoding="utf-8")
+        window, panel = self.open_window()
+        warning = window.findChild(QLabel, "diagnosticsWarning")
+        self.assertIn("Could not restore batch settings", warning.text())
+        self.assertFalse(panel.recursive.isChecked())
+        self.assertEqual(panel.format.currentText(), "JPEG")
+        with patch.object(panel.application.state, "update", side_effect=PermissionError("busy settings file")):
+            panel.format.setCurrentText("TIFF")
+            self.until(lambda: "Could not save batch settings" in warning.text(), "save failure was hidden")
+        for code in ("BATCH_SETTINGS_RESTORE_FAILED", "BATCH_SETTINGS_SAVE_FAILED"):
+            event = next(record for record in self.log.records if record["code"] == code)
+            self.assertIn("Traceback", event["exception"])
+        self.assertEqual(json.loads(path.read_bytes())["batch"], {"recursive": "no"})
+        self.close_window(window)
+        self.assertEqual(json.loads(path.read_bytes())["batch"]["format"], "TIFF")
 
     def test_pipeline_change_during_freeze_leaves_job_queued_for_review(self):
         pipeline = ROOT / "examples/pipelines/reference.json"

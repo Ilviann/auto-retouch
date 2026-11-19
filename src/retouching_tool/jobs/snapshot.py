@@ -166,7 +166,7 @@ class JobSnapshot:
         for item in inputs:
             require(any(root / item.relative_path == item.path for root, _ in roots),
                     "A frozen input path does not belong to its recorded source roots")
-        pipeline = parse_pipeline(data["pipeline"], registry)
+        pipeline = parse_pipeline(data["pipeline"], registry, frozen=True)
         approvals = data.get("resize_approvals", [])
         require(isinstance(approvals, list) and all(isinstance(key, str) for key in approvals)
                 and len(set(approvals)) == len(approvals) and set(approvals) <= {

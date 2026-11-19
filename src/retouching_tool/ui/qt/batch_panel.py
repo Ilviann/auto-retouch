@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
 
 from ...application.batch import ExistingOutputDecision, ExistingOutputs
 from ...errors import ResizeApprovalRequired, RetouchingError
-from ...imaging.export_settings import FORMATS, BmpSettings, JpegSettings, JxlSettings, PngSettings, TiffSettings
+from ...imaging.export_settings import FORMATS, BmpSettings, JpegSettings, JxlSettings, PngSettings, TiffSettings, encode_settings
 from .photo_grid import PhotoGrid
 from .picture_window import PictureWindow
 from .stage_preview_window import StagePreviewWindow, confirm_resize
@@ -140,6 +140,8 @@ class BatchPanel(QWidget):
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desktop-batch")
         self._task = None
         self._report = None
+        self.preferences_warning = ""
+        self._preferences_dirty = False
 
         workspace = QVBoxLayout(self)
         workspace.setContentsMargins(0, 0, 0, 0)
@@ -156,6 +158,18 @@ class BatchPanel(QWidget):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([430, 790])
         workspace.addWidget(splitter, 1)
+        self._restore_preferences()
+        self._preferences_timer = QTimer(self, singleShot=True, interval=300)
+        self._preferences_timer.timeout.connect(self._save_preferences)
+        self.recursive.toggled.connect(self._scan)
+        self.recursive.toggled.connect(self._preferences_changed)
+        for signal in (self.destination.textChanged, self.mode.currentIndexChanged, self.format.currentIndexChanged,
+                       self.quality.valueChanged, self.chroma.currentIndexChanged, self.progressive.toggled,
+                       self.jxl_quality.valueChanged, self.jxl_lossless.toggled, self.jxl_effort.valueChanged,
+                       self.png_compression.valueChanged, self.tiff_compression.currentIndexChanged, self.bmp_dpi.valueChanged):
+            signal.connect(self._preferences_changed)
+        for signal in (self.destination.textChanged, self.mode.currentIndexChanged, self.format.currentIndexChanged):
+            signal.connect(self._invalidate_plan)
         self.refresh_pipeline()
         self._update_controls()
         self._timer = QTimer(self, interval=400)
@@ -175,7 +189,6 @@ class BatchPanel(QWidget):
                     _button("Choose JPEGs…", "chooseSourceFiles", self._choose_files)))
         self.recursive = QCheckBox("Include subfolders")
         self.recursive.setObjectName("batchRecursive")
-        self.recursive.toggled.connect(self._scan)
         self.scan = _button("Rescan source folder", "scanSources", self._scan)
         scan_row = _row(self.recursive)
         scan_row.addStretch()
@@ -183,7 +196,6 @@ class BatchPanel(QWidget):
         form.addRow("", scan_row)
         self.destination = QLineEdit(placeholderText="Select an existing destination folder")
         self.destination.setObjectName("batchDestination")
-        self.destination.textChanged.connect(self._invalidate_plan)
         form.addRow("Destination", _row(self.destination,
                     _button("Browse…", "chooseDestination", self._choose_destination)))
         return self.folders
@@ -211,7 +223,6 @@ class BatchPanel(QWidget):
         self.mode.setObjectName("batchMode")
         self.mode.addItem("Sequential · one photo at a time", "sequential")
         self.mode.addItem("Staged · one operation at a time", "staged")
-        self.mode.currentIndexChanged.connect(self._invalidate_plan)
         form.addRow("Schedule", self.mode)
         self.format = QComboBox()
         self.format.setObjectName("exportFormat")
@@ -252,7 +263,6 @@ class BatchPanel(QWidget):
 
         show_options(self.format.currentText())
         self.format.currentTextChanged.connect(show_options)
-        self.format.currentTextChanged.connect(self._invalidate_plan)
         layout.addWidget(self.export)
 
         self.pipeline_summary = _label("batchPipelineSummary")
@@ -400,8 +410,53 @@ class BatchPanel(QWidget):
         elif any(image.issue for image in index.images):
             self.setup_message.setText("Repair unreadable JPEGs and rescan, or uncheck them to exclude them from this batch.")
 
-    def _export_settings(self):
-        match self.format.currentText():
+    def _restore_preferences(self):
+        try:
+            recursive, destination, mode, fmt, settings = self.application.state.batch_preferences()
+        except (OSError, RetouchingError) as exc:
+            self.preferences_warning = f"Could not restore batch settings: {exc}"
+            self.application.diagnostics.emit("BATCH_SETTINGS_RESTORE_FAILED", self.preferences_warning,
+                component="desktop", level="WARNING", exc_info=True, state_path=self.application.state.path)
+            return
+        self.recursive.setChecked(recursive)
+        self.destination.setText(destination)
+        self.mode.setCurrentIndex(self.mode.findData(mode))
+        self.format.setCurrentText(fmt)
+        jpeg, jxl = settings["JPEG"], settings["JPEG XL"]
+        self.quality.setValue(jpeg.quality)
+        self.chroma.setCurrentText(jpeg.subsampling)
+        self.progressive.setChecked(jpeg.progressive)
+        self.jxl_quality.setValue(jxl.quality)
+        self.jxl_lossless.setChecked(jxl.lossless)
+        self.jxl_effort.setValue(jxl.effort)
+        self.png_compression.setValue(settings["PNG"].compression)
+        self.tiff_compression.setCurrentText(settings["TIFF"].compression)
+        self.bmp_dpi.setValue(settings["BMP"].dpi)
+
+    def _preferences_changed(self):
+        self._preferences_dirty = True
+        self._preferences_timer.start()
+
+    def _save_preferences(self):
+        if not self._preferences_dirty:
+            return
+        self._preferences_timer.stop()
+        try:
+            self.application.state.update(batch={
+                "recursive": self.recursive.isChecked(), "destination": self.destination.text().strip(),
+                "mode": self.mode.currentData(), "format": self.format.currentText(),
+                "options": {fmt: encode_settings(self._export_settings(fmt)) for fmt in FORMATS},
+            })
+        except (OSError, RetouchingError) as exc:
+            self.preferences_warning = f"Could not save batch settings: {exc}"
+            self.application.diagnostics.emit("BATCH_SETTINGS_SAVE_FAILED", self.preferences_warning,
+                component="desktop", level="WARNING", exc_info=True, state_path=self.application.state.path)
+        else:
+            self._preferences_dirty = False
+            self.preferences_warning = ""
+
+    def _export_settings(self, fmt=None):
+        match fmt or self.format.currentText():
             case "JPEG":
                 return JpegSettings(self.quality.value(), self.chroma.currentText(), self.progressive.isChecked())
             case "JPEG XL":
@@ -927,11 +982,16 @@ class BatchPanel(QWidget):
             state = self._status.status.replace("_", " ").capitalize() if self._status else "Batch"
         self.job_heading.setText(f"{state}  ·  {self._job_id}")
 
+    @property
+    def closing(self):
+        return self._closing
+
     def request_close(self):
         """Stop the worker at a safe boundary and release the current batch."""
         if self._stage_preview is not None and not self._stage_preview.close():
             return False
         self._closing = True
+        self._save_preferences()
         thumbnails_stopped = self.images.shutdown()
         if self._run is not None:
             if self._request_sent is None:
