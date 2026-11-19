@@ -170,16 +170,16 @@ def _convert_to_srgb(image, metadata, exif, xmp_color_space, runtime, path):
                                                   flags=ImageCms.Flags.BLACKPOINTCOMPENSATION)
         except (OSError, ImageCms.PyCMSError, ValueError) as exc:
             raise RetouchingError("INPUT_COLOR_PROFILE_INVALID",
-                                  "Cannot convert the embedded ICC profile. Check the source JPEG or its color profile.") from exc
+                                  "Cannot convert the embedded ICC profile. Check the source image or its color profile.") from exc
         return converted, "embedded-icc"
     spaces = (exif.color_space, xmp_color_space)
     interop = (exif.interop or {}).get(1)
     if (image.mode not in ("RGB", "L") or any(space not in (None, 1, 65535) for space in spaces)
             or (interop is not None and interop.value.rstrip(b"\0") != b"R98")):
         raise RetouchingError("INPUT_COLOR_PROFILE_REQUIRED",
-                              "This JPEG needs an embedded ICC profile. Supply an original JPEG with the correct profile.")
+                              "This image needs an embedded ICC profile. Supply an original with the correct profile.")
     if 65535 in spaces or (1 not in spaces and interop is None):
-        runtime.emit("INPUT_SRGB_ASSUMED", "Used sRGB for JPEG samples without a usable color-space declaration",
+        runtime.emit("INPUT_SRGB_ASSUMED", "Used sRGB for source samples without a usable color-space declaration",
                      level="WARNING", source_path=str(path), exif_color_space=spaces[0], xmp_color_space=spaces[1])
     return (image if image.mode == "RGB" else image.convert("RGB")), "srgb"
 

@@ -434,9 +434,13 @@ class DesktopBatchTests(unittest.TestCase):
             picker.assert_called_once_with(panel, "Choose destination folder", str(self.source))
             self.assertEqual(panel.destination.text(), "")
 
-        files = [str(self.nested / "фото.jpg"), str(self.source / "a.jpg")]
-        with patch.object(QFileDialog, "getOpenFileNames", return_value=(files, "")):
+        avif = self.nested / "фото.avif"
+        with Image.new("RGB", (32, 24), "green") as image:
+            image.save(avif)
+        files = [str(avif), str(self.source / "a.jpg")]
+        with patch.object(QFileDialog, "getOpenFileNames", return_value=(files, "")) as picker:
             panel.findChild(QPushButton, "chooseSourceFiles").click()
+            self.assertIn("*.avif", picker.call_args.kwargs["filter"])
         self.wait_for_scan(panel, 2)
         with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.destination)) as picker:
             browse.click()

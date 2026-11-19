@@ -10,6 +10,7 @@ from ..diagnostics.history import DiagnosticHistory
 from ..diagnostics.reports import DiagnosticReport, write_report
 from ..errors import RetouchingError
 from ..imaging.export_settings import encode_settings
+from ..imaging.source import SOURCE_EXTENSIONS
 from ..jobs.journal import validate_job_id
 from ..jobs.snapshot import model_manifests, runtime_versions
 from ..json_io import atomic_json
@@ -215,8 +216,8 @@ class ApplicationService:
     @staticmethod
     def _validate_sources(sources):
         for source in sources:
-            if not source.exists() or (not source.is_dir() and not (source.is_file() and source.suffix.lower() in (".jpg", ".jpeg"))):
-                raise RetouchingError("SOURCE_INVALID", f"Source must be an existing folder or JPEG file: {source}")
+            if not source.exists() or (not source.is_dir() and not (source.is_file() and source.suffix.lower() in SOURCE_EXTENSIONS)):
+                raise RetouchingError("SOURCE_INVALID", f"Source must be an existing folder or a JPEG or AVIF file: {source}")
 
 
 def _report_pipeline(definition):

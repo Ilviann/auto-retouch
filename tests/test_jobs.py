@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PIL import Image, JpegImagePlugin
+from PIL import Image, ImageCms, JpegImagePlugin
 
 from retouching_tool.application.batch import BASE_SCRATCH_BYTES, ExistingOutputDecision, ExistingOutputs
 from retouching_tool.application.job_service import JobControl
@@ -21,6 +21,9 @@ from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
 from retouching_tool.imaging.export_settings import JpegSettings, PngSettings, TiffSettings, parse_settings
+from retouching_tool.imaging.jpeg import JpegRuntime
+from retouching_tool.imaging.source import decode_source
+from retouching_tool.imaging.xmp import EMPTY_XMP
 from retouching_tool.jobs.journal import MAX_ATTEMPTS, JobJournal, JournalError, open_journal, runner_lock, saved_job_files
 from retouching_tool.operations.reference import Exposure, ReferenceOperation
 from retouching_tool.pipeline.definition import OperationDescriptor
@@ -172,6 +175,60 @@ with fault:
         self.assertEqual(parse_settings({"quality": 80, "progressive": True, "subsampling": "4:2:0"}),
                          JpegSettings(80, "4:2:0", True))
 
+    def test_still_avif_sources_preview_and_export_in_both_schedules(self):
+        source = self.source / "portrait.AVIF"
+        exif = Image.Exif()
+        exif[271] = "AVIF Camera"
+        exif[274] = 6
+        profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+        with Image.new("RGBA", (36, 20), (112, 64, 48, 0)) as photo:
+            photo.paste((112, 64, 48, 255), (0, 0, 18, 20))
+            photo.save(source, exif=exif.tobytes(), icc_profile=profile, xmp=EMPTY_XMP)
+        original = source.read_bytes()
+        self.app.startup(LaunchOptions((source,), None, None), "directml")
+        index = self.app.index_sources((source,))
+        item, = index.images
+        state = decode_source(source, source_id=item.image_id, runtime=JpegRuntime(self.log, item.image_id))
+        # Pillow's encoder moved the orientation into an AVIF container transform.
+        del exif[274]
+        self.assertEqual(state.metadata.exif, exif.tobytes())
+        self.assertEqual(state.metadata.icc_profile, profile)
+        self.assertEqual(state.metadata.xmp, EMPTY_XMP)
+        preview = self.app.preview_service
+        thumb = preview.thumbnail(item)
+        picture = preview.picture(index, item.image_id, "avif-preview", process=True)
+        self.assertEqual((thumb.width, thumb.height), (20, 36))
+        self.assertEqual(picture.original, picture.result)
+        self.assertEqual(picture.original.rgb[-3:], bytes([255, 255, 255]))
+        self.assertLess(picture.original.rgb[0], 200)
+        self.load_staged_reference()
+        for mode in ("sequential", "staged"):
+            with self.subTest(mode=mode):
+                destination = self.destination / mode
+                destination.mkdir()
+                job_id = self.jobs.create(index, destination, mode=mode)
+                status = self.open_app().job_service.run(job_id)
+                self.assertEqual(status.status, "completed")
+                with Image.open(destination / "portrait.jpg") as exported:
+                    self.assertEqual((exported.format, exported.size), ("JPEG", (20, 36)))
+                    self.assertEqual(exported.getexif()[271], "AVIF Camera")
+                    self.assertEqual(exported.getexif()[274], 1)
+        self.assertEqual(source.read_bytes(), original)
+        self.jpeg("portrait.jpg")
+        with self.assertRaises(RetouchingError) as caught:
+            self.create()
+        self.assertEqual(caught.exception.code, "OUTPUT_COLLISION")
+
+    def test_corrupt_and_animated_avif_are_accounted_for_during_scan(self):
+        (self.source / "broken.avif").write_bytes(b"not an AVIF image")
+        with Image.new("RGB", (16, 16), "red") as first, Image.new("RGB", (16, 16), "blue") as second:
+            first.save(self.source / "animation.avif", save_all=True, append_images=[second])
+        index = self.app.index_sources((self.source,))
+        self.assertEqual(len(index.images), 2)
+        self.assertTrue(all(item.header is None and item.issue for item in index.images))
+        failures = {record["code"] for record in self.log.records if record.get("image_id")}
+        self.assertTrue({"INPUT_AVIF_SEQUENCE", "INPUT_HEADER_INVALID"} <= failures)
+
     def review_existing(self, action, **options):
         with self.assertRaises(ExistingOutputs) as caught:
             self.create(**options)
@@ -295,7 +352,7 @@ with fault:
 
         # The checkpoint has enough validated input state to run the later units.
         path.write_bytes(b"source changed after the committed first stage")
-        with patch(APP_JOBS + ".decode_jpeg", side_effect=AssertionError("Unexpected source decode")):
+        with patch(APP_JOBS + ".decode_source", side_effect=AssertionError("Unexpected source decode")):
             second = self.pause_after_checkpoint(job_id)
             self.assertEqual(second.images[0].completed_stages, 2)
             self.assertEqual(len(list((directory / "states").glob("*.json"))), 1)
@@ -364,7 +421,7 @@ with fault:
         self.assertEqual((event["job_id"], event["image_id"], event["stage_instance_id"]),
                          (job_id, interrupted.image_id, "exposure-reference"))
         self.assertIn("fixture disk full", event["exception"])
-        with patch(APP_JOBS + ".decode_jpeg", side_effect=AssertionError("Unexpected source decode")):
+        with patch(APP_JOBS + ".decode_source", side_effect=AssertionError("Unexpected source decode")):
             result = self.open_app().job_service.run(job_id)
         self.assertEqual((result.status, result.images[0].attempts), ("completed", 5))
 
@@ -729,7 +786,7 @@ with fault:
                 output = self.destination / "portrait.jpg"
                 verified = next(self.destination.glob("*.pending")) if boundary == "before" else output
                 expected = verified.read_bytes()
-                with (patch(APP_JOBS + ".decode_jpeg", side_effect=AssertionError("unexpected re-render")) as decode,
+                with (patch(APP_JOBS + ".decode_source", side_effect=AssertionError("unexpected re-render")) as decode,
                       patch(APP_JOBS + ".runtime_versions", side_effect=AssertionError("unused renderer"))):
                     status = self.open_app().job_service.run(job_id)
                 self.assertEqual(status.status, "completed")
@@ -876,7 +933,7 @@ with fault:
     def test_exhausted_interruption_replay_does_not_advance_the_attempt_count(self):
         self.jpeg("portrait.jpg")
         job_id = self.create()
-        with patch(APP_JOBS + ".decode_jpeg", side_effect=KeyboardInterrupt):
+        with patch(APP_JOBS + ".decode_source", side_effect=KeyboardInterrupt):
             for _ in range(MAX_ATTEMPTS):
                 with self.assertRaises(KeyboardInterrupt):
                     self.jobs.run(job_id)

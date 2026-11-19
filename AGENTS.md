@@ -38,7 +38,9 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
   input plus 200 MB; staged scratch is all inputs uncompressed plus 200 MB; output
   is twice the compressed source total. Account for actual representation and
   additional artifact/transactional overhead; sum budgets on shared volumes.
-- Required presets: Natural and Beauty.
+- Natural and Beauty are required presets. The user creates, tunes, and documents
+  presets. Leave preset files and their documentation to the user unless they
+  explicitly ask for help with them.
 - Minimum GPU: consumer RTX 20-series with at least 6 GB VRAM.
 - Development hardware: AMD Ryzen 7 7840HS APU with Radeon 780M Graphics,
   reported DirectX 12 Ultimate capability, and no NVIDIA CUDA GPU.

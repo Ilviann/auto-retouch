@@ -1,4 +1,4 @@
-"""Immutable source indexes and headless path/storage preflight for JPEG batches."""
+"""Immutable source indexes and headless path/storage preflight for photo batches."""
 
 from dataclasses import dataclass
 import os
@@ -9,14 +9,14 @@ from uuid import uuid4
 
 from ..errors import RetouchingError
 from ..imaging.export_settings import ExportSettings, JpegSettings, JxlSettings, export_relative_path, output_reservation, require_jxl
-from ..imaging.jpeg import JpegHeader, inspect_jpeg_header
+from ..imaging.jpeg import JpegHeader
+from ..imaging.source import SOURCE_EXTENSIONS, inspect_source_header
 from ..pipeline.image_state import RGB_FLOAT32_BYTES_PER_PIXEL
 from ..storage.artifacts import MANIFEST_LIMIT
 from ..storage.batch_paths import (FileStamp, current_file_stamp, directory_chain, existing_output_stamp, file_identity,
                                    is_reparse, output_path, probe_writable, resolve_folder)
 from ..storage.tiff_pixels import TIFF_OVERHEAD_LIMIT
 
-JPEG_EXTENSIONS = (".jpg", ".jpeg")
 BASE_SCRATCH_BYTES = 200_000_000
 CHECKPOINT_OVERHEAD_BYTES = MANIFEST_LIMIT + TIFF_OVERHEAD_LIMIT
 
@@ -117,8 +117,8 @@ class BatchPlan:
         return all(volume.available_bytes >= volume.required_bytes for volume in self.volumes)
 
 
-def _jpeg_name(path):
-    return path.suffix.lower() in JPEG_EXTENSIONS
+def _source_name(path):
+    return path.suffix.lower() in SOURCE_EXTENSIONS
 
 
 def _space_budget(images, mode, extra_scratch_bytes, settings):
@@ -184,11 +184,11 @@ class BatchService:
                 if stat.S_ISDIR(info.st_mode):
                     folders[str(source)] = source
                     root = source
-                elif stat.S_ISREG(info.st_mode) and _jpeg_name(source):
+                elif stat.S_ISREG(info.st_mode) and _source_name(source):
                     explicit[str(source)] = source
                     root = source.parent
                 else:
-                    raise RetouchingError("SOURCE_INVALID", f"Select an existing folder or JPEG file: {source}")
+                    raise RetouchingError("SOURCE_INVALID", f"Select an existing folder or photo file (JPEG, AVIF): {source}")
                 if str(root) not in roots:
                     roots[str(root)] = SourceRoot(root, file_identity(root.stat()))
 
@@ -209,7 +209,7 @@ class BatchService:
                 raise
             raise error from exc
 
-        self.diagnostics.emit("SOURCE_INDEXED", "Finished reading source JPEG headers", component="batch",
+        self.diagnostics.emit("SOURCE_INDEXED", "Finished reading source image headers", component="batch",
                               index_id=index_id, recursive=recursive, source_count=len(images),
                               unreadable_count=sum(image.issue is not None for image in images.values()))
         return SourceIndex(index_id, recursive, tuple(roots.values()), tuple(images.values()))
@@ -228,12 +228,12 @@ class BatchService:
                     path = Path(entry.path)
                     info = entry.stat(follow_symlinks=False)
                     if is_reparse(info) or stat.S_ISLNK(info.st_mode):
-                        if recursive or _jpeg_name(path):
-                            self.diagnostics.emit("SOURCE_LINK_SKIPPED", "Skipped a link or reparse point during JPEG discovery",
+                        if recursive or _source_name(path):
+                            self.diagnostics.emit("SOURCE_LINK_SKIPPED", "Skipped a link or reparse point during photo discovery",
                                                   component="batch", level="WARNING", index_id=index_id, source_path=path)
                     elif stat.S_ISDIR(info.st_mode) and recursive:
                         subdirectories.append(path)
-                    elif stat.S_ISREG(info.st_mode) and _jpeg_name(path):
+                    elif stat.S_ISREG(info.st_mode) and _source_name(path):
                         yield path
                 pending.extend(reversed(subdirectories))
             except OSError as exc:
@@ -245,13 +245,13 @@ class BatchService:
         try:
             stamp = current_file_stamp(path)
             with path.open("rb") as stream:
-                header = inspect_jpeg_header(stream)
+                header = inspect_source_header(path, stream)
                 opened = FileStamp.capture(os.fstat(stream.fileno()))
             if opened != stamp or current_file_stamp(path) != stamp:
                 raise RetouchingError("SOURCE_CHANGED", f"Source changed while it was indexed: {path}. Re-index it.")
         except (OSError, ValueError, RetouchingError) as exc:
             error = exc if isinstance(exc, RetouchingError) else RetouchingError(
-                "INPUT_HEADER_INVALID", f"Cannot read the JPEG header in {path}. Check the file and re-index it.")
+                "INPUT_HEADER_INVALID", f"Cannot read the image header in {path}. Check the file and re-index it.")
             self._emit_failure(error, index_id=index_id, image_id=image_id, source_path=path)
             return IndexedImage(image_id, path, relative, stamp, None, str(error))
         return IndexedImage(image_id, path, relative, stamp, header)
@@ -317,9 +317,9 @@ class BatchService:
             wanted = set(selected_ids)
             selected = tuple(image for image in index.images if image.image_id in wanted)
             if len(selected) != len(wanted):
-                raise RetouchingError("BATCH_SELECTION_INVALID", "Select JPEGs from the current index.")
+                raise RetouchingError("BATCH_SELECTION_INVALID", "Select photos from the current index.")
         if not selected and not allow_empty:
-            raise RetouchingError("BATCH_SELECTION_INVALID", "Select one or more JPEGs from the current index.")
+            raise RetouchingError("BATCH_SELECTION_INVALID", "Select one or more photos from the current index.")
         return selected
 
     def validate_folders(self, index, destination):
@@ -360,7 +360,7 @@ class BatchService:
             context.update(image_id=image.image_id, source_path=image.path)
             if image.header is None:
                 raise RetouchingError("BATCH_INDEX_INCOMPLETE",
-                                      f"No disk estimate for {image.path}. Fix and re-index the JPEG or remove it from the selection.")
+                                      f"No disk estimate for {image.path}. Fix and re-index the image or remove it from the selection.")
             try:
                 unchanged = current_file_stamp(image.path) == image.stamp
             except OSError as exc:

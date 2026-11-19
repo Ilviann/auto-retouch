@@ -11,7 +11,8 @@ from ..diagnostics.job_issues import JobIssues
 from ..imaging.scaling import fit_longest_side
 from ..imaging.export import export_image
 from ..imaging.export_settings import ExportSettings, JpegSettings, JxlSettings, require_jxl
-from ..imaging.jpeg import JpegRuntime, decode_jpeg
+from ..imaging.jpeg import JpegRuntime
+from ..imaging.source import decode_source
 from ..jobs.execution import ImageDiagnostics, disk_full
 from ..jobs.journal import (MAX_ATTEMPTS, STAGED_SCHEMA_VERSION, TERMINAL, JournalError,
                             open_issue_file, open_journal, runner_lock, saved_job_files, validate_job_id, workspace_key)
@@ -496,7 +497,7 @@ class JobService:
 
     def _decode(self, item, runtime):
         self._check_source(item)
-        state = decode_jpeg(item.path, source_id=item.image_id, runtime=runtime, expected_sha256=item.sha256)
+        state = decode_source(item.path, source_id=item.image_id, runtime=runtime, expected_sha256=item.sha256)
         self._check_source(item)
         return state
 

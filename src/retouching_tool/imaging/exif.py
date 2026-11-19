@@ -121,9 +121,13 @@ class _Reader:
 def read_exif(raw):
     if not raw:
         return Exif("<", {}, {})
-    if not raw.startswith(EXIF_HEADER) or not 14 <= len(raw) <= MAX_APP_PAYLOAD:
-        raise ValueError("Invalid JPEG EXIF APP1 payload")
-    reader = _Reader(raw[len(EXIF_HEADER):])
+    # AVIF Exif items can carry the TIFF directory without the JPEG APP1 prefix.
+    data = raw.removeprefix(EXIF_HEADER)
+    if len(data) < 8 or len(raw) > MAX_APP_PAYLOAD:
+        if raw.startswith(EXIF_HEADER):
+            raise ValueError("Invalid JPEG EXIF APP1 payload")
+        raise ValueError("Invalid EXIF payload size")
+    reader = _Reader(data)
     primary, thumbnail_offset = reader.ifd(reader.unpack("I", 4)[0], (EXIF_POINTER, GPS_POINTER))
     result = Exif(reader.order, primary, {}, had_thumbnail=bool(thumbnail_offset))
     result.capture = reader.child(result, primary, EXIF_POINTER, (INTEROP_POINTER,)) or {}

@@ -181,12 +181,12 @@ class BatchPanel(QWidget):
     def _build_folders(self):
         self.folders = QGroupBox("Sources and destination")
         form = QFormLayout(self.folders)
-        self.source_text = QLineEdit(readOnly=True, placeholderText="Select a folder or JPEG files")
+        self.source_text = QLineEdit(readOnly=True, placeholderText="Select a folder or photos (JPEG, AVIF)")
         self.source_text.setObjectName("batchSources")
         self._show_sources()
         form.addRow("Sources", _row(self.source_text,
                     _button("Choose folder…", "chooseSourceFolder", self._choose_folder),
-                    _button("Choose JPEGs…", "chooseSourceFiles", self._choose_files)))
+                    _button("Choose photos…", "chooseSourceFiles", self._choose_files)))
         self.recursive = QCheckBox("Include subfolders")
         self.recursive.setObjectName("batchRecursive")
         self.scan = _button("Rescan source folder", "scanSources", self._scan)
@@ -305,7 +305,7 @@ class BatchPanel(QWidget):
         for widget in (self.job_metadata, self.job_progress, self.job_timing, self.job_counts,
                        self.worker_warning, self.job_message):
             layout.addWidget(widget)
-        self.results = _table("jobImages", ("Source JPEG", "Result", "Attempts", "Warnings", "Stages"), 0)
+        self.results = _table("jobImages", ("Source photo", "Result", "Attempts", "Warnings", "Stages"), 0)
         layout.addWidget(self.results, 1)
         layout.addLayout(_row(self.refresh, self.pause, self.resume, self.cancel, monitor.close_button))
         for button in monitor.findChildren(QPushButton):
@@ -348,7 +348,7 @@ class BatchPanel(QWidget):
             self._set_sources((path,))
 
     def _choose_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "Choose source JPEGs", filter="JPEG (*.jpg *.jpeg)")
+        paths, _ = QFileDialog.getOpenFileNames(self, "Choose source photos", filter="Photos (*.jpg *.jpeg *.avif)")
         if paths:
             self._set_sources(paths)
 
@@ -398,7 +398,7 @@ class BatchPanel(QWidget):
         self._invalidate_index()
         if not self._sources:
             return
-        self.setup_message.setText("Reading JPEG headers…")
+        self.setup_message.setText("Reading image headers…")
         self._submit("scan", partial(self.application.index_sources, self._sources, recursive=self.recursive.isChecked()))
 
     def _show_index(self, index):
@@ -406,9 +406,9 @@ class BatchPanel(QWidget):
         self.images.set_index(index)
         self._invalidate_plan()
         if not index.images:
-            self.setup_message.setText("No JPEGs found. Choose another source or include subfolders.")
+            self.setup_message.setText("No photos found. Choose another source or include subfolders.")
         elif any(image.issue for image in index.images):
-            self.setup_message.setText("Repair unreadable JPEGs and rescan, or uncheck them to exclude them from this batch.")
+            self.setup_message.setText("Repair unreadable photos and rescan, or uncheck them to exclude them from this batch.")
 
     def _restore_preferences(self):
         try:
@@ -506,7 +506,7 @@ class BatchPanel(QWidget):
         if budget is not None:
             self.space.setText(self._estimate_text(budget))
         elif selected:
-            self.space.setText("Disk estimates need readable JPEG headers for all included photos.")
+            self.space.setText("Disk estimates need readable image headers for all included photos.")
         else:
             self.space.clear()
 
@@ -950,11 +950,11 @@ class BatchPanel(QWidget):
             self._preview_available = can_view
             self.operation_preview_available.emit(can_view)
         if self._index is None:
-            self.source_summary.setText("Choose a folder or JPEG files." if not self._sources else "No photos indexed.")
+            self.source_summary.setText("Choose a folder or photos (JPEG, AVIF)." if not self._sources else "No photos indexed.")
         else:
             total = len(self._index.images)
             unreadable = sum(image.issue is not None for image in self._index.images)
-            self.source_summary.setText(f"{total} JPEGs found · {selected} included · {total - selected} excluded · {unreadable} unreadable")
+            self.source_summary.setText(f"{total} photos found · {selected} included · {total - selected} excluded · {unreadable} unreadable")
 
         creating = self._task is not None and self._task[0] in ("create", "discard")
         self.export_issues.setEnabled(self.application.job_service.current_issues is not None and not creating

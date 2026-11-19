@@ -11,6 +11,7 @@ from .. import __version__
 from ..environment import RUNTIMES
 from ..imaging.export_settings import ExportSettings, encode_settings, export_relative_path, output_reservation, parse_settings
 from ..imaging.jpeg import MAX_PIXELS
+from ..imaging.source import SOURCE_EXTENSIONS
 from ..pipeline.definition import PipelineDefinition, parse_pipeline
 from ..pipeline.image_state import RGB_FLOAT32_BYTES_PER_PIXEL
 from ..storage.artifact_codec import digest, fields, integer, require
@@ -72,14 +73,14 @@ class FrozenInput:
         relative = Path(data["relative_path"])
         require(not relative.anchor and relative.parts and not any(part == ".." or os.path.isreserved(part)
                                                                  for part in relative.parts)
-                and relative.suffix.lower() in (".jpg", ".jpeg"), "Invalid job JPEG path")
+                and relative.suffix.lower() in SOURCE_EXTENSIONS, "Invalid job source path")
         require(isinstance(data["image_id"], str) and data["image_id"]
                 and (data["sha256"] is None or digest(data["sha256"]))
                 and integer(data["width"], 1) and integer(data["height"], 1)
-                and data["width"] * data["height"] <= MAX_PIXELS, "Invalid frozen JPEG identity or dimensions")
+                and data["width"] * data["height"] <= MAX_PIXELS, "Invalid frozen image identity or dimensions")
         stamp = parse_stamp(data["stamp"])
         header_bytes = data.get("header_bytes", 0)
-        require(integer(header_bytes) and header_bytes <= stamp.size, "Invalid frozen JPEG header size")
+        require(integer(header_bytes) and header_bytes <= stamp.size, "Invalid frozen image header size")
         return cls(data["image_id"], _absolute(data["path"]), relative, stamp,
                    data["sha256"], data["width"], data["height"], header_bytes,
                    parse_stamp(data["replace_stamp"]) if "replace_stamp" in data else None)
@@ -157,7 +158,7 @@ class JobSnapshot:
         roots = tuple((_absolute(path), _identity(identity)) for path, identity in data["roots"])
         inputs = tuple(FrozenInput.parse(item) for item in data["inputs"])
         require(data["mode"] == "sequential" or all(item.header_bytes > 0 for item in inputs),
-                "Staged jobs require frozen JPEG header sizes")
+                "Staged jobs require frozen image header sizes")
         require(inputs and roots and len({item.image_id for item in inputs}) == len(inputs)
                 and len({item.relative_path for item in inputs}) == len(inputs), "Invalid frozen input list")
         settings = parse_settings(data["settings"])

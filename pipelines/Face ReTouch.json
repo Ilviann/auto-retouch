@@ -20,7 +20,8 @@
       "enabled": true,
       "parameters": {
         "strength": 1.0,
-        "use_face_rects": true
+        "use_face_rects": true,
+        "blend": 0.87
       },
       "model_ref": "alibaba-blemish-cleanup"
     },
@@ -34,6 +35,25 @@
         "use_face_rects": true
       },
       "model_ref": "alibaba-skin-tone-smoothing"
+    },
+    {
+      "id": "eecc71692cd7430ab07fcf5c38f83694",
+      "operation": "analysis.exposed_skin",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {},
+      "model_ref": "selfie-multiclass-256x256-onnx"
+    },
+    {
+      "id": "8e928482d2ae4d1ab02179df3a8e0d7a",
+      "operation": "retouch.local_skin_tone_evening",
+      "operation_version": 1,
+      "enabled": true,
+      "parameters": {
+        "strength": 0.5,
+        "radius": 20,
+        "max_shift": 6.0
+      }
     }
   ]
 }

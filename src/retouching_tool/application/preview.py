@@ -5,7 +5,8 @@ from dataclasses import dataclass, replace
 from functools import partial
 
 from ..errors import ResizeApprovalRequired, RetouchingError
-from ..imaging.jpeg import JpegRuntime, decode_jpeg, encode_rgb_samples, read_srgb_jpeg
+from ..imaging.jpeg import JpegRuntime, encode_rgb_samples
+from ..imaging.source import decode_source, read_srgb_source
 from ..jobs.execution import ImageDiagnostics
 from ..jobs.journal import runner_lock
 from ..pipeline.definition import parse_pipeline
@@ -100,13 +101,13 @@ def _foreground_overlay(display, foreground):
 
 def _check_source(image):
     if image.header is None:
-        raise RetouchingError("INPUT_HEADER_INVALID", image.issue or "Re-index a readable JPEG.")
+        raise RetouchingError("INPUT_HEADER_INVALID", image.issue or "Re-index a readable photo.")
     try:
         if current_file_stamp(image.path) == image.stamp:
             return
     except OSError as exc:
-        raise RetouchingError("SOURCE_CHANGED", "Cannot reopen the indexed JPEG. Scan the sources again.") from exc
-    raise RetouchingError("SOURCE_CHANGED", "The indexed JPEG changed. Scan the sources again.")
+        raise RetouchingError("SOURCE_CHANGED", "Cannot reopen the indexed photo. Scan the sources again.") from exc
+    raise RetouchingError("SOURCE_CHANGED", "The indexed photo changed. Scan the sources again.")
 
 
 def _skin_overlay(display, mask):
@@ -140,7 +141,7 @@ class PreviewService:
 
     def _source_display(self, image, runtime, limit=None):
         _check_source(image)
-        with read_srgb_jpeg(image.path, source_id=image.image_id, runtime=runtime, draft_size=limit) as (
+        with read_srgb_source(image.path, source_id=image.image_id, runtime=runtime, draft_size=limit) as (
                 rgb, _, _, _):
             display = _full_display(rgb) if limit is None else _display(rgb, limit)
         _check_source(image)
@@ -152,9 +153,9 @@ class PreviewService:
         try:
             return self._source_display(image, runtime, THUMBNAIL_SIZE)
         except Exception as exc:
-            runtime.emit("THUMBNAIL_FAILED", "Cannot display the source thumbnail. Inspect the JPEG or scan again.",
+            runtime.emit("THUMBNAIL_FAILED", "Cannot display the source thumbnail. Inspect the photo or scan again.",
                          level="WARNING", exc_info=not log.traced_error, source_path=image.path)
-            raise RetouchingError("THUMBNAIL_FAILED", "Cannot display this JPEG.") from exc
+            raise RetouchingError("THUMBNAIL_FAILED", "Cannot display this photo.") from exc
 
     def stage_comparison(self, index, image_id, stage_id, *, through_stage):
         return StageComparison(partial(self.picture, index, image_id, stage_id=stage_id,
@@ -200,7 +201,7 @@ class PreviewService:
         if baseline is not None and baseline[0] == baseline_key:
             _, state, original = baseline
         else:
-            state = decode_jpeg(image.path, source_id=image.image_id, runtime=runtime)
+            state = decode_source(image.path, source_id=image.image_id, runtime=runtime)
             _check_source(image)
             for stage in prefix:
                 state = self._process_stage(state, stage, runtime, resize_approvals)

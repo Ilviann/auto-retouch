@@ -13,7 +13,7 @@ presets rather than fixed processing paths.
 | U01 | Windows 11 desktop application; Windows 10 support is outside the initial scope. |
 | U02 | Photo processing is entirely local; no cloud processing. |
 | U03 | Primary workload is studio portraits, approximately 500 photos per batch. |
-| U04 | JPEG input; vendor-specific RAW formats are outside the initial scope. |
+| U04 | JPEG and still AVIF photo input. AVIF uses the 8-bit SDR processing path. HDR processing and vendor-specific RAW formats are outside the initial scope. |
 | U05 | Automatic overall color correction and human skin retouching. |
 | U06 | Separate Natural and Beauty presets. |
 | U07 | Minimum GPU class is consumer RTX 20-series with at least 6 GB VRAM. |

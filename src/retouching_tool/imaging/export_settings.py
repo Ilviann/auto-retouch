@@ -101,7 +101,9 @@ def parse_settings(data):
 
 
 def export_relative_path(relative, settings):
-    return relative if settings.format == "JPEG" else relative.with_suffix(EXTENSIONS[settings.format][0])
+    if settings.format == "JPEG" and relative.suffix.lower() in EXTENSIONS["JPEG"]:
+        return relative
+    return relative.with_suffix(EXTENSIONS[settings.format][0])
 
 
 def output_reservation(settings, source_bytes, working_bytes):

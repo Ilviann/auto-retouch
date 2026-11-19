@@ -4,6 +4,7 @@ Author: Neyrome.
 
 A Windows 11 desktop project for fully local batch retouching of studio portraits.
 Stages can change pixels, produce reusable region/mask context, or do both.
+Open JPEG or still AVIF photos from a folder or individual files. AVIF uses the 8-bit SDR pipeline. Transparent areas are composited onto white.
 JPEG, JPEG XL, PNG and TIFF exports preserve supported capture EXIF and record processing by the tool. BMP exports omit photo metadata.
 The initial GUI uses PySide6 with Qt Widgets, isolated behind toolkit-independent
 application commands and events to keep a future GUI replacement localized.
