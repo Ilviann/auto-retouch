@@ -204,7 +204,7 @@ class BatchService:
                     explicit[str(source)] = source
                     root = source.parent
                 else:
-                    raise RetouchingError("SOURCE_INVALID", f"Select an existing folder or photo file (JPEG, AVIF, PNG, TIFF, BMP, JPEG XL): {source}")
+                    raise RetouchingError("SOURCE_INVALID", f"Select an existing folder or photo file (JPEG, AVIF, PNG, TIFF, BMP, JPEG XL, DNG): {source}")
                 if str(root) not in roots:
                     roots[str(root)] = SourceRoot(root, file_identity(root.stat()))
 

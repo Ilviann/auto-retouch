@@ -260,6 +260,67 @@ with fault:
                         self.assertEqual(image.info["xmp"].count(b"pipelineSHA256"), 2)
         self.assertEqual(source_hashes, {p: hashlib.sha256(p.read_bytes()).digest() for p in photos})
 
+    def test_dng_sensor_subifd_preview_and_batch_metadata(self):
+        import numpy as np
+        import tifffile
+
+        source = self.source / "камера.DNG"
+        capture = [(50706, "B", 4, (1, 4, 0, 0), False), (50707, "B", 4, (1, 1, 0, 0), False),
+                   (50708, "s", 0, "Fixture Camera", False), (271, "s", 0, "Studio", False),
+                   (272, "s", 0, "Fixture Camera", False), (50735, "s", 0, "SN-123", False),
+                   (274, "H", 1, 6, False), (700, "B", len(EMPTY_XMP), EMPTY_XMP, False)]
+        calibration = [(50721, "2i", 9, (1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1), False),
+                       (50728, "2I", 3, (1, 1, 1, 1, 1, 1), False), (50778, "H", 1, 21, False)]
+        mosaic = [(33421, "H", 2, (2, 2), False), (33422, "B", 4, (0, 1, 1, 2), False),
+                  (50717, "I", 1, 65535, False), (274, "H", 1, 6, False)]
+        ramp = np.tile(np.arange(96, dtype=np.uint16) * 512, (64, 1))
+        with tifffile.TiffWriter(source) as writer:
+            writer.write(np.zeros((12, 16, 3), np.uint8), photometric="rgb", subifds=1, subfiletype=1,
+                         metadata=None, extratags=capture + calibration)
+            writer.write(ramp, photometric=32803, metadata=None, extratags=mosaic)
+        original = source.read_bytes()
+        self.app.startup(LaunchOptions((source,), None, None), "directml")
+        index = self.app.index_sources((source, self.source))
+        item, = index.images
+        self.assertIsNone(item.issue)
+        self.assertEqual((item.header.width, item.header.height), (64, 96))
+        thumb = self.app.preview_service.thumbnail(item)
+        picture = self.app.preview_service.picture(index, item.image_id, "dng", process=True)
+        self.assertEqual(picture.original, picture.result)
+        self.assertEqual((thumb.width, thumb.height, thumb.rgb), (64, 96, picture.original.rgb))
+        self.assertGreater(thumb.rgb[-3], thumb.rgb[0] + 50)
+        self.load_staged_reference()
+        for mode in ("sequential", "staged"):
+            destination = self.destination / mode
+            destination.mkdir()
+            job = self.jobs.create(index, destination, mode=mode)
+            result = self.open_app().job_service.run(job)
+            self.assertEqual(result.status, "completed")
+            with Image.open(destination / "камера.jpg") as exported:
+                exif = exported.getexif()
+                self.assertEqual((exported.size, exif[271], exif[272], exif[274]), ((64, 96), "Studio", "Fixture Camera", 1))
+                self.assertEqual(exif.get_ifd(34665)[42033], "SN-123")
+                self.assertNotIn(50706, exif)
+                self.assertIn(b"pipelineSHA256", exported.info["xmp"])
+        self.assertEqual(source.read_bytes(), original)
+        self.jpeg("камера.jpg")
+        with self.assertRaises(RetouchingError) as caught:
+            self.create()
+        self.assertEqual(caught.exception.code, "SOURCE_NAME_CONFLICT")
+
+    def test_dng_rejects_a_renamed_tiff_and_reports_missing_decoder(self):
+        source = self.source / "camera.dng"
+        with Image.new("RGB", (20, 16), "red") as image:
+            image.save(source, format="TIFF")
+        item, = self.app.index_sources((source,)).images
+        self.assertIsNone(item.header)
+        self.assertIn("INPUT_METADATA_INVALID", [e["code"] for e in self.log.records])
+        with patch.dict(sys.modules, {"rawpy": None}):
+            item, = self.app.index_sources((source,)).images
+        self.assertIsNone(item.header)
+        self.assertIn("import-dng.lock", item.issue)
+        self.assertIn("DNG_CODEC_UNAVAILABLE", [e["code"] for e in self.log.records])
+
     def test_corrupt_and_animated_avif_are_accounted_for_during_scan(self):
         (self.source / "broken.avif").write_bytes(b"not an AVIF image")
         with Image.new("RGB", (16, 16), "red") as first, Image.new("RGB", (16, 16), "blue") as second:

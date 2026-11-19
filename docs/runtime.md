@@ -33,6 +33,10 @@ The publisher declares GPL-3.0-or-later. The wheel is installed from PyPI.
 Review its license and bundled library notices when preparing a redistributable build.
 [Publisher release](https://pypi.org/project/pillow-jxl-plugin/1.3.8/).
 
+Setup installs the Windows x64 Python 3.14 DNG decoder pinned in `requirements/import-dng.lock`. An existing environment can add it with `.venv\Scripts\python -m pip install --require-hashes --no-deps -r requirements/import-dng.lock`. The installed rawpy 0.28.0 wheel includes LibRaw 0.22.2 and supports Deflate and lossy JPEG DNG compression. The wheel includes the rawpy MIT and LibRaw LGPL 2.1 license files. Retain the relevant notices and review redistribution obligations when packaging. Jobs with DNG sources record both library versions. [Publisher release](https://pypi.org/project/rawpy/0.28.0/).
+
+DNG import reads classic-TIFF DNG 1.x and uses full-size LibRaw development, camera white balance when available, sRGB output and disabled automatic brightening. The limits are 80 megapixels for the sensor and active image, 65,500 pixels per side, and 345,165,824 input bytes. Generated Bayer DNG tests cover a raw SubIFD with a smaller embedded preview, orientation, camera metadata and both batch modes. Camera-specific rendering and other DNG compression variants require representative files.
+
 ## Python environment
 
 - Target Python 3.14.x. The proposed initial target is standard 64-bit CPython on

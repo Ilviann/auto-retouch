@@ -9,6 +9,7 @@ from uuid import uuid4
 from ..errors import ResizeApprovalRequired, RetouchingError
 from ..diagnostics.job_issues import JobIssues
 from ..imaging.scaling import fit_longest_side
+from ..imaging.dng_source import dng_versions
 from ..imaging.export import export_image
 from ..imaging.export_settings import ExportSettings, JpegSettings, JxlSettings, require_jxl
 from ..imaging.jpeg import JpegRuntime
@@ -258,6 +259,8 @@ class JobService:
             versions = runtime_versions(self.pipeline.backend, self.pipeline.pytorch_backend)
             if isinstance(settings, JxlSettings) or any(item.path.suffix.lower() == ".jxl" for item in inputs):
                 versions["pillow-jxl-plugin"] = require_jxl()
+            if any(item.path.suffix.lower() == ".dng" for item in inputs):
+                versions.update(dng_versions())
             snapshot = JobSnapshot(job_id, index.index_id, index.recursive,
                                    tuple((root.path, root.identity) for root in index.roots), plan.destination,
                                    file_identity(plan.destination.stat()), plan.scratch, self.pipeline.checkpoints.resolve(),
@@ -361,6 +364,8 @@ class JobService:
         current_versions = runtime_versions(job.backend, job.pytorch_backend)
         if isinstance(job.settings, JxlSettings) or "pillow-jxl-plugin" in job.versions:
             current_versions["pillow-jxl-plugin"] = require_jxl()
+        if any(item.path.suffix.lower() == ".dng" for item in job.inputs):
+            current_versions.update(dng_versions())
         if any(value != current_versions.get(key) for key, value in job.versions.items() if key != "windows"):
             raise RetouchingError("JOB_RUNTIME_CHANGED", "Restore the job's recorded runtime and prepared backend, or create a new job.")
         registry, catalog = self.pipeline.registry, self.pipeline.catalog

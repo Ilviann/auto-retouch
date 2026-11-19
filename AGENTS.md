@@ -48,7 +48,7 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
   stages. Actual CUDA acceptance requires NVIDIA hardware; mark it pending here.
 - Quality takes priority over throughput; a couple of hours unattended is
   acceptable, with no specified hard processing deadline.
-- RAW support is outside the initial scope.
+- Support local DNG import into the SDR workflow. Other camera RAW formats remain outside the initial scope.
 - Ordered operation list with add/remove/reorder and parameter panels; JSON
   save/load and last-used pipeline restoration.
 - Every editable stage can be turned off. Missing required AI model files force

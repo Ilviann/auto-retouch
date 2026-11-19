@@ -325,7 +325,7 @@ class BatchTests(unittest.TestCase):
 import sys
 class Block:
     def find_spec(self, fullname, *args):
-        assert fullname.split('.')[0] not in {'PySide6', 'PIL', 'numpy', 'tifffile', 'onnxruntime'}, fullname
+        assert fullname.split('.')[0] not in {'PySide6', 'PIL', 'numpy', 'tifffile', 'onnxruntime', 'rawpy'}, fullname
 sys.meta_path.insert(0, Block())
 from retouching_tool.application.service import ApplicationService
 """

@@ -9,6 +9,7 @@ from time import perf_counter
 
 from ..errors import RetouchingError
 from ..pipeline.image_state import ImageState, SourceMetadata
+from .dng_source import inspect_dng, open_dng
 from .exif import TIFF_LAYOUT_TAGS, read_exif, read_tiff_directory, write_exif
 from .jxl_source import inspect_jxl, open_jxl
 from .jpeg import (MAX_HEADER_BYTES, MAX_PIXELS, JpegHeader, _convert_to_srgb, _linear_pixels,
@@ -16,7 +17,7 @@ from .jpeg import (MAX_HEADER_BYTES, MAX_PIXELS, JpegHeader, _convert_to_srgb, _
 from .xmp import EXIF, Xmp
 
 SOURCE_FORMATS = {".jpg": "JPEG", ".jpeg": "JPEG", ".avif": "AVIF", ".png": "PNG",
-                  ".tif": "TIFF", ".tiff": "TIFF", ".bmp": "BMP", ".jxl": "JXL"}
+                  ".tif": "TIFF", ".tiff": "TIFF", ".bmp": "BMP", ".jxl": "JXL", ".dng": "DNG"}
 SOURCE_EXTENSIONS = tuple(SOURCE_FORMATS)
 # Pillow's AVIF decoder reads the entire compressed container before parsing it.
 MAX_AVIF_BYTES = 4 * MAX_PIXELS + MAX_HEADER_BYTES
@@ -57,6 +58,8 @@ def inspect_source_header(path, stream):
         return inspect_jpeg_header(stream)
     if fmt == "JXL":
         return inspect_jxl(stream)
+    if fmt == "DNG":
+        return inspect_dng(stream)
     with _open_raster(stream, fmt) as image:
         return JpegHeader(image.width, image.height, min(os.fstat(stream.fileno()).st_size, MAX_HEADER_BYTES))
 
@@ -98,6 +101,9 @@ def _open_photo(stream, fmt, source_id):
     if fmt == "AVIF":
         with _open_avif(stream) as (image, icc, raw_exif, orientation, xmp, _):
             yield image, SourceMetadata(source_id, raw_exif or b"", icc or b"", xmp or b""), orientation
+    elif fmt == "DNG":
+        with open_dng(stream, source_id) as photo:
+            yield photo
     elif fmt == "JXL":
         inspect_jxl(stream)
         with open_jxl(stream, source_id) as photo:
@@ -157,7 +163,10 @@ def _read_photo(path, fmt, *, source_id, runtime, expected_sha256=None):
                                  level="WARNING", source_path=str(path), technical_cause=exif.thumbnail_issue)
                 image.load()
                 oriented = _opaque_pixels(_orient(image, orientation))
-                rgb, handling = _convert_to_srgb(oriented, metadata, exif, color_space, runtime, path)
+                if fmt == "DNG":
+                    rgb, handling = oriented, "libraw-camera-wb-srgb"
+                else:
+                    rgb, handling = _convert_to_srgb(oriented, metadata, exif, color_space, runtime, path)
                 yield rgb, metadata, orientation, handling
     except Exception as exc:
         _report_failure(runtime, exc, path, "INPUT_DECODE_FAILED",

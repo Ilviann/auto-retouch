@@ -32,8 +32,8 @@ also provides access to saved jobs, Settings and Diagnostics.
   visual review. Track each of those states independently. Keep thumbnail
   decoding and caching bounded for a shoot of approximately 500 JPEGs.
 - **Inspect.** Double-click a tile to inspect it and run its pipeline in the
-  preview window. Compare side by side or press Space to switch between
-  input and result at the same zoom and position. Scroll to zoom, drag to pan
+  preview window. **Side-by-side** shows both images. **Overlay** shows the result
+  at full width and reveals the input at the same zoom and position while Shift is held. Scroll to zoom, drag to pan
   both panes, use **100%** for full-resolution detail or **Fit** to recenter.
   Proposed navigation adds arrow keys to step through photos.
   Choose preview scope independently of the

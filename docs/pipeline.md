@@ -238,8 +238,8 @@ Double-clicking a thumbnail opens its source in a modal window. **Run pipeline**
 opens a window-modal progress dialog immediately and displays the completed
 comparison in the same photo window. If a stage needs resize approval, progress
 yields to the prompt and reopens for the approved retry. Whole-pipeline
-and stage comparisons start side by side. Space alternates between input and
-result in a single pane. The view selector restores the side-by-side layout.
+and stage comparisons start in **Side-by-side**. In **Overlay**, the result fills
+the pane. Holding Shift shows the comparison input until the user releases it.
 All photo and stage previews support wheel zoom around the pointer and drag
 to pan. The panes share magnification and image center across mode changes
 and stage refreshes. **100%** preserves the inspected center and maps an oriented

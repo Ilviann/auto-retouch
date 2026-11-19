@@ -4,7 +4,7 @@ Author: Neyrome.
 
 A Windows 11 desktop project for fully local batch retouching of studio portraits.
 Stages can change pixels, produce reusable region/mask context, or do both.
-Open still JPEG, AVIF, JPEG XL, PNG, TIFF and BMP photos from folders or individual files. Imports use the 8-bit SDR workflow and composite transparency onto white. Source filenames must be unique across the scan, ignoring case and the final extension. If names conflict, rename or remove the listed files and rescan.
+Open still JPEG, AVIF, JPEG XL, PNG, TIFF, BMP and DNG photos from folders or individual files. Imports use the 8-bit SDR workflow and composite transparency onto white. DNG import develops the full-resolution sensor image locally using camera white balance when available. Source filenames must be unique across the scan, ignoring case and the final extension. If names conflict, rename or remove the listed files and rescan.
 JPEG, JPEG XL, PNG and TIFF exports preserve supported capture EXIF and record processing by the tool. BMP exports omit photo metadata.
 The initial GUI uses PySide6 with Qt Widgets, isolated behind toolkit-independent
 application commands and events to keep a future GUI replacement localized.
@@ -120,12 +120,12 @@ changes, choose **Cancel** to keep editing or **Discard** to load the selection.
 Choosing sources starts a scan and shows thumbnails and disk estimates. Use the
 thumbnail checkboxes to include photos in a batch. Double-click a thumbnail or
 press Enter on the selected photo to open the source. Choose **Run pipeline** in
-that window to see the result. All comparisons start side by side. Press Space
-to switch between input and result at the full pane width, or choose **Side by
-side** in the view selector to see both again. Scroll over a detail to zoom there,
+that window to see the result. Comparisons open in **Side-by-side**. Choose
+**Overlay** to see the result at full width. Hold **Shift** to inspect the input
+at the same zoom and position, then release it to return to the result. Scroll over a detail to zoom there,
 or use **+** and **−** to zoom around the center. Drag either image to pan both.
 Select **100%** to inspect the current detail at one image pixel per physical
-screen pixel. Space keeps the same magnification and center. **Fit** shows the
+screen pixel. **Fit** shows the
 whole photo again.
 
 On a stage card, **Preview** compares the

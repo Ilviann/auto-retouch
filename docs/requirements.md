@@ -13,7 +13,7 @@ presets rather than fixed processing paths.
 | U01 | Windows 11 desktop application; Windows 10 support is outside the initial scope. |
 | U02 | Photo processing is entirely local; no cloud processing. |
 | U03 | Primary workload is studio portraits, approximately 500 photos per batch. |
-| U04 | JPEG, AVIF, JPEG XL, PNG, TIFF and BMP still-photo input using the 8-bit SDR decode path. HDR processing and vendor-specific RAW formats are outside the initial scope. |
+| U04 | JPEG, AVIF, JPEG XL, PNG, TIFF, BMP and DNG still-photo input using the 8-bit SDR decode path. HDR processing and vendor-specific RAW formats are outside the initial scope. |
 | U05 | Automatic overall color correction and human skin retouching. |
 | U06 | Separate Natural and Beauty presets. |
 | U07 | Minimum GPU class is consumer RTX 20-series with at least 6 GB VRAM. |
@@ -26,7 +26,7 @@ presets rather than fixed processing paths.
 | U14 | Require a destination folder before batch processing and reject a destination equal to the source folder. |
 | U15 | When recursive search is enabled, also reject a destination inside the source folder. |
 | U16 | Display discovered source files in a thumbnail grid. Double-click a thumbnail to open its source preview. The preview window offers **Run pipeline** for that photo. Omit separate preview buttons above the photo list. |
-| U17 | Compare input and result side by side or switch between them with Space in every image comparison. Use a stage card's **Preview** or **Preview in pipeline** action to compare the selected stage's input and output in a modal window. The input is the source for **Preview** and the result of preceding enabled stages for **Preview in pipeline**. Edit that stage's parameters in the window, with automatic refresh or **Preview changes** as appropriate. Ask whether to save changed parameters when the window closes. |
+| U17 | Every image comparison offers **Side-by-side** and **Overlay**. Overlay shows the result by default and the input while Shift is held. Space has no preview action. Use a stage card's **Preview** or **Preview in pipeline** action to compare the selected stage's input and output in a modal window. The input is the source for **Preview** and the result of preceding enabled stages for **Preview in pipeline**. Edit that stage's parameters in the window, with automatic refresh or **Preview changes** as appropriate. Ask whether to save changed parameters when the window closes. |
 | U18 | Support a temporary folder for processing artifacts. |
 | U19 | Sequential mode processes one image through every stage, exports it, then moves to the next image. |
 | U20 | Staged mode processes every image through one stage, persists intermediate results, releases that stage's model resources, then advances to the next stage. |
@@ -67,7 +67,7 @@ presets rather than fixed processing paths.
 | U55 | Every **Run pipeline** in the main photo preview shows a modal progress dialog while processing. Automatic stage preview updates use a fixed-size progress bar that stays visible while idle. Explicit stage updates use a modal or overlay progress panel. Showing progress keeps the comparison panes and settings in place. |
 | U56 | Update batch disk status automatically when the user chooses a source folder, chooses a destination folder, or rescans the source. |
 | U57 | **Start processing** opens a modal window showing progress, **Pause**, **Continue**, and **Break**. Ask for confirmation before breaking processing. |
-| U58 | Support zoom and pan in every image preview. Keep both comparison panes at the same zoom and position and preserve the view when Space switches between input and result. |
+| U58 | Support zoom and pan in every image preview. Keep both comparison panes at the same zoom and position and preserve the view when holding or releasing Shift in Overlay. |
 | U59 | Provide a true 100% view in every photo and stage preview. Show one full-resolution image pixel per physical display pixel, with synchronized zoom and pan across input and result. |
 | U60 | Defer existing-output checks until **Start processing**. If planned filenames already exist, ask whether to stop, skip the affected photos, or overwrite those files. |
 | U61 | When first browsing for an output folder, open the picker in the selected source folder if one is available. |
@@ -378,7 +378,7 @@ only faces cannot by themselves satisfy this scope.
 
 ## Initial exclusions and open decisions
 
-Proposed exclusions: RAW processing, manual brush editing, face/body reshaping,
+Proposed exclusions: RAW processing beyond DNG import, manual brush editing, face/body reshaping,
 background replacement, cloud processing, and training a model from scratch.
 
 Open decisions: representative image dimensions and maximum supported size;

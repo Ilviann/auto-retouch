@@ -118,20 +118,34 @@ class DesktopBatchTests(unittest.TestCase):
 
     def check_comparison_views(self, window, focus_widget):
         view = window.comparison
-        self.assertEqual(view.mode.currentText(), "Side by side")
+        self.assertEqual([view.mode.itemText(i) for i in range(view.mode.count())], ["Side-by-side", "Overlay"])
+        self.assertEqual(view.mode.currentText(), "Side-by-side")
         self.assertTrue(view.before.isVisible() and view.after.isVisible())
         split_width = view.before.width()
         focus_widget.setFocus()
         QTest.keyClick(focus_widget, Qt.Key.Key_Space)
+        QTest.keyPress(focus_widget, Qt.Key.Key_Shift)
+        self.assertTrue(view.before.isVisible() and view.after.isVisible())
+        QTest.keyRelease(focus_widget, Qt.Key.Key_Shift)
+        view.mode.setCurrentText("Overlay")
+        QTest.keyClick(focus_widget, Qt.Key.Key_Space)
+        self.assertFalse(view.before.isVisible())
+        self.assertTrue(view.after.isVisible())
+        QTest.keyPress(focus_widget, Qt.Key.Key_Shift)
         self.qt.processEvents()
         self.assertTrue(view.before.isVisible())
         self.assertFalse(view.after.isVisible())
         self.assertGreater(view.before.width(), split_width)
-        QTest.keyClick(focus_widget, Qt.Key.Key_Space)
+        QTest.keyRelease(focus_widget, Qt.Key.Key_Shift)
         self.qt.processEvents()
         self.assertFalse(view.before.isVisible())
         self.assertTrue(view.after.isVisible())
         self.assertGreater(view.after.width(), split_width)
+        QTest.keyPress(focus_widget, Qt.Key.Key_Shift)
+        self.qt.sendEvent(window, QEvent(QEvent.Type.WindowDeactivate))
+        self.assertFalse(view.before.isVisible())
+        self.assertTrue(view.after.isVisible())
+        QTest.keyRelease(focus_widget, Qt.Key.Key_Shift)
         view.mode.setCurrentIndex(0)
         self.assertTrue(view.before.isVisible() and view.after.isVisible())
 
@@ -440,7 +454,7 @@ class DesktopBatchTests(unittest.TestCase):
         files = [str(avif), str(self.source / "a.jpg")]
         with patch.object(QFileDialog, "getOpenFileNames", return_value=(files, "")) as picker:
             panel.findChild(QPushButton, "chooseSourceFiles").click()
-            for suffix in ("jpg", "jpeg", "avif", "jxl", "png", "tif", "tiff", "bmp"):
+            for suffix in ("jpg", "jpeg", "avif", "jxl", "png", "tif", "tiff", "bmp", "dng"):
                 self.assertIn(f"*.{suffix}", picker.call_args.kwargs["filter"])
         self.wait_for_scan(panel, 2)
         with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.destination)) as picker:
@@ -1016,7 +1030,7 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertEqual(list(self.destination.iterdir()), [])
         self.assertFalse(saved_job_files(panel.application.job_service.job_folder))
 
-    def test_preview_zoom_pan_and_space_preserve_displayed_detail(self):
+    def test_preview_zoom_pan_and_overlay_preserve_displayed_detail(self):
         path = self.source / "detail.jpg"
         gradient = Image.linear_gradient("L")
         Image.merge("RGB", (gradient.rotate(90), gradient, gradient)).resize((1200, 800)).save(path)
@@ -1067,9 +1081,10 @@ class DesktopBatchTests(unittest.TestCase):
         check_samples(samples(view.after, drag), [zoomed[0]])
         panned = samples(view.after, *offsets)
         check_samples(samples(view.before, *offsets), panned)
-        QTest.keyClick(photo, Qt.Key.Key_Space)
+        view.mode.setCurrentIndex(view.OVERLAY)
+        QTest.keyPress(photo, Qt.Key.Key_Shift)
         check_samples(samples(view.before, *offsets), panned)
-        QTest.keyClick(photo, Qt.Key.Key_Space)
+        QTest.keyRelease(photo, Qt.Key.Key_Shift)
         check_samples(samples(view.after, *offsets), panned)
         buttons = {button.text(): button for button in view.zoom_controls.findChildren(QToolButton)}
         previous_scale = view.scale()
@@ -1083,8 +1098,10 @@ class DesktopBatchTests(unittest.TestCase):
         view.mode.setCurrentIndex(view.SIDE_BY_SIDE)
         buttons["Fit"].click()
         fitted_pair = samples(view.after, *offsets)
-        QTest.keyClick(photo, Qt.Key.Key_Space)
+        view.mode.setCurrentIndex(view.OVERLAY)
+        QTest.keyPress(photo, Qt.Key.Key_Shift)
         check_samples(samples(view.before, *offsets), fitted_pair)
+        QTest.keyRelease(photo, Qt.Key.Key_Shift)
         photo.close()
 
         window.pipeline_page.stage_cards["exposure-reference"].preview_pipeline.click()
@@ -1099,7 +1116,7 @@ class DesktopBatchTests(unittest.TestCase):
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
             dialog.close()
 
-    def test_preview_100_percent_shows_native_pixels_after_pan_and_space(self):
+    def test_preview_100_percent_shows_native_pixels_after_pan_in_overlay(self):
         path = self.source / "grain.jpg"
         size = (2179, 521)
         Image.frombytes("L", size, Random(37).randbytes(size[0] * size[1])).save(path, quality=95)
@@ -1147,9 +1164,10 @@ class DesktopBatchTests(unittest.TestCase):
         self.until(view.controls.isVisible, "pipeline result did not render")
         check_pixels(view.before, source)
         check_pixels(view.after, expected_result)
-        QTest.keyClick(photo, Qt.Key.Key_Space)
+        view.mode.setCurrentIndex(view.OVERLAY)
+        QTest.keyPress(photo, Qt.Key.Key_Shift)
         check_pixels(view.before, source)
-        QTest.keyClick(photo, Qt.Key.Key_Space)
+        QTest.keyRelease(photo, Qt.Key.Key_Shift)
         check_pixels(view.after, expected_result)
         self.assertEqual(view.center, center)
         photo.close()
@@ -1184,8 +1202,12 @@ class DesktopBatchTests(unittest.TestCase):
         dialog.comparison.actual_size()
         self.qt.processEvents()
         pane = dialog.comparison.before
+        dialog.comparison.mode.setCurrentIndex(dialog.comparison.OVERLAY)
         dialog.pick_neutral.click()
+        QTest.keyPress(dialog.pick_neutral, Qt.Key.Key_Shift)
+        self.qt.processEvents()
         QTest.mouseClick(pane, Qt.MouseButton.LeftButton, pos=pane.rect().center())
+        QTest.keyRelease(dialog.pick_neutral, Qt.Key.Key_Shift)
         self.until(lambda: dialog._submitted["mode"] == "Fixed" and dialog._future is None,
                    "the sampled correction did not render")
         self.assertLess(dialog._draft["red_stops"], 0)

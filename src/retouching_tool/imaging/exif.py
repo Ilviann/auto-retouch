@@ -83,7 +83,7 @@ class _Reader:
     def unpack(self, layout, offset):
         return struct.unpack_from(self.order + layout, self.data, offset)
 
-    def ifd(self, offset, allowed_pointers=()):
+    def ifd(self, offset, allowed_pointers=(), include=None):
         if offset < 8 or offset + 6 > len(self.data):
             raise ValueError("EXIF directory offset is outside the TIFF data")
         count, = self.unpack("H", offset)
@@ -94,6 +94,8 @@ class _Reader:
         entries = {}
         for position in range(offset + 2, end - 4, 12):
             tag, kind, length = self.unpack("HHI", position)
+            if include is not None and not include(tag):
+                continue
             if tag in entries or kind not in TYPE_SIZES or not length:
                 raise ValueError(f"Duplicate or invalid EXIF field 0x{tag:04x}")
             if tag == 330 or tag in POINTERS and tag not in allowed_pointers:
@@ -134,14 +136,14 @@ def read_exif(raw):
     return read_tiff_directory(data, byte_limit=MAX_APP_PAYLOAD)
 
 
-def read_tiff_directory(data, *, byte_limit):
+def read_tiff_directory(data, *, byte_limit, primary_filter=None, read_thumbnail=True):
     reader = _Reader(data, byte_limit)
-    primary, thumbnail_offset = reader.ifd(reader.unpack("I", 4)[0], (EXIF_POINTER, GPS_POINTER))
+    primary, thumbnail_offset = reader.ifd(reader.unpack("I", 4)[0], (EXIF_POINTER, GPS_POINTER), primary_filter)
     result = Exif(reader.order, primary, {}, had_thumbnail=bool(thumbnail_offset))
     result.capture = reader.child(result, primary, EXIF_POINTER, (INTEROP_POINTER,)) or {}
     result.gps = reader.child(result, primary, GPS_POINTER)
     result.interop = reader.child(result, result.capture, INTEROP_POINTER)
-    if thumbnail_offset:
+    if thumbnail_offset and read_thumbnail:
         thumbnail, next_ifd = reader.ifd(thumbnail_offset)
         start = result.scalar(thumbnail, 513)
         size = result.scalar(thumbnail, 514)

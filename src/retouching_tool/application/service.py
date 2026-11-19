@@ -217,7 +217,7 @@ class ApplicationService:
     def _validate_sources(sources):
         for source in sources:
             if not source.exists() or (not source.is_dir() and not (source.is_file() and source.suffix.lower() in SOURCE_EXTENSIONS)):
-                raise RetouchingError("SOURCE_INVALID", f"Source must be an existing folder or a photo file (JPEG, AVIF, PNG, TIFF, BMP, JPEG XL): {source}")
+                raise RetouchingError("SOURCE_INVALID", f"Source must be an existing folder or a photo file (JPEG, AVIF, PNG, TIFF, BMP, JPEG XL, DNG): {source}")
 
 
 def _report_pipeline(definition):

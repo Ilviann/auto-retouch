@@ -21,8 +21,8 @@ workspace uses binary units for both estimates and free space.
 Operation cards describe image and context inputs and effects from the operation
 descriptor. Double-clicking a thumbnail or pressing Enter on it opens its source
 without a destination. **Run pipeline** runs enabled stages in order and updates
-the same window. Whole-pipeline and stage comparisons open side by side. The
-view selector and Space shortcut support single-pane input and result views.
+the same window. Whole-pipeline and stage comparisons open in **Side-by-side**.
+**Overlay** shows the result at full width and reveals the input while Shift is held.
 Zoom and pan work from either pane and carry over when switching views.
 Stage cards offer the two modal comparisons described below.
 Processing previews run without a destination and use the shared JPEG decoder
@@ -90,21 +90,22 @@ On 2026-11-19, all four focused Qt preview checks in the second command passed
 with generated JPEGs. Double-click and Enter opened the source. **Run pipeline**
 processed the opened photo in the same dialog, including after the grid selection
 changed. Tests verified side-by-side and full-width views in the photo preview
-and both stage previews, including Space with a numeric stage control focused.
+and both stage previews. They checked Shift press and release, restoration of
+the result on window deactivation, and Space with a button or numeric editor focused.
 They also exercised declining and retrying a resize and closing a photo preview
 while a render was outstanding.
 
 A focused offscreen Qt test uses a generated two-axis gradient JPEG to check
 the pixels shown at the center and at several offsets. It covers wheel zoom at
 the pointer, dragging the result pane, synchronized crops after a pipeline run,
-Space switching from split and single views, zoom buttons, Fit, and retaining
+switching to Overlay and holding Shift, zoom buttons, Fit, and retaining
 the inspected detail when a stage parameter changes.
 
 The **100%** checks used JPEGs larger than the 1,600-pixel overview. A headless
 test verified the rotated source pixel bytes, native dimensions for both stage
 scopes and the pipeline, and the thumbnail bound. An offscreen Qt test compared
 a patch of adjacent physical screen pixels against the source and processed
-samples in all four preview paths, including after a drag and Space switching.
+samples in all four preview paths, including after a drag and holding Shift in Overlay.
 It passed with `QT_SCALE_FACTOR` set to 1, 1.25, 1.5, and 2.
 
 The main photo preview tests verified that **Run pipeline** immediately opens

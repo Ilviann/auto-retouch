@@ -1,8 +1,8 @@
 """Modal stage comparison, including local draft settings and preview scheduling."""
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
-                               QProgressBar, QPushButton, QSpinBox, QVBoxLayout)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+                               QProgressBar, QPushButton, QVBoxLayout)
 
 from ...errors import ResizeApprovalRequired, RetouchingError
 from ...pipeline.definition import BooleanParameter, MaskTargetParameter
@@ -53,9 +53,6 @@ class StagePreviewWindow(QDialog):
             for parameter in descriptor.editable_parameters:
                 control = parameter_control(parameter)
                 self._controls[parameter.name] = control
-                if isinstance(control, (QDoubleSpinBox, QSpinBox)):
-                    control.installEventFilter(self)
-                    control.lineEdit().installEventFilter(self)
                 control.setValue(self._original[parameter.name])
                 control.setMinimumWidth(110)
                 hint = ("Updates the preview automatically." if parameter.preview_on_change
@@ -110,8 +107,6 @@ class StagePreviewWindow(QDialog):
         before = self.comparison.before
         before.picking = armed
         before.setCursor(Qt.CursorShape.CrossCursor if armed else Qt.CursorShape.OpenHandCursor)
-        if armed and self.comparison.mode.currentIndex() == self.comparison.RESULT:
-            self.comparison.mode.setCurrentIndex(self.comparison.SOURCE)
 
     def _pick(self, x, y):
         try:
@@ -124,14 +119,6 @@ class StagePreviewWindow(QDialog):
             self._controls[name].setValue(value)
         self.feedback.hide()
         self.pick_neutral.setChecked(False)
-
-    def eventFilter(self, watched, event):
-        # Numeric editors normally claim printable keys before window shortcuts.
-        if (event.type() == QEvent.Type.ShortcutOverride and event.key() == Qt.Key.Key_Space
-                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
-            event.ignore()
-            return True
-        return super().eventFilter(watched, event)
 
     def _change(self, parameter, value, initial):
         name = parameter.name

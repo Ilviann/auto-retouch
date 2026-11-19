@@ -2,9 +2,9 @@
 
 from math import floor, isclose
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QImage, QKeySequence, QPainter, QShortcut
-from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QImage, QPainter
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ...pipeline.image_state import ImageStatistics
@@ -125,23 +125,25 @@ def statistics_text(context):
 
 
 class PictureComparison(QWidget):
-    SIDE_BY_SIDE, SOURCE, RESULT = range(3)
+    SIDE_BY_SIDE, OVERLAY = range(2)
 
     def __init__(self, source_caption, result_caption, *, source_only=False):
         super().__init__()
         self._magnification = None  # Physical display pixels per image pixel, or Fit.
         self.center = QPointF(.5, .5)
         self._result_caption = result_caption
+        self._shift_held = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.controls = QWidget()
         toolbar = QHBoxLayout(self.controls)
         toolbar.setContentsMargins(0, 0, 0, 0)
         self.mode = QComboBox(accessibleName="Comparison view")
-        self.mode.addItems(["Side by side", source_caption, "Result"])
+        self.mode.addItems(["Side-by-side", "Overlay"])
         toolbar.addWidget(QLabel("View"))
         toolbar.addWidget(self.mode)
-        toolbar.addWidget(QLabel("Space to switch"))
+        self.overlay_hint = QLabel("Hold Shift to view the input")
+        toolbar.addWidget(self.overlay_hint)
         actions = QHBoxLayout()
         actions.addWidget(self.controls)
         actions.addStretch()
@@ -174,16 +176,40 @@ class PictureComparison(QWidget):
             column.addWidget(picture, 1)
             pictures.addWidget(pane, 1)
         layout.addLayout(pictures, 1)
-        self.shortcut = QShortcut(QKeySequence(Qt.Key.Key_Space), self, autoRepeat=False)
-        self.shortcut.activated.connect(self._switch_picture)
         self.mode.currentIndexChanged.connect(self._change_mode)
         self.controls.setVisible(not source_only)
         self.controls.setEnabled(False)
-        self.shortcut.setEnabled(False)
-        self._show_mode(self.SOURCE if source_only else self.SIDE_BY_SIDE)
+        self.overlay_hint.hide()
+        self.result_pane.setVisible(not source_only)
 
-    def _switch_picture(self):
-        self.mode.setCurrentIndex(self.RESULT if self.mode.currentIndex() == self.SOURCE else self.SOURCE)
+    def showEvent(self, event):
+        super().showEvent(event)
+        QApplication.instance().installEventFilter(self)
+
+    def hideEvent(self, event):
+        QApplication.instance().removeEventFilter(self)
+        self._set_shift_held(False)
+        super().hideEvent(event)
+
+    def eventFilter(self, watched, event):
+        kind = event.type()
+        if kind == QEvent.Type.WindowDeactivate and watched is self.window():
+            self._set_shift_held(False)
+        elif (kind in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress, QEvent.Type.KeyRelease)
+              and isinstance(watched, QWidget) and watched.window() is self.window()):
+            if event.key() == Qt.Key.Key_Space and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+                event.accept()
+                return True
+            if event.key() == Qt.Key.Key_Shift and kind != QEvent.Type.ShortcutOverride and not event.isAutoRepeat():
+                self._set_shift_held(kind == QEvent.Type.KeyPress)
+        return False
+
+    def _set_shift_held(self, held):
+        if self._shift_held == held:
+            return
+        self._shift_held = held
+        if self.mode.currentIndex() == self.OVERLAY and self.controls.isEnabled():
+            self._show_mode(self.OVERLAY)
 
     def scale(self):
         if self._magnification is not None:
@@ -230,8 +256,10 @@ class PictureComparison(QWidget):
         self._show_mode(index)
 
     def _show_mode(self, index):
-        self.source_pane.setVisible(index != self.RESULT)
-        self.result_pane.setVisible(index != self.SOURCE)
+        overlay = index == self.OVERLAY
+        self.overlay_hint.setVisible(overlay)
+        self.source_pane.setVisible(not overlay or self._shift_held)
+        self.result_pane.setVisible(not overlay or not self._shift_held)
 
     def display(self, preview):
         self.before.show_pixels(preview.original)
@@ -241,7 +269,6 @@ class PictureComparison(QWidget):
             self.result_label.setText(preview.result_caption or self._result_caption)
             self.controls.show()
             self.controls.setEnabled(True)
-            self.shortcut.setEnabled(True)
             self._show_mode(self.mode.currentIndex())
 
     def clear(self):

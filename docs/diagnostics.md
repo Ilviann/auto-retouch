@@ -28,7 +28,7 @@ and appear on its tile. Display and processing errors preserve their technical
 causes in the local logs.
 Each successful source decode records oriented dimensions and color handling under
 `INPUT_JPEG_DECODED`, `INPUT_AVIF_DECODED`, `INPUT_JXL_DECODED`, `INPUT_PNG_DECODED`,
-`INPUT_TIFF_DECODED` or `INPUT_BMP_DECODED`. A scan with duplicate filename stems
+`INPUT_TIFF_DECODED`, `INPUT_BMP_DECODED` or `INPUT_DNG_DECODED`. DNG inputs report decoder availability, unsupported camera data or development failures through `DNG_CODEC_UNAVAILABLE`, `INPUT_DNG_UNSUPPORTED` or `INPUT_DNG_DECODE_FAILED`. A scan with duplicate filename stems
 records `SOURCE_NAME_CONFLICT` with the index ID and conflicting source paths.
 `INPUT_EXIF_THUMBNAIL_INVALID` and `INPUT_SRGB_ASSUMED` expose recoverable input
 issues. Input metadata/decode errors, unsupported export metadata, write errors,

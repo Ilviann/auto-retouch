@@ -1,0 +1,2 @@
+# rawpy with LibRaw, Windows x86-64 CPython 3.14. NumPy is in shared.lock.
+rawpy==0.28.0 --hash=sha256:9105d9523c35c7c03841943151501c78b4bec5524c31a55d7071b47f271a6ca2
