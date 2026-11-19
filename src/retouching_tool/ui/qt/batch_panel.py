@@ -10,11 +10,12 @@ from uuid import uuid4
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGroupBox,
                               QHBoxLayout, QHeaderView, QLabel, QLayout, QLineEdit,
-                              QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
+                              QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ...application.batch import ExistingOutputDecision, ExistingOutputs
 from ...errors import ResizeApprovalRequired, RetouchingError
+from ...imaging.source import SOURCE_EXTENSIONS
 from ...imaging.export_settings import FORMATS, BmpSettings, JpegSettings, JxlSettings, PngSettings, TiffSettings, encode_settings
 from .photo_grid import PhotoGrid
 from .picture_window import PictureWindow
@@ -181,7 +182,7 @@ class BatchPanel(QWidget):
     def _build_folders(self):
         self.folders = QGroupBox("Sources and destination")
         form = QFormLayout(self.folders)
-        self.source_text = QLineEdit(readOnly=True, placeholderText="Select a folder or photos (JPEG, AVIF)")
+        self.source_text = QLineEdit(readOnly=True, placeholderText="Select a folder or photo files")
         self.source_text.setObjectName("batchSources")
         self._show_sources()
         form.addRow("Sources", _row(self.source_text,
@@ -211,6 +212,11 @@ class BatchPanel(QWidget):
         selection = _row(self.source_summary, self.check_all, self.uncheck_all)
         selection.setStretch(0, 1)
         layout.addLayout(selection)
+        self.name_error = QPlainTextEdit(readOnly=True, objectName="sourceNameError")
+        self.name_error.setAccessibleName("Duplicate source names")
+        self.name_error.setMaximumHeight(84)
+        self.name_error.hide()
+        layout.addWidget(self.name_error)
         self.images = PhotoGrid(self.application.preview_service)
         self.images.itemChanged.connect(self._invalidate_plan)
         self.images.itemSelectionChanged.connect(self._update_controls)
@@ -348,7 +354,8 @@ class BatchPanel(QWidget):
             self._set_sources((path,))
 
     def _choose_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "Choose source photos", filter="Photos (*.jpg *.jpeg *.avif)")
+        patterns = " ".join(f"*{suffix}" for suffix in SOURCE_EXTENSIONS)
+        paths, _ = QFileDialog.getOpenFileNames(self, "Choose source photos", filter=f"Photos ({patterns})")
         if paths:
             self._set_sources(paths)
 
@@ -366,13 +373,15 @@ class BatchPanel(QWidget):
 
     def _invalidate_index(self):
         self._index = None
+        self.name_error.hide()
         self.images.set_index(None)
         self._invalidate_plan()
 
     def _invalidate_plan(self):
         self._plan = None
         self._plan_revision += 1
-        can_check = self.destination.text().strip() and self._selected_ids()
+        can_check = (self._index is not None and not self._index.name_conflicts
+                     and self.destination.text().strip() and self._selected_ids())
         self._space_check_after = monotonic() + 0.3 if can_check else None
         self.setup_message.clear()
         self._show_estimate()
@@ -404,6 +413,8 @@ class BatchPanel(QWidget):
     def _show_index(self, index):
         self._index = index
         self.images.set_index(index)
+        self.name_error.setPlainText(index.name_error)
+        self.name_error.setVisible(bool(index.name_conflicts))
         self._invalidate_plan()
         if not index.images:
             self.setup_message.setText("No photos found. Choose another source or include subfolders.")
@@ -950,7 +961,7 @@ class BatchPanel(QWidget):
             self._preview_available = can_view
             self.operation_preview_available.emit(can_view)
         if self._index is None:
-            self.source_summary.setText("Choose a folder or photos (JPEG, AVIF)." if not self._sources else "No photos indexed.")
+            self.source_summary.setText("Choose a folder or photo files." if not self._sources else "No photos indexed.")
         else:
             total = len(self._index.images)
             unreadable = sum(image.issue is not None for image in self._index.images)

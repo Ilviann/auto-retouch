@@ -42,7 +42,7 @@ diagnostics ZIP through the same log reader and reads job settings and outcomes
 from the saved journal. See
 [desktop diagnostics evidence](verification/desktop-diagnostics.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
-16 GB system RAM on Windows 11 only. Sources can be JPEG or still AVIF. Export supports JPEG, JPEG XL, PNG, TIFF and BMP. WebP and AVIF exports are planned.
+16 GB system RAM on Windows 11 only. Still-photo sources can be JPEG, AVIF, JPEG XL, PNG, TIFF or BMP. Export supports JPEG, JPEG XL, PNG, TIFF and BMP. WebP and AVIF exports are planned.
 
 ## Runtime and candidate stack
 
@@ -411,10 +411,10 @@ sequence. The [Pipeline contract](pipeline.md) defines recovery and job snapshot
 ## Folder and artifact validation
 
 `ApplicationService.batch_service` uses `application/batch.py`,
-`storage/batch_paths.py`, and the JPEG and AVIF header readers. It returns an immutable
+`storage/batch_paths.py`, and the source header readers. It returns an immutable
 index and processes a selected subset into an immutable export plan. Folder inputs
 supply relative paths in selection order. Explicit files also contribute their
-containing directory to path validation. Unreadable source headers remain visible in
+containing directory to path validation. A case-insensitive duplicate filename stem anywhere in the index blocks both schedules until the sources are renamed or removed and rescanned. Unreadable source headers remain visible in
 the index and require correction or deselection before planning. File IDs, sizes
 and modification times detect ordinary edits between indexing and preflight. Job
 content hashing and execution-time verification belong to the scheduler.
@@ -480,7 +480,7 @@ after precision and mode-equivalence validation, with CPU buffering bounded for
 Export settings and codec adapters are independent of pipeline operations and Qt.
 The selected format determines the output suffix, collision checks, disk reservation,
 encoder controls and metadata verification. JPEG exports preserve a JPEG source filename
-and use .jpg for an AVIF source. The
+and use .jpg for other sources. The
 other encoders use .jxl, .png, .tif and .bmp. Jobs freeze the format and its options.
 Legacy snapshots without a format use JPEG. BMP is a 24-bit metadata-free export.
 [Export verification](verification/export-formats.md).

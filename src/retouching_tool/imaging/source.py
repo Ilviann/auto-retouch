@@ -1,19 +1,23 @@
-"""Source discovery and SDR decoding for local JPEG and still AVIF photos."""
+"""Source discovery and SDR decoding for local still photos."""
 
 from contextlib import contextmanager
 import hashlib
+import mmap
 import os
 from pathlib import Path
 from time import perf_counter
 
 from ..errors import RetouchingError
 from ..pipeline.image_state import ImageState, SourceMetadata
-from .exif import read_exif
+from .exif import TIFF_LAYOUT_TAGS, read_exif, read_tiff_directory, write_exif
+from .jxl_source import inspect_jxl, open_jxl
 from .jpeg import (MAX_HEADER_BYTES, MAX_PIXELS, JpegHeader, _convert_to_srgb, _linear_pixels,
-                   _orient, _report_failure, decode_jpeg, inspect_jpeg_header, read_srgb_jpeg)
+                   _orient, _orientation, _report_failure, decode_jpeg, inspect_jpeg_header, read_srgb_jpeg)
 from .xmp import EXIF, Xmp
 
-SOURCE_EXTENSIONS = (".jpg", ".jpeg", ".avif")
+SOURCE_FORMATS = {".jpg": "JPEG", ".jpeg": "JPEG", ".avif": "AVIF", ".png": "PNG",
+                  ".tif": "TIFF", ".tiff": "TIFF", ".bmp": "BMP", ".jxl": "JXL"}
+SOURCE_EXTENSIONS = tuple(SOURCE_FORMATS)
 # Pillow's AVIF decoder reads the entire compressed container before parsing it.
 MAX_AVIF_BYTES = 4 * MAX_PIXELS + MAX_HEADER_BYTES
 
@@ -45,61 +49,138 @@ def _open_avif(stream):
 
 
 def inspect_source_header(path, stream):
-    if path.suffix.lower() == ".avif":
+    fmt = SOURCE_FORMATS[path.suffix.lower()]
+    if fmt == "AVIF":
         with _open_avif(stream) as (image, _, _, _, _, metadata_bytes):
             return JpegHeader(image.width, image.height, metadata_bytes)
-    return inspect_jpeg_header(stream)
+    if fmt == "JPEG":
+        return inspect_jpeg_header(stream)
+    if fmt == "JXL":
+        return inspect_jxl(stream)
+    with _open_raster(stream, fmt) as image:
+        return JpegHeader(image.width, image.height, min(os.fstat(stream.fileno()).st_size, MAX_HEADER_BYTES))
 
 
 @contextmanager
-def _read_avif(path, *, source_id, runtime, expected_sha256=None):
+def _open_raster(stream, fmt):
     from PIL import Image
 
+    try:
+        image = Image.open(stream, formats=(fmt,))
+    except Image.DecompressionBombError as exc:
+        raise RetouchingError("INPUT_IMAGE_TOO_LARGE", f"{fmt} exceeds the working image dimensions.") from exc
+    except Exception as exc:
+        raise RetouchingError("INPUT_HEADER_INVALID", f"Cannot open the {fmt} header. Check the source file.") from exc
+    with image:
+        if image.width * image.height > MAX_PIXELS or max(image.size) > 65500:
+            raise RetouchingError("INPUT_IMAGE_TOO_LARGE", f"{fmt} exceeds the working image dimensions.")
+        if getattr(image, "is_animated", False):
+            raise RetouchingError("INPUT_IMAGE_SEQUENCE", f"Choose a single-image {fmt} or extract one frame or page.")
+        yield image
+
+
+def _tiff_metadata(stream, source_id):
+    # TIFF capture fields can be anywhere in the file. Map it to read just the IFDs
+    # and their bounded values, retaining typed entries and the original byte order.
+    with mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+        exif = read_tiff_directory(mapped, byte_limit=MAX_HEADER_BYTES)
+    resources = {}
+    for tag in (34675, 700, 33723):
+        entry = exif.primary.pop(tag, None)
+        resources[tag] = entry.value if entry else b""
+    for tag in TIFF_LAYOUT_TAGS | {320, 339, 347}:
+        exif.primary.pop(tag, None)
+    return SourceMetadata(source_id, write_exif(exif), resources[34675], resources[700], resources[33723])
+
+
+@contextmanager
+def _open_photo(stream, fmt, source_id):
+    if fmt == "AVIF":
+        with _open_avif(stream) as (image, icc, raw_exif, orientation, xmp, _):
+            yield image, SourceMetadata(source_id, raw_exif or b"", icc or b"", xmp or b""), orientation
+    elif fmt == "JXL":
+        inspect_jxl(stream)
+        with open_jxl(stream, source_id) as photo:
+            yield photo
+    else:
+        with _open_raster(stream, fmt) as image:
+            if fmt == "TIFF":
+                metadata = _tiff_metadata(stream, source_id)
+                # Pillow applies the TIFF orientation when it loads the pixels.
+                orientation = 1 if 274 in image.tag_v2 else None
+            else:
+                image.load()  # PNG text and EXIF chunks may follow the pixel data.
+                raw_exif = image.info.get("exif", b"")
+                if not raw_exif and "Raw profile type exif" in image.info:
+                    raw_exif = bytes.fromhex("".join(image.info["Raw profile type exif"].splitlines()[3:]))
+                xmp = image.info.get("XML:com.adobe.xmp", "").encode("utf-8")
+                metadata = SourceMetadata(source_id, raw_exif, image.info.get("icc_profile") or b"", xmp)
+                orientation = None
+            yield image, metadata, orientation
+
+
+def _opaque_pixels(image):
+    from PIL import Image
+
+    if image.has_transparency_data:
+        alpha = image.convert("RGBA")
+        background = Image.new("L" if image.mode == "LA" else "RGB", image.size, "white")
+        background.paste(alpha, mask=alpha.getchannel("A"))
+        return background
+    if image.mode.startswith("I;16"):
+        # Pillow convert("L") clips 16-bit grayscale samples above 255.
+        return image.convert("I").point(lambda value: value * (1 / 257)).convert("L")
+    if image.mode in ("P", "1"):
+        return image.convert("RGB" if image.mode == "P" else "L")
+    return image
+
+
+@contextmanager
+def _read_photo(path, fmt, *, source_id, runtime, expected_sha256=None):
     try:
         with Path(path).open("rb") as stream:
             if expected_sha256 is not None:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != expected_sha256:
-                    raise RetouchingError("SOURCE_CHANGED", "AVIF content changed. Re-index the source for a new job.")
+                    raise RetouchingError("SOURCE_CHANGED", f"{fmt} content changed. Re-index the source for a new job.")
                 stream.seek(0)
-            with _open_avif(stream) as (image, icc, raw_exif, orientation, raw_xmp, _):
-                metadata = SourceMetadata(source_id, raw_exif or b"", icc or b"", raw_xmp or b"")
+            with _open_photo(stream, fmt, source_id) as (image, metadata, orientation):
                 try:
                     exif = read_exif(metadata.exif)
-                    color_space = Xmp(metadata.xmp).number(EXIF, "ColorSpace")
+                    xmp = Xmp(metadata.xmp)
+                    color_space = xmp.number(EXIF, "ColorSpace")
+                    if orientation is None:
+                        orientation = _orientation(exif, xmp, runtime, path)
                 except Exception as exc:
-                    raise RetouchingError("INPUT_METADATA_INVALID", "Cannot read the AVIF capture metadata.") from exc
+                    raise RetouchingError("INPUT_METADATA_INVALID", f"Cannot read the {fmt} capture metadata.") from exc
                 if exif.thumbnail_issue:
                     runtime.emit("INPUT_EXIF_THUMBNAIL_INVALID", "Ignored an invalid EXIF preview thumbnail.",
                                  level="WARNING", source_path=str(path), technical_cause=exif.thumbnail_issue)
                 image.load()
-                oriented = _orient(image, orientation)
-                if oriented.mode == "RGBA":
-                    # The portrait pipeline is opaque RGB. Composite transparency on white.
-                    background = Image.new("RGB", oriented.size, "white")
-                    background.paste(oriented, mask=oriented.getchannel("A"))
-                    oriented = background
+                oriented = _opaque_pixels(_orient(image, orientation))
                 rgb, handling = _convert_to_srgb(oriented, metadata, exif, color_space, runtime, path)
                 yield rgb, metadata, orientation, handling
     except Exception as exc:
         _report_failure(runtime, exc, path, "INPUT_DECODE_FAILED",
-                        "Cannot decode source AVIF. Check that the file is readable and complete.", "source_path")
+                        f"Cannot decode source {fmt}. Check the file and its capture metadata.", "source_path")
         raise
 
 
 def read_srgb_source(path, *, source_id, runtime, draft_size=None):
-    if Path(path).suffix.lower() == ".avif":
-        return _read_avif(path, source_id=source_id, runtime=runtime)
+    fmt = SOURCE_FORMATS[Path(path).suffix.lower()]
+    if fmt != "JPEG":
+        return _read_photo(path, fmt, source_id=source_id, runtime=runtime)
     return read_srgb_jpeg(path, source_id=source_id, runtime=runtime, draft_size=draft_size)
 
 
 def decode_source(path, *, source_id, runtime, expected_sha256=None):
-    if Path(path).suffix.lower() != ".avif":
+    fmt = SOURCE_FORMATS[Path(path).suffix.lower()]
+    if fmt == "JPEG":
         return decode_jpeg(path, source_id=source_id, runtime=runtime, expected_sha256=expected_sha256)
     started = perf_counter()
-    with _read_avif(path, source_id=source_id, runtime=runtime, expected_sha256=expected_sha256) as (
+    with _read_photo(path, fmt, source_id=source_id, runtime=runtime, expected_sha256=expected_sha256) as (
             rgb, metadata, orientation, handling):
         state = ImageState.from_pixels(_linear_pixels(rgb), metadata)
-        runtime.emit("INPUT_AVIF_DECODED", "Decoded still AVIF through 8-bit RGB to oriented linear sRGB",
+        runtime.emit(f"INPUT_{fmt}_DECODED", f"Decoded still {fmt} through 8-bit RGB to oriented linear sRGB",
                      source_path=str(path), source_id=source_id, width=state.width, height=state.height,
                      orientation=orientation, color_handling=handling, duration_ms=(perf_counter() - started) * 1000)
     return state

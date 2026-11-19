@@ -1,6 +1,7 @@
 """Immutable source indexes and headless path/storage preflight for photo batches."""
 
 from dataclasses import dataclass
+from functools import cached_property
 import os
 from pathlib import Path
 import shutil
@@ -49,6 +50,21 @@ class SourceIndex:
     recursive: bool
     roots: tuple[SourceRoot, ...]
     images: tuple[IndexedImage, ...]
+
+    @cached_property
+    def name_conflicts(self):
+        groups = {}
+        for image in self.images:
+            groups.setdefault(image.path.stem.casefold(), []).append(image.path)
+        return tuple(tuple(group) for group in groups.values() if len(group) > 1)
+
+    @cached_property
+    def name_error(self):
+        if not self.name_conflicts:
+            return ""
+        names = "\n".join(f"{group[0].stem} — " + ", ".join(str(path) for path in group)
+                          for group in self.name_conflicts)
+        return "Source names must be unique without extensions. Rename or remove the duplicates, then rescan.\n" + names
 
 
 @dataclass(frozen=True)
@@ -188,7 +204,7 @@ class BatchService:
                     explicit[str(source)] = source
                     root = source.parent
                 else:
-                    raise RetouchingError("SOURCE_INVALID", f"Select an existing folder or photo file (JPEG, AVIF): {source}")
+                    raise RetouchingError("SOURCE_INVALID", f"Select an existing folder or photo file (JPEG, AVIF, PNG, TIFF, BMP, JPEG XL): {source}")
                 if str(root) not in roots:
                     roots[str(root)] = SourceRoot(root, file_identity(root.stat()))
 
@@ -196,11 +212,11 @@ class BatchService:
             for folder in folders.values():
                 source = folder
                 for path in self._paths(folder, recursive, index_id):
-                    if str(path) not in images:
-                        images[str(path)] = self._inspect(path, path.relative_to(folder), index_id)
+                    if path not in images:
+                        images[path] = self._inspect(path, path.relative_to(folder), index_id)
             for path in explicit.values():
-                if str(path) not in images:
-                    images[str(path)] = self._inspect(path, Path(path.name), index_id)
+                if path not in images:
+                    images[path] = self._inspect(path, Path(path.name), index_id)
         except (TypeError, OSError, ValueError, RetouchingError) as exc:
             error = exc if isinstance(exc, RetouchingError) else RetouchingError(
                 "SOURCE_SCAN_FAILED", f"Cannot index {source}. Check that the source exists and can be read.")
@@ -212,7 +228,11 @@ class BatchService:
         self.diagnostics.emit("SOURCE_INDEXED", "Finished reading source image headers", component="batch",
                               index_id=index_id, recursive=recursive, source_count=len(images),
                               unreadable_count=sum(image.issue is not None for image in images.values()))
-        return SourceIndex(index_id, recursive, tuple(roots.values()), tuple(images.values()))
+        index = SourceIndex(index_id, recursive, tuple(roots.values()), tuple(images.values()))
+        if index.name_conflicts:
+            self.diagnostics.emit("SOURCE_NAME_CONFLICT", index.name_error, component="batch",
+                                  level="ERROR", index_id=index_id)
+        return index
 
     def _paths(self, folder, recursive, index_id):
         pending = [folder]
@@ -269,6 +289,8 @@ class BatchService:
             if not isinstance(settings, ExportSettings):
                 raise RetouchingError("BATCH_SETTINGS_INVALID", "Select a supported export format and settings.")
             context["export_format"] = settings.format
+            if index.name_conflicts:
+                raise RetouchingError("SOURCE_NAME_CONFLICT", index.name_error)
             if isinstance(settings, JxlSettings):
                 require_jxl()
             selected = self._select(index, selected_ids)

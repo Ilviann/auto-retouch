@@ -20,7 +20,7 @@ from retouching_tool.cli import LaunchOptions
 from retouching_tool.config import load_config
 from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.errors import RetouchingError
-from retouching_tool.imaging.export_settings import JpegSettings, PngSettings, TiffSettings, parse_settings
+from retouching_tool.imaging.export_settings import BmpSettings, JpegSettings, JxlSettings, PngSettings, TiffSettings, parse_settings
 from retouching_tool.imaging.jpeg import JpegRuntime
 from retouching_tool.imaging.source import decode_source
 from retouching_tool.imaging.xmp import EMPTY_XMP
@@ -171,7 +171,7 @@ with fault:
         self.jpeg("same.jpeg")
         with self.assertRaises(RetouchingError) as caught:
             self.create(settings=PngSettings())
-        self.assertEqual(caught.exception.code, "OUTPUT_COLLISION")
+        self.assertEqual(caught.exception.code, "SOURCE_NAME_CONFLICT")
         self.assertEqual(parse_settings({"quality": 80, "progressive": True, "subsampling": "4:2:0"}),
                          JpegSettings(80, "4:2:0", True))
 
@@ -217,7 +217,48 @@ with fault:
         self.jpeg("portrait.jpg")
         with self.assertRaises(RetouchingError) as caught:
             self.create()
-        self.assertEqual(caught.exception.code, "OUTPUT_COLLISION")
+        self.assertEqual(caught.exception.code, "SOURCE_NAME_CONFLICT")
+
+    def test_reopen_exports_as_sources_for_previews_and_both_schedules(self):
+        reference = self.jpeg("original.jpeg")
+        imports = self.root / "new sources"
+        imports.mkdir()
+        for settings in (PngSettings(), TiffSettings(), BmpSettings(), JxlSettings(lossless=True)):
+            with self.subTest(fmt=settings.format):
+                job = self.jobs.run(self.create(settings=settings))
+                self.assertEqual(job.status, "completed")
+                output = job.images[0].output
+                output.rename(imports / (settings.format + output.suffix.upper()))
+        photos = tuple(imports.iterdir())
+        self.app.startup(LaunchOptions(photos, None, None), "directml")
+        index = self.app.index_sources((imports, *photos))
+        self.assertEqual(len(index.images), 4)
+        source_hashes = {p: hashlib.sha256(p.read_bytes()).digest() for p in photos}
+        original = self.app.index_sources((reference,)).images[0]
+        expected = self.app.preview_service.thumbnail(original)
+        for item in index.images:
+            with self.subTest(photo=item.path.name):
+                self.assertIsNone(item.issue)
+                self.assertEqual(self.app.preview_service.thumbnail(item), expected)
+                pic = self.app.preview_service.picture(index, item.image_id, "import-preview", process=True)
+                self.assertEqual(pic.original, pic.result)
+                self.assertEqual(pic.original.rgb, expected.rgb)
+                if item.path.suffix.lower() != ".bmp":
+                    state = decode_source(item.path, source_id=item.image_id, runtime=JpegRuntime(self.log, item.image_id))
+                    self.assertIn(b"pipelineSHA256", state.metadata.xmp)
+        self.load_staged_reference()
+        for mode in ("sequential", "staged"):
+            destination = self.destination / mode
+            destination.mkdir()
+            result = self.jobs.run(self.jobs.create(index, destination, mode=mode))
+            self.assertEqual(result.status, "completed")
+            for item in result.images:
+                with Image.open(item.output) as image:
+                    self.assertEqual((image.format, image.size), ("JPEG", (20, 36)))
+                    if item.source.suffix.lower() != ".bmp":
+                        self.assertEqual(image.getexif()[271], "Generated Test Camera")
+                        self.assertEqual(image.info["xmp"].count(b"pipelineSHA256"), 2)
+        self.assertEqual(source_hashes, {p: hashlib.sha256(p.read_bytes()).digest() for p in photos})
 
     def test_corrupt_and_animated_avif_are_accounted_for_during_scan(self):
         (self.source / "broken.avif").write_bytes(b"not an AVIF image")
@@ -228,6 +269,55 @@ with fault:
         self.assertTrue(all(item.header is None and item.issue for item in index.images))
         failures = {record["code"] for record in self.log.records if record.get("image_id")}
         self.assertTrue({"INPUT_AVIF_SEQUENCE", "INPUT_HEADER_INVALID"} <= failures)
+
+    def test_png_and_tiff_orientation_and_single_page_validation(self):
+        exif = Image.Exif()
+        exif[274] = 6
+        exif[271] = "Capture Camera"
+        with Image.new("RGB", (16, 8), "red") as image:
+            image.paste("blue", (8, 0, 16, 8))
+            for suffix in ("png", "tif"):
+                with self.subTest(suffix=suffix):
+                    path = self.source / f"rotated.{suffix}"
+                    image.save(path, exif=exif)
+                    index = self.app.index_sources((path,))
+                    item, = index.images
+                    preview = self.app.preview_service.picture(index, item.image_id, "orient", process=True)
+                    self.assertEqual((preview.original.width, preview.original.height), (8, 16))
+                    self.assertEqual(preview.original.rgb, image.transpose(Image.Transpose.ROTATE_270).tobytes())
+                    self.assertEqual(preview.original, preview.result)
+            with Image.new("RGB", (16, 8), "green") as other:
+                for suffix in ("png", "tiff"):
+                    path = self.source / f"sequence.{suffix}"
+                    image.save(path, save_all=True, append_images=[other])
+                    item, = self.app.index_sources((path,)).images
+                    self.assertIsNone(item.header)
+                    self.assertIn("single-image", item.issue)
+
+    def test_jxl_codestream_compressed_metadata_and_jpeg_reconstruction(self):
+        from retouching_tool.imaging.export_settings import require_jxl
+
+        require_jxl()
+        exif = Image.Exif()
+        exif[271] = "Capture Camera"
+        raw = exif.tobytes()[6:]
+        with Image.new("RGB", (19, 11), "red") as image:
+            for name, options in (("raw", {}), ("metadata", dict(use_container=True, compress_metadata=True,
+                                         exif=bytes(4) + raw, xmp=EMPTY_XMP))):
+                path = self.source / f"{name}.jxl"
+                image.save(path, lossless=True, **options)
+                item, = self.app.index_sources((path,)).images
+                state = decode_source(path, source_id=item.image_id, runtime=JpegRuntime(self.log, item.image_id))
+                self.assertEqual((state.width, state.height), (19, 11))
+                if options:
+                    self.assertEqual((state.metadata.exif, state.metadata.xmp), (raw, EMPTY_XMP))
+        jpeg = self.jpeg("capture.jpg")
+        path = self.source / "reconstructed.jxl"
+        with Image.open(jpeg) as image:
+            image.save(path, lossless_jpeg=True)
+        index = self.app.index_sources((jpeg, path))
+        previews = [self.app.preview_service.thumbnail(item) for item in index.images]
+        self.assertEqual(previews[0], previews[1])
 
     def review_existing(self, action, **options):
         with self.assertRaises(ExistingOutputs) as caught:

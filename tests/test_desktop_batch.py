@@ -440,13 +440,46 @@ class DesktopBatchTests(unittest.TestCase):
         files = [str(avif), str(self.source / "a.jpg")]
         with patch.object(QFileDialog, "getOpenFileNames", return_value=(files, "")) as picker:
             panel.findChild(QPushButton, "chooseSourceFiles").click()
-            self.assertIn("*.avif", picker.call_args.kwargs["filter"])
+            for suffix in ("jpg", "jpeg", "avif", "jxl", "png", "tif", "tiff", "bmp"):
+                self.assertIn(f"*.{suffix}", picker.call_args.kwargs["filter"])
         self.wait_for_scan(panel, 2)
         with patch.object(QFileDialog, "getExistingDirectory", return_value=str(self.destination)) as picker:
             browse.click()
             picker.assert_called_once_with(panel, "Choose destination folder", str(self.nested))
             browse.click()
             picker.assert_called_with(panel, "Choose destination folder", str(self.destination))
+
+    def test_duplicate_stems_block_start_and_highlight_until_rescanned(self):
+        conflict = self.nested / "A.PNG"
+        with Image.new("RGB", (20, 36), "green") as photo:
+            photo.save(conflict)
+        _, panel = self.open_window((self.source,))
+        self.wait_for_scan(panel, 1)
+        panel.destination.setText(str(self.destination))
+        self.until(panel.start.isEnabled, "initial scan should be ready")
+        panel.recursive.setChecked(True)
+        self.wait_for_scan(panel, 3)
+        self.assertFalse(panel.start.isEnabled())
+        self.assertTrue(panel.name_error.isVisible())
+        self.assertIn("Rename or remove", panel.name_error.toPlainText())
+        for path in (self.source / "a.jpg", conflict):
+            self.assertIn(str(path), panel.name_error.toPlainText())
+            tile, = panel.images.findItems(path.name, Qt.MatchFlag.MatchExactly)
+            self.assertEqual(tile.background().color().name(), "#ffd6df")
+        tile.setCheckState(Qt.CheckState.Unchecked)
+        panel.format.setCurrentText("TIFF")
+        self.assertFalse(panel.start.isEnabled())
+        self.assertTrue(panel.name_error.isVisible())
+        with self.assertRaises(RetouchingError) as caught:
+            panel.application.batch_service.preflight(*panel._plan_args()[0], **panel._plan_args()[1], check_outputs=False)
+        self.assertEqual(caught.exception.code, "SOURCE_NAME_CONFLICT")
+        conflict.rename(conflict.with_name("unique.PNG"))
+        panel.scan.click()
+        self.wait_for_scan(panel, 3)
+        self.until(panel.start.isEnabled, "renaming then rescanning should clear the conflict")
+        self.assertFalse(panel.name_error.isVisible())
+        tile, = panel.images.findItems("a.jpg", Qt.MatchFlag.MatchExactly)
+        self.assertEqual(tile.background().style(), Qt.BrushStyle.NoBrush)
 
     def test_auto_preflight_after_folder_selection_rescan_and_destination_edit(self):
         _, panel = self.open_window()

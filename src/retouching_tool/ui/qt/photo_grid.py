@@ -3,7 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer
-from PySide6.QtGui import QColorSpace, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtGui import QColor, QColorSpace, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QListView, QListWidget, QListWidgetItem, QStyle
 
 from ...errors import RetouchingError
@@ -53,12 +53,17 @@ class PhotoGrid(QListWidget):
             self._index = index
             self._next_row = 0
             if index is not None:
+                conflicts = {path for group in index.name_conflicts for path in group}
                 for image in index.images:
                     item = QListWidgetItem(self._warning if image.issue else self._placeholder, image.path.name, self)
                     item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable)
                     item.setData(Qt.ItemDataRole.UserRole, image.image_id)
                     item.setCheckState(Qt.CheckState.Checked)
                     details = image.issue or f"{image.header.width} × {image.header.height}"
+                    if image.path in conflicts:
+                        item.setBackground(QColor("#ffd6df"))
+                        item.setForeground(QColor("#451324"))
+                        details += f"\nDuplicate source name: {image.path.stem}"
                     item.setToolTip(f"{image.path}\n{details}" + ("" if image.issue else "\nDouble-click to preview"))
             if self.count():
                 self.setCurrentRow(0)

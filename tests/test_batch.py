@@ -78,7 +78,7 @@ class BatchTests(unittest.TestCase):
     def test_discovery_deduplicates_explicit_files_and_folders_without_decoding(self):
         flat = self.jpeg("z.JPG", mode="L")
         nested = self.jpeg("child/Фото.JpEg", (30, 20))
-        (self.source / "ignored.png").write_bytes(b"ignored")
+        (self.source / "ignored.webp").write_bytes(b"ignored")
         with patch.object(JpegImagePlugin.JpegImageFile, "load", side_effect=AssertionError("decoded pixels")):
             flat_index = self.batch.index((flat, self.source, flat))
             tree_index = self.batch.index((nested, self.source, self.source / "child"), recursive=True)
@@ -237,7 +237,8 @@ class BatchTests(unittest.TestCase):
         for folder in (other, third):
             with self.subTest(folder=folder):
                 index = self.batch.index((self.source, folder), recursive=True)
-                self.failure("OUTPUT_COLLISION", lambda: self.batch.preflight(index, self.output, mode="sequential"))
+                code = "SOURCE_NAME_CONFLICT" if folder == other else "OUTPUT_COLLISION"
+                self.failure(code, lambda: self.batch.preflight(index, self.output, mode="sequential"))
 
     def test_blocked_output_parent_and_simulated_reparse_parent(self):
         self.jpeg("sub/shot.jpg")

@@ -256,7 +256,7 @@ class JobService:
             context.pop("image_id")
             context.pop("source_path")
             versions = runtime_versions(self.pipeline.backend, self.pipeline.pytorch_backend)
-            if isinstance(settings, JxlSettings):
+            if isinstance(settings, JxlSettings) or any(item.path.suffix.lower() == ".jxl" for item in inputs):
                 versions["pillow-jxl-plugin"] = require_jxl()
             snapshot = JobSnapshot(job_id, index.index_id, index.recursive,
                                    tuple((root.path, root.identity) for root in index.roots), plan.destination,
@@ -359,7 +359,7 @@ class JobService:
                 job.pytorch_backend is not None and job.pytorch_backend != self.pipeline.pytorch_backend):
             raise RetouchingError("JOB_RUNTIME_CHANGED", "Restore the job's recorded prepared backend or create a new job.")
         current_versions = runtime_versions(job.backend, job.pytorch_backend)
-        if isinstance(job.settings, JxlSettings):
+        if isinstance(job.settings, JxlSettings) or "pillow-jxl-plugin" in job.versions:
             current_versions["pillow-jxl-plugin"] = require_jxl()
         if any(value != current_versions.get(key) for key, value in job.versions.items() if key != "windows"):
             raise RetouchingError("JOB_RUNTIME_CHANGED", "Restore the job's recorded runtime and prepared backend, or create a new job.")

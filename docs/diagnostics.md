@@ -26,7 +26,10 @@ Preview stage events carry the preview request ID for correlation with picture
 failures. Thumbnail failures identify the indexed photo
 and appear on its tile. Display and processing errors preserve their technical
 causes in the local logs.
-`INPUT_JPEG_DECODED` records oriented dimensions and color handling.
+Each successful source decode records oriented dimensions and color handling under
+`INPUT_JPEG_DECODED`, `INPUT_AVIF_DECODED`, `INPUT_JXL_DECODED`, `INPUT_PNG_DECODED`,
+`INPUT_TIFF_DECODED` or `INPUT_BMP_DECODED`. A scan with duplicate filename stems
+records `SOURCE_NAME_CONFLICT` with the index ID and conflicting source paths.
 `INPUT_EXIF_THUMBNAIL_INVALID` and `INPUT_SRGB_ASSUMED` expose recoverable input
 issues. Input metadata/decode errors, unsupported export metadata, write errors,
 collisions and `OUTPUT_VALIDATION_FAILED` carry causes or tracebacks.

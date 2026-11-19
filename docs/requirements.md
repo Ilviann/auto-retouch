@@ -13,7 +13,7 @@ presets rather than fixed processing paths.
 | U01 | Windows 11 desktop application; Windows 10 support is outside the initial scope. |
 | U02 | Photo processing is entirely local; no cloud processing. |
 | U03 | Primary workload is studio portraits, approximately 500 photos per batch. |
-| U04 | JPEG and still AVIF photo input. AVIF uses the 8-bit SDR processing path. HDR processing and vendor-specific RAW formats are outside the initial scope. |
+| U04 | JPEG, AVIF, JPEG XL, PNG, TIFF and BMP still-photo input using the 8-bit SDR decode path. HDR processing and vendor-specific RAW formats are outside the initial scope. |
 | U05 | Automatic overall color correction and human skin retouching. |
 | U06 | Separate Natural and Beauty presets. |
 | U07 | Minimum GPU class is consumer RTX 20-series with at least 6 GB VRAM. |
@@ -22,7 +22,7 @@ presets rather than fixed processing paths.
 | U10 | Operations can use conventional image processing or local neural-network checkpoints. Auto contrast, red-eye correction, and skin-texture correction are example operations. |
 | U11 | Save and load pipeline settings as JSON files. |
 | U12 | Automatically restore the last-used pipeline at application startup. |
-| U13 | Select a source folder and optionally search for photos recursively. |
+| U13 | Select a source folder and optionally search for photos recursively. All indexed source names must be unique ignoring extension and case, including across folders. List conflicting names, mark their thumbnails, and disable Start processing until the conflicts are resolved and sources rescanned. |
 | U14 | Require a destination folder before batch processing and reject a destination equal to the source folder. |
 | U15 | When recursive search is enabled, also reject a destination inside the source folder. |
 | U16 | Display discovered source files in a thumbnail grid. Double-click a thumbnail to open its source preview. The preview window offers **Run pipeline** for that photo. Omit separate preview buttons above the photo list. |

@@ -71,8 +71,9 @@ class Exif:
 
 
 class _Reader:
-    def __init__(self, data):
+    def __init__(self, data, byte_limit):
         self.data = data
+        self.remaining = byte_limit
         self.order = {b"II": "<", b"MM": ">"}.get(data[:2])
         if self.order is None or self.unpack("H", 2)[0] != 42:
             raise ValueError("Invalid EXIF TIFF header")
@@ -98,6 +99,9 @@ class _Reader:
             if tag == 330 or tag in POINTERS and tag not in allowed_pointers:
                 raise ValueError(f"Unsupported EXIF directory reference 0x{tag:04x}")
             size = TYPE_SIZES[kind] * length
+            self.remaining -= size
+            if self.remaining < 0:
+                raise ValueError("TIFF directory values exceed the metadata size limit")
             start = position + 8
             if size > 4:
                 start, = self.unpack("I", start)
@@ -127,7 +131,11 @@ def read_exif(raw):
         if raw.startswith(EXIF_HEADER):
             raise ValueError("Invalid JPEG EXIF APP1 payload")
         raise ValueError("Invalid EXIF payload size")
-    reader = _Reader(data)
+    return read_tiff_directory(data, byte_limit=MAX_APP_PAYLOAD)
+
+
+def read_tiff_directory(data, *, byte_limit):
+    reader = _Reader(data, byte_limit)
     primary, thumbnail_offset = reader.ifd(reader.unpack("I", 4)[0], (EXIF_POINTER, GPS_POINTER))
     result = Exif(reader.order, primary, {}, had_thumbnail=bool(thumbnail_offset))
     result.capture = reader.child(result, primary, EXIF_POINTER, (INTEROP_POINTER,)) or {}

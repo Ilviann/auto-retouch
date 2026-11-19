@@ -158,8 +158,8 @@ class FoundationTests(unittest.TestCase):
         self.assertIn("exception", self.log.records[-2])
 
     def test_explicit_invalid_source_is_error(self):
-        invalid = self.root / "source.png"
-        invalid.write_text("synthetic non-JPEG fixture")
+        invalid = self.root / "source.webp"
+        invalid.write_text("unsupported source format")
         with self.assertRaises(RetouchingError):
             self.service().startup(self.options((invalid,)), "cpu")
 
