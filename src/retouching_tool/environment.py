@@ -33,8 +33,9 @@ def validate_python() -> None:
     if (sys.version_info[:2] != (3, 14) or struct.calcsize("P") != 8
             or platform.machine().lower() not in ("amd64", "x86_64") or platform.python_implementation() != "CPython"):
         raise RetouchingError("PYTHON_INCOMPATIBLE", "Use standard 64-bit x86 CPython 3.14; no Python downgrade is supported")
-    if sys.platform != "win32" or sys.getwindowsversion().build < 22000:
-        raise RetouchingError("PLATFORM_UNSUPPORTED", "Auto ReTouch requires Windows 11 (build 22000 or later)")
+    if sys.platform != "win32" or sys.getwindowsversion().build < 19045:
+        raise RetouchingError("PLATFORM_UNSUPPORTED",
+                              "Auto ReTouch requires Windows x64 build 19045 (Windows 10 22H2) or later")
     if hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled():
         raise RetouchingError("PYTHON_INCOMPATIBLE", "Use standard CPython 3.14 rather than the free-threaded build")
 

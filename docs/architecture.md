@@ -42,7 +42,8 @@ diagnostics ZIP through the same log reader and reads job settings and outcomes
 from the saved journal. See
 [desktop diagnostics evidence](verification/desktop-diagnostics.md).
 The initial scope covers all exposed skin and multiple people, with a minimum of
-16 GB system RAM on Windows 11 only. Still-photo sources can be JPEG, AVIF, JPEG XL, PNG, TIFF, BMP or DNG. The DNG adapter develops the sensor image locally with LibRaw into oriented SDR sRGB. Export supports JPEG, JPEG XL, PNG, TIFF and BMP. WebP and AVIF exports are planned.
+16 GB system RAM. Windows 11 is the target desktop platform. Windows 10 22H2
+x64 is enabled for compatibility testing. Still-photo sources can be JPEG, AVIF, JPEG XL, PNG, TIFF, BMP or DNG. The DNG adapter develops the sensor image locally with LibRaw into oriented SDR sRGB. Export supports JPEG, JPEG XL, PNG, TIFF and BMP. WebP and AVIF exports are planned.
 
 ## Runtime and candidate stack
 

@@ -8,7 +8,7 @@ before substantial
 work. Preserve the distinction between
 confirmed user requirements, proposed defaults, and unvalidated assumptions.
 
-- Windows 11 desktop only; photo processing is fully local.
+- Target Windows 11 desktop. Setup and startup require Windows x64 build 19045 or later. Windows 10 22H2 is enabled for testing. Photo processing is fully local.
 - App name: Auto ReTouch. App author: Neyrome.
 - Stages may modify pixels, typed context, or both. Preserve immutable source EXIF;
   validate context provenance/coordinates and required/optional dependencies.

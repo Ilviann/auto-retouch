@@ -2,7 +2,7 @@
 
 Author: Neyrome.
 
-A Windows 11 desktop project for fully local batch retouching of studio portraits.
+A Windows desktop project for fully local batch retouching of studio portraits.
 Stages can change pixels, produce reusable region/mask context, or do both.
 Open still JPEG, AVIF, JPEG XL, PNG, TIFF, BMP and DNG photos from folders or individual files. Imports use the 8-bit SDR workflow and composite transparency onto white. DNG import develops the full-resolution sensor image locally using camera white balance when available. Source filenames must be unique across the scan, ignoring case and the final extension. If names conflict, rename or remove the listed files and rescan.
 JPEG, JPEG XL, PNG and TIFF exports preserve supported capture EXIF and record processing by the tool. BMP exports omit photo metadata.
@@ -83,7 +83,8 @@ opens the progress dialog. See
 [staged job verification](docs/verification/staged-jobs.md), and
 [desktop workspace verification](docs/verification/desktop-workspace.md).
 
-Use standard 64-bit Python 3.14 on Windows 11. For a new installation, run
+Use standard x64 Python 3.14 on Windows build 19045 (Windows 10 22H2) or later.
+Windows 11 is the tested platform. For a new installation, run
 `prepare_env.cmd` and answer both prompts. Enter selects CUDA at either prompt.
 Setup installs the hash-pinned packages in `.venv` and tests execution on both devices.
 GPU setup fails when its provider cannot execute; it never silently falls back.

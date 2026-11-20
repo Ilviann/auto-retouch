@@ -1,8 +1,9 @@
 # Runtime and launch contract
 
-The application targets Windows 11 only and runs on the user's system-wide
-Python 3.14 through a project-local
-virtual environment. Milestone 1a implements the script names, flags, configuration,
+Setup and launch require Windows x64 build 19045 (Windows 10 22H2) or later.
+Windows 10 compatibility awaits testing on that OS. The application uses the user's
+system-wide x64 Python 3.14 through a project-local virtual environment.
+Milestone 1a implements the script names, flags, configuration,
 environment metadata, and startup skeleton below. Milestone 3a adds registered
 pipeline validation and reference-stage cards. The headless application service
 supports sequential and staged job execution and recovery, including execution in

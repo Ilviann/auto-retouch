@@ -10,7 +10,7 @@ presets rather than fixed processing paths.
 
 | ID | Requirement |
 | --- | --- |
-| U01 | Windows 11 desktop application; Windows 10 support is outside the initial scope. |
+| U01 | Target Windows 11 desktop. Accept Windows x64 build 19045 or later at setup and startup to allow compatibility testing on Windows 10 22H2. |
 | U02 | Photo processing is entirely local; no cloud processing. |
 | U03 | Primary workload is studio portraits, approximately 500 photos per batch. |
 | U04 | JPEG, AVIF, JPEG XL, PNG, TIFF, BMP and DNG still-photo input using the 8-bit SDR decode path. HDR processing and vendor-specific RAW formats are outside the initial scope. |

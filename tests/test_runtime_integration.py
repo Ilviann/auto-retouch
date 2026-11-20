@@ -72,6 +72,18 @@ raise SystemExit(main([]))
         self.assertIn("GUI_STARTED", result.stderr)
         self.assertIn("LAUNCH_EXITED", result.stderr)
 
+    def test_windows_minimum_build(self):
+        with patch.object(sys, "getwindowsversion") as version:
+            for build in (19045, 19046, 20348, 22000):
+                with self.subTest(build=build):
+                    version.return_value.build = build
+                    validate_python()
+            version.return_value.build = 19044
+            with self.assertRaises(RetouchingError) as error:
+                validate_python()
+            self.assertEqual(error.exception.code, "PLATFORM_UNSUPPORTED")
+            self.assertIn("build 19045", str(error.exception))
+
     def test_wrong_python_and_unavailable_provider_fail_explicitly(self):
         with patch("retouching_tool.environment.sys.version_info", (3, 13, 0)):
             with self.assertRaises(RetouchingError) as context:
