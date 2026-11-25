@@ -4,11 +4,12 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ...errors import RetouchingError
+from .operation_picker import OperationPicker
 from .stage_card import StageCard
 
 
@@ -81,17 +82,8 @@ class PipelinePanel(QWidget):
         layout.addLayout(preset_row)
 
         add = QPushButton("Add operation", objectName="addOperation")
-        menu = QMenu(add)
-        for descriptor in service.registry.descriptors():
-            for model_ref in descriptor.model_refs or (None,):
-                label = f"{descriptor.title} · v{descriptor.version}"
-                if model_ref is not None:
-                    label += f" · {model_ref}"
-                action = menu.addAction(label)
-                action.setData((descriptor.operation, descriptor.version, model_ref))
-        menu.triggered.connect(self._add_stage)
-        add.setMenu(menu)
-        add.setEnabled(not menu.isEmpty())
+        add.clicked.connect(self._choose_operation)
+        add.setEnabled(bool(service.registry.descriptors()))
         layout.addWidget(add, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.message = QLabel(objectName="pipelineCommandError", wordWrap=True)
@@ -255,8 +247,12 @@ class PipelinePanel(QWidget):
             detail = "Dependencies checked." if item.stage.enabled else "Stage is off."
             self._show_message(f"{item.title} · {detail}")
 
-    def _add_stage(self, action):
-        operation, version, model_ref = action.data()
+    def _choose_operation(self):
+        picker = OperationPicker(self.service.registry.descriptors(), self)
+        picker.chosen.connect(self._add_stage)
+        picker.open()
+
+    def _add_stage(self, operation, version, model_ref):
         status = self._command(self.service.add_operation, operation, version, model_ref=model_ref)
         if status is not None:
             self.reveal_stage = status.stages[-1].stage.id

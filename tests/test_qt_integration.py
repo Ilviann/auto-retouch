@@ -14,11 +14,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QPlainTextEdit, QSlider,
-    QMessageBox, QPushButton, QSpinBox,
+    QAbstractButton, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QLineEdit, QPlainTextEdit, QSlider,
+    QMessageBox, QSpinBox,
 )
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QFontMetrics
 from retouching_tool.application.contracts import StartupSnapshot
@@ -37,6 +37,7 @@ from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManife
 from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, SCALING_PARAMETERS, StageDefinition
 from retouching_tool.pipeline.registry import application_registry
 from retouching_tool.ui.qt.main_window import MainWindow
+from retouching_tool.ui.qt.operation_picker import OperationChoice, OperationPicker
 from retouching_tool.ui.qt.stage_card import StageCard
 from retouching_tool.ui.qt.stage_preview_window import StagePreviewWindow
 
@@ -156,6 +157,61 @@ class QtIntegrationTests(unittest.TestCase):
         finally:
             self.close_window(window)
 
+    def test_operation_picker_keeps_version_and_model_choices_distinct(self):
+        earlier = replace(SMOOTHING, title="alpha", version=2, model_refs=("Zulu", "bravo"))
+        later = replace(earlier, version=10, model_refs=("other",))
+        picker = OperationPicker((replace(SHINE, title="Beta"), later, earlier), None)
+        self.addCleanup(picker.close)
+        chosen = []
+        picker.chosen.connect(lambda *choice: chosen.append(choice))
+        picker.resize(360, 500)
+        picker.open()
+        self.app.processEvents()
+        cards = picker.findChildren(OperationChoice)
+        self.assertEqual([card.accessibleName() for card in cards], ["alpha · v2", "alpha · v2", "alpha · v10", "Beta · v1"])
+        self.assertIn("Model: bravo", cards[0].accessibleDescription())
+        self.assertIn("Model: Zulu", cards[1].accessibleDescription())
+        for card in cards:
+            for label in card.findChildren(QLabel):
+                with self.subTest(card=card.accessibleName(), text=label.text()):
+                    self.assertTrue(card.rect().contains(label.geometry()))
+                    self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
+        QTest.mouseClick(cards[1], Qt.MouseButton.LeftButton)
+        self.assertEqual(chosen, [(SMOOTHING.operation, 2, "Zulu")])
+
+    def test_operation_picker_filters_by_name_as_you_type(self):
+        picker = OperationPicker((SMOOTHING, DETECTOR, SHINE), None)
+        self.addCleanup(picker.close)
+        chosen = []
+        picker.chosen.connect(lambda *choice: chosen.append(choice))
+        picker.open()
+        self.app.processEvents()
+        search = picker.findChild(QLineEdit)
+        self.assertIs(picker.focusWidget(), search)
+        cards = picker.findChildren(OperationChoice)
+
+        def visible_operations():
+            return [card.toolTip() for card in cards if card.isVisible()]
+
+        QTest.keyClicks(search, "KiN")
+        self.assertEqual(visible_operations(), [SHINE.operation, SMOOTHING.operation])
+        QTest.keyClicks(search, " To")
+        self.assertEqual(visible_operations(), [SMOOTHING.operation])
+        search.selectAll()
+        QTest.keyClicks(search, "PyTorch")
+        self.assertFalse(visible_operations())
+        self.assertTrue(picker.no_matches.isVisible())
+        QTest.keyClick(search, Qt.Key.Key_Return)
+        self.assertTrue(picker.isVisible())
+        self.assertEqual(chosen, [])
+        search.selectAll()
+        QTest.keyClick(search, Qt.Key.Key_Backspace)
+        self.assertEqual(visible_operations(), [DETECTOR.operation, SHINE.operation, SMOOTHING.operation])
+        self.assertFalse(picker.no_matches.isVisible())
+        QTest.keyClicks(search, "smooth")
+        QTest.keyClick(search, Qt.Key.Key_Return)
+        self.assertEqual(chosen, [(SMOOTHING.operation, SMOOTHING.version, SMOOTHING_MODEL.ref)])
+
     def test_pipeline_editor_actions_json_dialogs_and_restart(self):
         artifacts = ROOT / ".test-work"
         artifacts.mkdir(exist_ok=True)
@@ -198,23 +254,39 @@ class QtIntegrationTests(unittest.TestCase):
                 self.assertEqual(presets.count(), 1)
                 self.assertEqual((presets.currentIndex(), presets.currentText(), presets.placeholderText()), (-1, "", ""))
                 self.assertIsNone(panel.findChild(QComboBox, "operationPicker"))
-                menu = panel.findChild(QPushButton, "addOperation").menu()
-                expected = [(d.operation, d.version, model) for d in editor.registry.descriptors()
-                            for model in d.model_refs or (None,)]
-                self.assertEqual([action.data() for action in menu.actions()], expected)
-                QTimer.singleShot(0, lambda: QTest.keyClick(menu, Qt.Key.Key_Escape))
                 click("addOperation")
+                picker = self.app.activeModalWidget()
+                self.assertIsInstance(picker, OperationPicker)
+                choices = picker.findChildren(OperationChoice)
+                expected = sorted((f"{d.title} · v{d.version}" for d in editor.registry.descriptors()
+                                   for _ in d.model_refs or (None,)), key=str.casefold)
+                self.assertEqual([button.accessibleName() for button in choices], expected)
+                descriptions = {button.toolTip(): button.accessibleDescription() for button in choices}
+                self.assertIn("Conventional (no AI)", descriptions["core.exposure"])
+                self.assertIn("Outputs: Pixels", descriptions["core.exposure"])
+                self.assertIn("AI engine: ONNX Runtime", descriptions[DETECTOR.operation])
+                self.assertIn("Outputs: Face regions", descriptions[DETECTOR.operation])
+                self.assertIn("AI engine: PyTorch", descriptions[SMOOTHING.operation])
+                self.assertIn(SMOOTHING_MODEL.ref, descriptions[SMOOTHING.operation])
+                self.assertIn("Optional inputs: Face regions", descriptions[SMOOTHING.operation])
+                self.assertIn("Exposed skin mask (required with “Target exposed skin”)", descriptions[SMOOTHING.operation])
+                self.assertIn("Inputs: Pixels (linear sRGB, float32), Exposed skin mask", descriptions[SHINE.operation])
+                QTest.keyClick(picker, Qt.Key.Key_Escape)
                 self.assertFalse(stages())
-                exposure_action = next(a for a in menu.actions() if a.data() == ("core.exposure", 1, None))
-
-                def choose_exposure():
-                    menu.setActiveAction(exposure_action)
-                    QTest.keyClick(menu, Qt.Key.Key_Return)
-
-                for _ in range(2):
-                    QTimer.singleShot(0, choose_exposure)
+                for keyboard in (False, True):
                     click("addOperation")
-                self.app.processEvents()  # Apply the deferred card refresh after the menu action.
+                    picker = self.app.activeModalWidget()
+                    exposure = next(b for b in picker.findChildren(OperationChoice) if b.toolTip() == "core.exposure")
+                    if keyboard:
+                        for _ in range(len(choices) + 2):
+                            if picker.focusWidget() is exposure:
+                                break
+                            QTest.keyClick(picker.focusWidget(), Qt.Key.Key_Tab)
+                        self.assertIs(picker.focusWidget(), exposure)
+                        QTest.keyClick(exposure, Qt.Key.Key_Return)
+                    else:
+                        QTest.mouseClick(exposure, Qt.MouseButton.LeftButton)
+                    self.app.processEvents()
                 first, second = stages()
                 self.assertEqual(first.operation, "core.exposure")
                 self.assertNotEqual(first.id, second.id)

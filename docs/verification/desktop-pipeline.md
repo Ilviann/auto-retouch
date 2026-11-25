@@ -1,6 +1,14 @@
 # Desktop pipeline editor
 
-**Add operation** opens a popup menu populated from the operation registry.
+**Add operation** opens a scrollable picker with one card per registered
+operation version and model choice, sorted alphabetically by display name.
+The search field takes focus when the picker opens. Type any part of a name
+to filter the cards regardless of case. Enter adds the first match, and
+clearing the field restores the full list.
+Cards show required, optional and setting-dependent inputs, outputs, and
+either conventional processing or the AI runtime, supported devices and model.
+Click a card or focus it and press Enter to append the operation. Escape or
+Cancel dismisses the picker.
 Each stage card shows Move up, Move down and Remove to the left of the fold
 button. Moving a stage preserves its expanded or folded state. Remove asks for
 confirmation with the stage's current position and name. Cancel is the default.
@@ -26,6 +34,17 @@ and keeping the selection after a failed import. The desktop settings test
 checks that a folder change updates the picker immediately.
 
 ## Focused verification
+
+On 2026-11-25, three offscreen Qt checks exercised the operation picker.
+`test_operation_picker_filters_by_name_as_you_type` checked initial focus,
+live substring matching, an empty result, clearing the field and keyboard
+selection of a filtered model.
+`test_pipeline_editor_actions_json_dialogs_and_restart` checked the installed
+catalog's display order and metadata, dismissed the picker with Escape, and
+added separate instances using the mouse and keyboard.
+`test_operation_picker_keeps_version_and_model_choices_distinct` checked
+case-insensitive sorting, numeric version order, model selection and label
+fit at 360 pixels wide. Offscreen renders were inspected at 560 and 360 pixels.
 
 On 2026-11-19, the offscreen Qt test
 `test_pipeline_editor_actions_json_dialogs_and_restart` checked the popup
