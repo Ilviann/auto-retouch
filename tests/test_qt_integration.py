@@ -31,6 +31,7 @@ from retouching_tool.diagnostics.service import Diagnostics
 from retouching_tool.operations.alibaba_skin import BLEMISH, BLEMISH_MODEL, SMOOTHING, SMOOTHING_MODEL
 from retouching_tool.operations.face_detection import DESCRIPTOR as DETECTOR, MODEL as DETECTOR_MODEL
 from retouching_tool.operations.facial_features import DESCRIPTOR as FEATURES, MODEL as FEATURES_MODEL
+from retouching_tool.operations.iat_exposure import DESCRIPTOR as IAT, MODEL as IAT_MODEL
 from retouching_tool.operations.exposed_skin import DESCRIPTOR as SKIN, MODEL as SKIN_MODEL
 from retouching_tool.operations.skin_shine import DESCRIPTOR as SHINE
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
@@ -45,6 +46,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class QtIntegrationTests(unittest.TestCase):
+    def test_iat_card_identifies_both_files_and_recovers_off(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as resources:
+            root = Path(tmp)
+            log = Diagnostics(root / "logs", console=io.StringIO())
+            resources.callback(log.close)
+            editor = PipelineService(root / "models", "directml", log)
+            status, = editor.add_operation(IAT.operation, 1, model_ref=IAT_MODEL.ref).stages
+            snapshot = StartupSnapshot((), "Fixture", "Fixture", "directml", root, root, root, (), stages=(status,))
+            window = MainWindow(snapshot, editor)
+            try:
+                card = window.findChild(StageCard, f"stage-{status.stage.id}")
+                self.assertFalse(card.toggle.isEnabled())
+                self.assertEqual(card.model_page, IAT_MODEL.publisher_url)
+                self.assertEqual(card.parameters["analysis_size"].value(), 512)
+                files = []
+                for item in IAT_MODEL.files:
+                    path = editor.checkpoints / item.relative_path
+                    self.assertIn(str(path), card.status_label.text())
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    payload = path.name.encode()
+                    path.write_bytes(payload)
+                    files.append(replace(item, sha256=hashlib.sha256(payload).hexdigest()))
+                editor.catalog = ModelCatalog((replace(IAT_MODEL, files=tuple(files)),))
+                card.findChild(QAction, "recheckStage").trigger()
+                self.app.processEvents()
+                card = window.findChild(StageCard, f"stage-{status.stage.id}")
+                self.assertTrue(card.toggle.isEnabled())
+                self.assertFalse(card.toggle.isChecked())
+            finally:
+                self.close_window(window)
+                window.deleteLater()
+                self.app.processEvents()
+
     def test_feature_protection_card_shows_checkpoint_and_context(self):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as resources:
             root = Path(tmp)

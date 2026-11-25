@@ -93,6 +93,7 @@ presets rather than fixed processing paths.
 | U81 | Provide an editable Levels stage similar to a photo editor's Levels adjustment, with a GIMP-style settings editor. Use ONNX if it speeds up the stage by more than 1.5×. |
 | U82 | Provide a separate Auto Levels stage that calculates and applies levels independently to every incoming photo. |
 | U83 | Provide an Auto color grade stage using the local CSRNet PyTorch checkpoint. |
+| U84 | Provide an optional Adaptive exposure correction (IAT) stage for the incoming photo, with the standard stage blending controls and local ONNX Runtime inference. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 

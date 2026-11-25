@@ -51,6 +51,7 @@ def application_registry():
     from ..operations.auto_color_grade import DESCRIPTOR as AUTO_COLOR_GRADE, AutoColorGrade
     from ..operations.auto_levels import DESCRIPTOR as AUTO_LEVELS, AutoLevels
     from ..operations.frequency_filters import HIGH_PASS, LOW_PASS, FrequencyFilter
+    from ..operations.iat_exposure import DESCRIPTOR as IAT_EXPOSURE, AdaptiveExposure
     from ..operations.levels import DESCRIPTOR as LEVELS, Levels
     from ..operations.person_foreground import DESCRIPTOR, PersonForeground
     from ..operations.white_balance import DESCRIPTOR as WHITE_BALANCE, WhiteBalance
@@ -63,6 +64,7 @@ def application_registry():
     registry = reference_registry()
     registry.register(WHITE_BALANCE, WhiteBalance)
     registry.register(AUTO_EXPOSURE, AutoExposure)
+    registry.register(IAT_EXPOSURE, AdaptiveExposure)
     registry.register(AUTO_COLOR_GRADE, AutoColorGrade)
     registry.register(AUTO_LEVELS, AutoLevels)
     registry.register(LEVELS, Levels)

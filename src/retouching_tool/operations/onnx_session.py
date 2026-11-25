@@ -4,7 +4,7 @@ from ..environment import PROVIDERS
 from ..errors import RetouchingError
 
 
-def open_session(path, backend, *, cuda_options=None):
+def open_session(path, backend, *, cuda_options=None, free_dimensions=None):
     import onnxruntime as ort
 
     provider = PROVIDERS[backend]
@@ -14,6 +14,8 @@ def open_session(path, backend, *, cuda_options=None):
     options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
     options.enable_mem_pattern = False
     options.enable_cpu_mem_arena = False
+    for name, size in (free_dimensions or {}).items():
+        options.add_free_dimension_override_by_name(name, size)
     if backend != "cpu":
         options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
     providers = [provider]

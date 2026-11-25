@@ -50,6 +50,27 @@ Place it before image statistics or AI analysis so those stages measure the
 corrected pixels. The target band and defaults are provisional and may need
 adjustment for intentional lighting or grading. See [verification](verification/auto-exposure.md).
 
+## Adaptive exposure correction (IAT)
+
+Choose **Add operation → Adaptive exposure correction (IAT)**. The stage estimates
+local and global lighting changes from the incoming photo. It needs no upstream
+analysis. Use **Preview** on the source or **Preview in pipeline** after upstream
+edits. **Blending** controls how much correction to apply.
+
+**Analysis longest side (px)** defaults to 512 and accepts 128–1024. The stage
+preserves aspect ratio and uses the smaller of the input size and this limit.
+IAT receives float32 sRGB and returns an enhanced image at the analysis size.
+For larger photos, the stage measures the signed RGB change in linear light,
+resamples that change to the original dimensions, and adds it to the incoming
+pixels. The stage card offers separate downscaling and upscaling methods.
+Full blend can deepen shadows on already exposed portraits. Inspect skin and
+shadow detail when comparing settings.
+
+Install both files together under `iat-exposure/6a2bfef/` inside the configured
+checkpoint folder. The card checks both hashes. After recovering missing or
+incorrect files, use **Check required model files** and enable the stage.
+[Pinned files](https://huggingface.co/eleasm/IAT-ONNX/tree/6a2bfefd823bbe167fbbfcba13296899ea398afc/onnx) · [Model decision and measurements](decisions/0007-iat-exposure.md)
+
 ## Auto color grade
 
 Choose **Add operation → Auto color grade** to grade the whole incoming photo.

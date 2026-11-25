@@ -2,10 +2,11 @@
 
 Research recorded on 2026-11-19 for Auto ReTouch. The proposed first comparisons
 are **AdaInt and CSRNet** for whole-photo color, **IAT Exposure** for lighting
-errors, and **MediaPipe Selfie Multiclass** for selecting exposed skin. These
-candidates still need local inference and portrait-quality evaluation. The app
-already provides white balance, auto exposure, face detection, and the two
-Alibaba retouching stages. [Current stage catalog](stages.md)
+errors, and **MediaPipe Selfie Multiclass** for selecting exposed skin. CSRNet,
+IAT Exposure and Selfie Multiclass have since run locally. Portrait-quality
+acceptance remains open. The IAT evaluation includes a comparison with Auto
+exposure and tone on three local frames. [Current stage catalog](stages.md) ·
+[IAT results](decisions/0007-iat-exposure.md)
 
 ## Whole-photo color, exposure and white balance
 
