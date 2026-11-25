@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from ...config import SCALING_METHODS
 from ...pipeline.definition import BLEND, BLEND_MODE, BooleanParameter, ChoiceParameter, IntegerParameter, MaskTargetParameter, Parameter, ScalingParameter
 from ...pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, FACIAL_FEATURES, PERSON_FOREGROUND
+from .levels_editor import INPUT, OUTPUT, LevelsEditor
 
 
 class BooleanControl(QCheckBox):
@@ -106,6 +107,18 @@ def add_parameter_row(form, parameter, control):
         form.addRow(control)
     else:
         form.addRow(parameter.label, control)
+
+
+def populate_parameter_form(form, descriptor, controls, *, preview=False):
+    levels = None
+    for parameter in descriptor.editable_parameters:
+        if descriptor.operation == "core.levels" and parameter.name in (*INPUT, *OUTPUT):
+            if levels is None:
+                levels = LevelsEditor(controls, preview=preview)
+                form.addRow(levels)
+        else:
+            add_parameter_row(form, parameter, controls[parameter.name])
+    return levels
 
 
 def tag_row(label, entries, hint):
@@ -234,6 +247,7 @@ class StageCard(QFrame):
         layout.addLayout(tag_row("Out", outputs, " ".join(effects)))
 
         self.parameters = {}
+        self.levels = None
         self.displayed_values = {}
         if descriptor.editable_parameters:
             settings = QFrame(objectName="stageParameters")
@@ -245,7 +259,6 @@ class StageCard(QFrame):
                 name = parameter.name
                 control = parameter_control(parameter)
                 self.parameters[name] = control
-                add_parameter_row(form, parameter, control)
                 if isinstance(control, (BooleanControl, BlendControl)):
                     control.valueChanged.connect(lambda value, n=name: on_parameter(stage_id, n, value))
                 elif isinstance(control, ChoiceControl):
@@ -253,6 +266,7 @@ class StageCard(QFrame):
                 else:
                     control.editingFinished.connect(lambda n=name, c=control:
                         self._commit_parameter(stage_id, n, c, on_parameter))
+            self.levels = populate_parameter_form(form, descriptor, self.parameters)
             layout.addWidget(settings)
 
         self.preview = QPushButton("Preview", objectName="previewStage")
@@ -306,12 +320,16 @@ class StageCard(QFrame):
         details = [text, *(f"{i.code}: {i.message}" for i in status.issues), *status.dependency_errors]
         self.status_label.setText("\n".join(filter(None, details)))
         self.status_label.setVisible(bool(self.status_label.text()))
+        if self.levels is not None:
+            self.levels.set_limits(status.stage.parameter("input_black"), status.stage.parameter("input_white"))
         for name, value in status.stage.parameters:
             control = self.parameters[name]
             with QSignalBlocker(control):
                 control.setValue(value)
             self.displayed_values[name] = control.value()
         update_choice_dependents(self.descriptor, self.parameters)
+        if self.levels is not None:
+            self.levels.refresh()
         self.model_page = status.model_page
         if self.descriptor.model_refs:
             self.link.setEnabled(bool(self.model_page))

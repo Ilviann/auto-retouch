@@ -90,6 +90,7 @@ presets rather than fixed processing paths.
 | U78 | Both Alibaba retouching stages run on the PyTorch device selected in setup, CPU or CUDA. Each new neural stage supports every compatible backend offered for its inference runtime. |
 | U79 | Provide separate High Pass and Low Pass filter stages using the ONNX Runtime backend selected during setup. |
 | U80 | Run the Auto exposure tone curve and Fixed white balance correction on the ONNX Runtime backend selected during setup. Keep Automatic white balance on the CPU. |
+| U81 | Provide an editable Levels stage similar to a photo editor's Levels adjustment, with a GIMP-style settings editor. Use ONNX if it speeds up the stage by more than 1.5×. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 

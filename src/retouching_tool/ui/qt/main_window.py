@@ -40,6 +40,7 @@ class MainWindow(QMainWindow):
             heading.addWidget(settings)
             self.batch_panel.pipeline_locked.connect(self.pipeline_page.set_locked)
             self.batch_panel.operation_preview_available.connect(self.pipeline_page.set_preview_available)
+            self.batch_panel.images.histogram_changed.connect(self.pipeline_page.set_source_histogram)
             self.pipeline_page.preview_requested.connect(self.batch_panel.preview_stage)
             self.pipeline_page.changed.connect(self.batch_panel.refresh_pipeline)
             self.batch_panel.ready_to_close.connect(self.close)

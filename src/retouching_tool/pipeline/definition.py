@@ -129,6 +129,8 @@ class OperationDescriptor:
     inference_runtime: str = "onnxruntime"
     resize_limit: ResizeLimit | None = None
     neutral_picker: bool = False
+    ordered_parameter_pairs: tuple[tuple[str, str], ...] = ()
+    input_histogram: bool = False
 
     @property
     def editable_parameters(self):
@@ -247,6 +249,13 @@ def parse_pipeline(data, registry, *, frozen=False) -> PipelineDefinition:
         if set(raw["parameters"]) - known:
             fail(f"Stage {raw['id']}: unknown parameters {set(raw['parameters']) - known}")
         parameters = tuple((p.name, p.validate(raw["parameters"].get(p.name, p.default))) for p in descriptor.editable_parameters)
+        if descriptor.ordered_parameter_pairs:
+            values = dict(parameters)
+            labels = {p.name: p.label for p in descriptor.parameters}
+            for lower, upper in descriptor.ordered_parameter_pairs:
+                if values[lower] >= values[upper]:
+                    raise RetouchingError("PARAMETER_INVALID", f"Stage {raw['id']} ({descriptor.title}): "
+                                          f"{labels[lower]} must be less than {labels[upper]}.")
         model = raw.get("model_ref")
         if (descriptor.model_refs and (not isinstance(model, str) or model not in descriptor.model_refs)
                 or not descriptor.model_refs and "model_ref" in raw):

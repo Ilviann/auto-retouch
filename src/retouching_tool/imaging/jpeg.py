@@ -15,6 +15,7 @@ from ..pipeline.image_state import ImageState, SourceMetadata
 from .export_settings import JpegSettings
 from .exif import EXIF_HEADER, ORIENTATION, read_exif
 from .iptc import PHOTOSHOP, read_iptc
+from .transfer import srgb8_to_linear
 from .xmp import EXIF, EXTENDED_XMP_HEADER, TIFF, XMP_HEADER, Xmp
 
 MAX_PIXELS = 80_000_000
@@ -186,8 +187,7 @@ def _convert_to_srgb(image, metadata, exif, xmp_color_space, runtime, path):
 
 def _linear_pixels(rgb):
     import numpy as np
-    encoded = np.arange(256, dtype=np.float32) / 255
-    lut = np.where(encoded <= .04045, encoded / 12.92, ((encoded + .055) / 1.055) ** 2.4)
+    lut = srgb8_to_linear(np.arange(256))
     pixels = np.empty((rgb.height, rgb.width, 3), np.float32)
     for top in range(0, rgb.height, STRIP_ROWS):
         bottom = min(top + STRIP_ROWS, rgb.height)

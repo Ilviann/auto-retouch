@@ -1,14 +1,14 @@
 """Modal stage comparison, including local draft settings and preview scheduling."""
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+from PySide6.QtWidgets import (QBoxLayout, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
                                QProgressBar, QPushButton, QVBoxLayout)
 
 from ...application.preview import StagePreviewMode
 from ...errors import ResizeApprovalRequired, RetouchingError
 from ...pipeline.definition import BooleanParameter, MaskTargetParameter
 from .picture_window import PictureComparison, RenderProgressDialog, statistics_text
-from .stage_card import ChoiceControl, add_parameter_row, parameter_control, update_choice_dependents
+from .stage_card import ChoiceControl, parameter_control, populate_parameter_form, update_choice_dependents
 
 
 def confirm_resize(parent, message):
@@ -41,6 +41,7 @@ class StagePreviewWindow(QDialog):
 
         layout = QVBoxLayout(self)
         self.comparison = PictureComparison("Before this stage" if through_stage else "Source", "After this stage")
+        self._levels_layout = None
         layout.addWidget(self.comparison, 1)
         self.statistics = QLabel(objectName="previewStatistics", wordWrap=True)
         self.statistics.hide()
@@ -48,6 +49,9 @@ class StagePreviewWindow(QDialog):
 
         self._controls = {}
         self.pick_neutral = None
+        self.levels = None
+        self._levels_input = None
+        self._point_to_pick = ""
         if descriptor.editable_parameters:
             settings = QGroupBox("Stage settings")
             form = QFormLayout(settings)
@@ -63,7 +67,10 @@ class StagePreviewWindow(QDialog):
                 signal = control.currentIndexChanged if isinstance(control, ChoiceControl) else control.valueChanged
                 signal.connect(lambda _, p=parameter, widget=control, initial=control.value():
                                self._change(p, widget.value(), initial))
-                add_parameter_row(form, parameter, control)
+            self.levels = populate_parameter_form(form, descriptor, self._controls, preview=True)
+            if self.levels is not None:
+                self.levels.pick_requested.connect(self._arm_levels_picker)
+                self.comparison.before.pixel_picked.connect(self._pick_level)
             for target in descriptor.parameters:
                 if isinstance(target, MaskTargetParameter):
                     toggle = self._controls[target.name]
@@ -80,7 +87,15 @@ class StagePreviewWindow(QDialog):
                 self.pick_neutral.toggled.connect(self._arm_picker)
                 self.comparison.before.pixel_picked.connect(self._pick)
                 form.addRow(self.pick_neutral)
-            layout.addWidget(settings)
+            if self.levels is None:
+                layout.addWidget(settings)
+            else:
+                settings.setMinimumWidth(365)
+                layout.removeWidget(self.comparison)
+                self._levels_layout = QHBoxLayout()
+                self._levels_layout.addWidget(self.comparison, 1)
+                self._levels_layout.addWidget(settings, 0, Qt.AlignmentFlag.AlignTop)
+                layout.insertLayout(0, self._levels_layout, 1)
 
         self.feedback = QLabel(objectName="stagePreviewFeedback", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
         self.feedback.setMinimumHeight(self.feedback.fontMetrics().height())
@@ -114,6 +129,44 @@ class StagePreviewWindow(QDialog):
         layout.addLayout(actions)
         self._update_actions()
         self.finished.connect(self.comparison.clear)
+        self.finished.connect(self._clear_levels_input)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._levels_layout is not None:
+            direction = QBoxLayout.Direction
+            self._levels_layout.setDirection(direction.LeftToRight if event.size().width() >= 860
+                                             else direction.TopToBottom)
+
+    def _clear_levels_input(self):
+        self._levels_input = None
+
+    def _arm_levels_picker(self, name):
+        self._point_to_pick = name
+        if name:
+            self.comparison.mode.setCurrentIndex(self.comparison.SIDE_BY_SIDE)
+        self._arm_picker(bool(name))
+
+    def _pick_level(self, x, y):
+        name, image = self._point_to_pick, self._levels_input
+        if not name or image is None or not (0 <= x < image.width and 0 <= y < image.height):
+            return
+        start = (y * image.width + x) * 3
+        rgb = image.rgb[start:start + 3]
+        channel = self._controls["channel"].value()
+        if channel == "RGB":
+            value = max(rgb) if name == "input_black" else min(rgb)
+        else:
+            value = rgb[("Red", "Green", "Blue").index(channel)]
+        control = self._controls[name]
+        if not control.minimum() <= value <= control.maximum():
+            self.feedback.setText(f"Sampled {value}. Choose an {name.replace('_', ' ')} point "
+                                  f"between {control.minimum()} and {control.maximum()}.")
+            self.feedback.show()
+            return
+        control.setValue(value)
+        self.levels.clear_picker()
+        self.feedback.hide()
 
     def _arm_picker(self, armed):
         before = self.comparison.before
@@ -182,6 +235,11 @@ class StagePreviewWindow(QDialog):
         else:
             if current:
                 self.comparison.display(preview)
+                if self.levels is not None and self._levels_input is not preview.original:
+                    self._levels_input = preview.original
+                    self.levels.set_histogram(preview.original.histogram)
+                    for button in self.levels.pickers.values():
+                        button.setEnabled(True)
                 if self.pick_neutral is not None:
                     self.pick_neutral.setEnabled(True)
                 measurements = statistics_text(preview.context)

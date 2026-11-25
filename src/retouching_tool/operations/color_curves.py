@@ -27,13 +27,16 @@ def white_balance_graph():
     return graph.encode("fixed-white-balance", {"rgb": RGB_SHAPE, "gain": [3]}, output, RGB_SHAPE)
 
 
-def apply_curve(session, pixels, gain):
+def apply_curve(session, pixels, *, channel_index=None, **parameters):
     import numpy as np
 
     source = pixels.reshape(-1, 3)
-    output = np.empty_like(source)
+    output = np.empty_like(source) if channel_index is None else source.copy()
+    if channel_index is not None:
+        source = source[:, channel_index:channel_index + 1]
+    target = output if channel_index is None else output[:, channel_index:channel_index + 1]
     for start in range(0, len(source), CHUNK_PIXELS):
         block = slice(start, start + CHUNK_PIXELS)
-        corrected, = session.run(None, {"rgb": source[block], "gain": gain})
-        output[block] = corrected
+        corrected, = session.run(None, {"rgb": np.ascontiguousarray(source[block]), **parameters})
+        target[block] = corrected
     return output.reshape(pixels.shape)

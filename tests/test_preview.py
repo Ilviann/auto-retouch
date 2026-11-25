@@ -49,6 +49,25 @@ class PreviewTests(unittest.TestCase):
         self.editor = self.app.pipeline_service
         self.service = self.app.preview_service
 
+    def test_levels_histogram_uses_full_cached_stage_input(self):
+        self.editor.set_parameter("exposure-reference", "stops", 1)
+        self.editor.set_enabled("exposure-reference", True)
+        stage = self.editor.add_operation("core.levels", 1).definition.stages[-1]
+        peaks = []
+        for through in (False, True):
+            comparison = self.service.stage_comparison(self.index, self.item.image_id, stage.id, through_stage=through)
+            first = comparison.render("default", {})
+            original = first.original
+            histogram = original.histogram
+            self.assertEqual(len(histogram), 768)
+            self.assertEqual(sum(histogram[:256]), original.width * original.height)
+            self.assertEqual(histogram[original.rgb[0]], original.width * original.height)
+            peaks.append(original.rgb[0])
+            second = comparison.render("edited", {"gamma": 2}, mode=StagePreviewMode.DIFFERENCE)
+            self.assertIs(second.original.histogram, histogram)
+            comparison.clear()
+        self.assertGreater(peaks[1], peaks[0])
+
     def test_preview_preserves_orientation_and_executes_isolated_or_enabled_stages(self):
         original_bytes = self.path.read_bytes()
         thumbnail = self.service.thumbnail(self.item)

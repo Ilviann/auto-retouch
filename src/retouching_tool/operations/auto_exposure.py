@@ -85,7 +85,7 @@ class AutoExposure:
         stops = self.strength * max(-self.max_stops, min(self.max_stops, requested))
         if self.session is None:
             self.session = open_session(exposure_graph(), self.runtime.backend)
-        pixels = apply_curve(self.session, state.pixels, np.asarray([2 ** stops], dtype=np.float32))
+        pixels = apply_curve(self.session, state.pixels, gain=np.asarray([2 ** stops], dtype=np.float32))
         result = ImageState.from_pixels(pixels, state.metadata, pixel_revision=state.pixel_revision + 1,
                                         geometry_revision=state.geometry_revision)
         self.runtime.emit("AUTO_EXPOSURE_APPLIED", "Applied a bounded exposure and tone correction.",

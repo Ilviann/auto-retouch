@@ -2,7 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QColorSpace, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QListView, QListWidget, QListWidgetItem, QStyle
 
@@ -23,6 +23,9 @@ def pixmap(display):
 
 
 class PhotoGrid(QListWidget):
+    histogram_changed = Signal(object)
+    _histogram_role = Qt.ItemDataRole.UserRole + 1
+
     def __init__(self, preview_service):
         super().__init__(objectName="batchImages")
         self.preview_service = preview_service
@@ -46,6 +49,12 @@ class PhotoGrid(QListWidget):
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desktop-thumbnail")
         self._timer = QTimer(self, interval=10, singleShot=True)
         self._timer.timeout.connect(self._load_next)
+        self.itemSelectionChanged.connect(self.publish_histogram)
+
+    def publish_histogram(self):
+        selected = self.selectedItems()
+        bins = selected[0].data(self._histogram_role) if selected else None
+        self.histogram_changed.emit(bins or ())
 
     def set_index(self, index):
         with QSignalBlocker(self):
@@ -67,6 +76,7 @@ class PhotoGrid(QListWidget):
                     item.setToolTip(f"{image.path}\n{details}" + ("" if image.issue else "\nDouble-click to preview"))
             if self.count():
                 self.setCurrentRow(0)
+        self.publish_histogram()
         if not self._closing:
             self._timer.start()
 
@@ -101,6 +111,9 @@ class PhotoGrid(QListWidget):
                 if item is not None:
                     with QSignalBlocker(self):
                         item.setIcon(self._thumbnail_icon(display))
+                        item.setData(self._histogram_role, display.histogram)
+                    if item.isSelected():
+                        self.publish_histogram()
         while self._next_row < self.count():
             row = self._next_row
             self._next_row += 1

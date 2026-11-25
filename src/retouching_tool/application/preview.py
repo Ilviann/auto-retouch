@@ -1,7 +1,7 @@
 """Local, toolkit-independent display reads and processing previews."""
 
 from contextlib import nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import partial
 
@@ -35,6 +35,8 @@ class DisplayImage:
     height: int
     rgb: bytes
     overview: DisplayImage | None = None
+    # Three consecutive 256-bin sRGB histograms, independent of display equality.
+    histogram: tuple[int, ...] = field(default=(), compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -86,15 +88,17 @@ class StageComparison:
         return sample_neutral(self._baseline[1], x, y)
 
 
-def _display(rgb, limit):
+def _display(rgb, limit, *, histogram=False):
     from PIL.Image import Resampling
 
     rgb.thumbnail((limit, limit), Resampling.LANCZOS)
-    return DisplayImage(rgb.width, rgb.height, rgb.tobytes())
+    return DisplayImage(rgb.width, rgb.height, rgb.tobytes(),
+                        histogram=tuple(rgb.histogram()) if histogram else ())
 
 
-def _full_display(rgb):
-    full = DisplayImage(rgb.width, rgb.height, rgb.tobytes())
+def _full_display(rgb, *, histogram=False):
+    full = DisplayImage(rgb.width, rgb.height, rgb.tobytes(),
+                        histogram=tuple(rgb.histogram()) if histogram else ())
     if max(rgb.size) <= OVERVIEW_SIZE:
         return full
     return replace(full, overview=_display(rgb, OVERVIEW_SIZE))
@@ -186,7 +190,7 @@ class PreviewService:
         _check_source(image)
         with read_srgb_source(image.path, source_id=image.image_id, runtime=runtime, draft_size=limit) as (
                 rgb, _, _, _):
-            display = _full_display(rgb) if limit is None else _display(rgb, limit)
+            display = _full_display(rgb) if limit is None else _display(rgb, limit, histogram=True)
         _check_source(image)
         return display
 
@@ -263,7 +267,9 @@ class PreviewService:
             _check_source(image)
             for stage in prefix:
                 state = self._process_stage(state, stage, runtime, resize_approvals)
-            original = _full_display(Image.fromarray(encode_rgb_samples(state)))
+            histogram = stage_id is not None and self.editor.registry.descriptor(
+                stages[-1].operation, stages[-1].operation_version).input_histogram
+            original = _full_display(Image.fromarray(encode_rgb_samples(state)), histogram=histogram)
             if comparison is not None:
                 comparison._baseline = (baseline_key, state, original)
         initial_revision = state.pixel_revision

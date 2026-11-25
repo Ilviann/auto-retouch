@@ -50,6 +50,43 @@ Place it before image statistics or AI analysis so those stages measure the
 corrected pixels. The target band and defaults are provisional and may need
 adjustment for intentional lighting or grading. See [verification](verification/auto-exposure.md).
 
+## Levels
+
+**Levels** (`core.levels` v1) adjusts the whole image or one color channel.
+Choose **RGB** to apply the same curve to red, green and blue, or choose a
+single channel to correct a cast. Add another Levels stage to combine channel
+adjustments with independent settings.
+
+**Input black** and **Input white** use the familiar 0–255 sRGB scale. Values
+at or below input black map to **Output black**. Values at or above input
+white map to **Output white**. Between those points the stage normalizes the
+input, raises it to the power `1 / gamma`, and scales it into the output range.
+Increasing **Midtone gamma** above 1 lightens midtones with the default output
+range. Lowering it below 1 darkens them. Raising output black lifts shadows,
+lowering output white caps highlights, and reversing the output points inverts
+the selected channels. Input black must be lower than input white.
+
+Drag the black, gray or white triangle below the input histogram, or enter an
+exact value in the matching field. Moving the gray triangle left lightens
+midtones. The two handles under **Output Levels** can cross for an inverted
+range. On the stage card the histogram comes from the selected source thumbnail.
+**Preview** shows the full-resolution source histogram. **Preview in pipeline**
+measures the full-resolution input after earlier enabled stages. Selecting
+**RGB** combines the counts of the three sRGB channels.
+
+In either preview, choose **Pick black** or **Pick white** and click the input
+photo. For a single channel the picker reads that channel's value. In **RGB**,
+black uses the largest of the three values and white uses the smallest so all
+channels of the sampled pixel reach the chosen endpoint. Clamping follows the
+stage's SDR mapping.
+
+The default endpoints (0 and 255) and gamma (1.0) preserve the input exactly.
+The stage operates on continuous float32 values between sRGB code points and
+returns linear-sRGB pixels for pipeline blending. It keeps the image dimensions,
+source metadata and compatible upstream context. All controls support live preview.
+The curve runs locally on the setup-selected ONNX Runtime backend and requires
+no checkpoint. [Levels verification](verification/levels.md).
+
 ## High Pass and Low Pass
 
 **Low Pass** (`core.low_pass` v1) softens fine texture by applying a Gaussian

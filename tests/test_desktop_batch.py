@@ -1028,6 +1028,64 @@ class DesktopBatchTests(unittest.TestCase):
             self.close_window(window)
             self.assertEqual(grid.item(0).icon().cacheKey(), grid._placeholder.cacheKey())
 
+    def test_levels_editor_handles_histograms_and_point_pickers(self):
+        path = self.source / "colors.png"
+        Image.frombytes("RGB", (2, 1), bytes((18, 40, 60, 205, 230, 250))).save(path)
+        window, panel = self.open_window((path, self.source / "a.jpg"))
+        self.wait_for_scan(panel, 2)
+        editor = panel.application.pipeline_service
+        stage = editor.add_operation("core.levels", 1).definition.stages[-1]
+        page = window.pipeline_page
+        page._refresh_cards()
+        card = page.stage_cards[stage.id]
+        card.expand.setChecked(True)
+        panel.images.setCurrentItem(panel.images.findItems(path.name, Qt.MatchFlag.MatchExactly)[0])
+        self.until(lambda: sum(card.levels.input_ramp.bins) == 6, "selected thumbnail histogram missing")
+        panel.images.clearSelection()
+        self.assertFalse(card.levels.input_ramp.bins)
+        panel.images.setCurrentItem(panel.images.findItems(path.name, Qt.MatchFlag.MatchExactly)[0])
+        self.assertEqual(card.levels.input_ramp.bins[40], 1)
+
+        def drag(ramp, name, fraction):
+            y = ramp.height() - 6
+            start = QPoint(round(ramp.position(name)), y)
+            end = QPoint(round(8 + (ramp.width() - 16) * fraction), y)
+            QTest.mousePress(ramp, Qt.MouseButton.LeftButton, pos=start)
+            QTest.mouseMove(ramp, end)
+            QTest.mouseRelease(ramp, Qt.MouseButton.LeftButton, pos=end)
+
+        drag(card.levels.input_ramp, "gamma", .25)
+        self.assertAlmostEqual(editor.status.definition.stages[-1].parameter("gamma"), 2.0, delta=.04)
+        self.assertEqual(card.parameters["input_black"].value(), 0)
+        card.preview.click()
+        dialog = panel._stage_preview
+        self.until(lambda: dialog._levels_input is not None, "stage input did not render")
+        controls = dialog._controls
+        controls["channel"].setValue("Green")
+        self.assertEqual(dialog.levels.input_ramp.bins[40], 1)
+        self.assertEqual(sum(dialog.levels.input_ramp.bins), 2)
+        dialog.levels.pickers["input_black"].click()
+        dialog.comparison.before.pixel_picked.emit(0, 0)
+        self.assertEqual(controls["input_black"].value(), 40)
+        self.assertEqual(controls["input_white"].minimum(), 41)
+        dialog.levels.pickers["input_white"].click()
+        dialog.comparison.before.pixel_picked.emit(0, 0)
+        self.assertTrue(dialog.feedback.isVisible())
+        self.assertTrue(dialog.comparison.before.picking)
+        dialog.comparison.before.pixel_picked.emit(1, 0)
+        self.assertEqual(controls["input_white"].value(), 230)
+        self.assertFalse(dialog.comparison.before.picking)
+        drag(dialog.levels.output_ramp, "output_white", .15)
+        drag(dialog.levels.output_ramp, "output_black", .8)
+        self.assertGreater(controls["output_black"].value(), controls["output_white"].value())
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Save):
+            dialog.close()
+            self.until(lambda: panel._stage_preview is None, "edited preview did not close")
+        saved = editor.status.definition.stages[-1]
+        for name in ("channel", "gamma", "input_black", "input_white", "output_black", "output_white"):
+            self.assertEqual(card.parameters[name].value(), saved.parameter(name))
+        self.assertEqual(saved.parameter("input_black"), 40)
+
     def test_thumbnail_workspace_previews_and_live_estimates(self):
         window, panel = self.open_window(tuple(self.originals), pipeline=ROOT / "examples/pipelines/reference.json")
         self.wait_for_scan(panel, 2)

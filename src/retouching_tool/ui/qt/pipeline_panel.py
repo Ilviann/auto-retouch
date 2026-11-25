@@ -34,6 +34,7 @@ class PipelinePanel(QWidget):
         self.stage_cards = {}
         self.reveal_stage = None
         self.preview_available = False
+        self.source_histogram = ()
         self.preset_folder_error = ""
         self.command_message = ""
         self.refresh_timer = QTimer(self, interval=0, singleShot=True)
@@ -156,6 +157,12 @@ class PipelinePanel(QWidget):
         for card in self.stage_cards.values():
             card.set_preview_available(available)
 
+    def set_source_histogram(self, bins):
+        self.source_histogram = bins
+        for card in self.stage_cards.values():
+            if card.levels is not None:
+                card.levels.set_histogram(bins)
+
     def show_diagnostic_operation(self, event):
         card = self.stage_cards.get(event.stage_id)
         if (card is None or (event.operation and card.descriptor.operation != event.operation)
@@ -193,6 +200,8 @@ class PipelinePanel(QWidget):
                     on_preview=self.preview_requested.emit,
                 )
                 self.stage_cards[stage.id] = card
+                if card.levels is not None:
+                    card.levels.set_histogram(self.source_histogram)
                 self.cards.insertWidget(index, card)
                 card.expand.setChecked(stage.id == self.reveal_stage)
             elif self.cards.indexOf(card) != index:

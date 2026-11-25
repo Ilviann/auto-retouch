@@ -205,6 +205,33 @@ class WorkerTests(unittest.TestCase):
                 self.assertGreater(left.getpixel((0, 0))[0], 96)
                 self.assertEqual(left.getexif()[271], "Worker Test Camera")
 
+    def test_levels_in_preview_and_both_workers(self):
+        editor = self.app.pipeline_service
+        editor.load_data({"schema_version": 1, "name": "Manual levels", "stages": []})
+        stage = editor.add_operation("core.levels", 1).definition.stages[0]
+        index = self.app.batch_service.index((self.source,), recursive=False)
+        image_id = index.images[0].image_id
+        preview = self.app.preview_service
+        comparison = preview.stage_comparison(index, image_id, stage.id, through_stage=False)
+        neutral = comparison.render("defaults", {})
+        self.assertEqual(neutral.original, neutral.result)
+        settings = {"channel": "Red", "gamma": 2.0}
+        changed = comparison.render("red-midtone", settings)
+        self.assertGreater(changed.result.rgb[0], neutral.result.rgb[0])
+        self.assertEqual(changed.result.rgb[1:3], neutral.result.rgb[1:3])
+        editor.set_parameters(stage.id, settings)
+        self.assertEqual(preview.picture(index, image_id, "whole", process=True).result, changed.result)
+        for mode in ("sequential", "staged"):
+            job_id = self.create(mode)
+            self.assertEqual(self.worker.start(job_id).wait(20).exit_code, 0)
+            self.assertEqual(self.jobs.status(job_id).status, "completed")
+        for path in self.originals:
+            with (Image.open(self.root / "sequential" / path.name) as left,
+                  Image.open(self.root / "staged" / path.name) as right):
+                self.assertEqual(left.tobytes(), right.tobytes())
+                self.assertAlmostEqual(left.getpixel((0, 0))[0], changed.result.rgb[0], delta=3)
+                self.assertEqual(left.getexif()[271], "Worker Test Camera")
+
     def test_frequency_filters_in_preview_and_both_workers(self):
         path = self.source / "edge.jpg"
         with Image.new("RGB", (40, 30), (75, 96, 125)) as edge:

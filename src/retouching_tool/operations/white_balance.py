@@ -91,7 +91,7 @@ class WhiteBalance:
         if mode == "Fixed":
             if self.session is None:
                 self.session = open_session(white_balance_graph(), self.runtime.backend)
-            pixels = apply_curve(self.session, state.pixels, gains)
+            pixels = apply_curve(self.session, state.pixels, gain=gains)
         else:
             pixels = np.empty_like(state.pixels)
             for start in range(0, state.height, 64):
