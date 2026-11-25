@@ -12,7 +12,7 @@ confirmed user requirements, proposed defaults, and unvalidated assumptions.
 - App name: Auto ReTouch. App author: Neyrome.
 - Stages may modify pixels, typed context, or both. Preserve immutable source EXIF;
   validate context provenance/coordinates and required/optional dependencies.
-- Except for metadata-free BMP, exports preserve source capture metadata and add tool/version provenance. Update
+- Except for metadata-free BMP, exports retain standard capture EXIF, omit MakerNotes and private EXIF tags, and add tool/version provenance. Update
   technical fields to match the output; verify transfer and never silently drop EXIF.
 - Initial GUI: PySide6 with Qt Widgets. Isolate toolkit code in `ui/qt/`; shared
   application services expose plain-Python commands/state/events and must run

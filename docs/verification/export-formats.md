@@ -46,12 +46,17 @@ diagnostic reports, selected scheduler cases and desktop integration. This check
 covered file integrity and metadata. Portrait appearance and full-batch peak
 memory were outside the verification scope.
 
-### ASUS MakerNote regression
+### Standard EXIF export (2026-11-25)
 
-Two local ASUS_AI2302 JPEGs, including the reported 4,096 × 3,072 input,
-exported to JPEG XL at default settings. Reopening both outputs confirmed
-byte-identical `imginfo` MakerNotes, normalized orientation, expected dimensions
-and the Auto ReTouch Software tag. Both source SHA-256 hashes matched after
-the run. Synthetic fixtures exercised JPEG, JPEG XL, PNG and TIFF in both EXIF
-byte orders. Unrecognized binary notes, malformed XML, unknown fields and
-trailing binary data produced correlated errors before publication.
+A local Canon EOS 6D JPEG with a 7,784-byte MakerNote exported successfully.
+Reopening the 3,648 × 5,472 JPEG confirmed omission of the note and retention of
+camera make/model, capture time, shutter speed, aperture, ISO and focal length.
+Orientation, dimensions and the Software tag matched the output. The source
+SHA-256 matched after the run.
+
+Generated Canon binary and ASUS XML fixtures covered both EXIF byte orders.
+JPEG, JPEG XL, PNG and TIFF exports omitted MakerNotes and private tags in all
+four directories while retaining standard camera, lens, GPS and interoperability
+fields. Additional checks covered UTF-8 credits and tag IDs introduced in
+Exif 3.1 that older cameras used privately. BMP remained metadata-free.
+All 17 JPEG and multi-format tests passed.

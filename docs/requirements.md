@@ -43,7 +43,7 @@ presets rather than fixed processing paths.
 | U31 | Use PySide6 with Qt Widgets for the initial desktop GUI. |
 | U32 | Keep the GUI separate behind an application boundary so another toolkit can replace it if problems arise. |
 | U33 | Stages return image state: they may change pixels, add/update contextual analysis data, or do both. Later operations can use optional context such as face/eye/teeth/person regions. |
-| U34 | Transfer source EXIF metadata, including camera and capture information, to the final image and identify processing by this tool. BMP exports omit EXIF. |
+| U34 | Transfer standard EXIF fields, including camera and capture information, to the final image and identify processing by this tool. Omit MakerNotes and other private EXIF tags from every export. BMP exports omit EXIF entirely. |
 | U35 | App name: Auto ReTouch (exact capitalization). |
 | U36 | Every editable pipeline stage can be skipped by turning it off. |
 | U37 | A stage missing a required AI model file must be turned off and show an error status on its own UI card. |
@@ -130,7 +130,7 @@ Representative coverage and visual acceptance remain unreviewed.
 | F09 | Pause at a safe boundary, continue the open batch, or cancel remaining work in either scheduling mode. |
 | F10 | Continue past an isolated corrupt image or processing failure and provide a batch summary. |
 | F11 | Export settings provide format and encoder controls, original pixel dimensions by default, destination, and names. Preserve originals and handle output-name collisions explicitly. Keep export adapters separate for later WebP and AVIF support. |
-| F12 | Preserve source capture EXIF in exports and add tool/version processing provenance. Normalize orientation, dimensions, and profile-related fields to match the actual output; keep original capture time and author/copyright information. |
+| F12 | Preserve standard source capture EXIF in metadata-bearing exports and add tool/version processing provenance. Normalize orientation, dimensions, and profile-related fields to match the actual output; keep original capture time and author/copyright information. |
 | F13 | Every editable stage has an on/off control. Turning it off preserves its position and parameters; allow multiple instances of the same operation with distinct parameters. |
 | F14 | Validate pipeline structure/parameters separately from asset availability. Load structurally valid pipelines with missing checkpoints, turn affected stages off, and show their errors. Unknown schema/operations and invalid parameters remain explicit import errors; enabled stages with unresolved required context block processing. |
 | F15 | Preserve relative source subdirectories in destination by default, preventing same-name inputs from different folders from colliding. Existing-output policy is explicit; no silent overwrite. |

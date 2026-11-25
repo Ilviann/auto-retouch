@@ -34,11 +34,14 @@ def _metadata(state, size, pipeline_sha256, fmt):
     original = read_exif(state.metadata.exif)
     expected, previous = for_output(original, size, SOFTWARE)
     iptc = state.metadata.iptc
+    embedded_iptc = original.primary.get(33723)
+    if embedded_iptc is not None:
+        if iptc and iptc != embedded_iptc.value:
+            raise RetouchingError("OUTPUT_METADATA_UNSUPPORTED", "Conflicting embedded IPTC resources.")
+        iptc = embedded_iptc.value
     if fmt != "JPEG":
         expected.capture.pop(37121)  # JPEG YCbCr component configuration
         if iptc:
-            if 33723 in expected.primary:
-                raise RetouchingError("OUTPUT_METADATA_UNSUPPORTED", "Conflicting embedded IPTC resources.")
             expected.primary[33723] = Entry(7, len(iptc), iptc)
     raw = write_exif(expected, size_limit=MAX_APP_PAYLOAD if fmt == "JPEG" else 2 * MAX_APP_PAYLOAD + 1024)
     xmp = Xmp(state.metadata.xmp).for_output(size, SOFTWARE, datetime.now(timezone.utc).isoformat(
@@ -170,7 +173,7 @@ def export_image(state, destination, *, settings, pipeline_sha256, runtime, befo
         code = "JXL" if fmt == "JPEG XL" else fmt
         runtime.emit(f"OUTPUT_{code}_VERIFIED", f"Published verified {fmt} export", output_path=str(destination),
                      width=size[0], height=size[1], pipeline_sha256=pipeline_sha256, **asdict(settings),
-                     metadata_policy="omitted" if meta is None else "preserved",
+                     metadata_policy="omitted" if meta is None else "standard_exif",
                      removed_exif_thumbnail=meta.removed_thumbnail if meta else False,
                      duration_ms=(perf_counter() - started) * 1000)
         return destination

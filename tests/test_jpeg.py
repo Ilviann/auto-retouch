@@ -313,10 +313,14 @@ class JpegTests(unittest.TestCase):
         self.save(xmp=b'<!DOCTYPE x [<!ENTITY x "test">]><x>&x;</x>')
         self.assertIn("DTD", self.failure("INPUT_METADATA_INVALID", self.decode)["exception"])
 
-    def test_asus_imginfo_survives_verified_exports(self):
-        note = b"<imginfo>\n <type>main</type><mode>photo</mode><ditfilter></ditfilter>\n</imginfo>"
-        for order in ("<", ">"):
-            raw = add_thumbnail(camera_exif(order=order, make="ASUS", maker_note=note))
+    def test_exports_omit_maker_notes_and_private_tags_in_each_directory(self):
+        for order, make, note in [("<", "Canon", b"opaque\x00camera data"),
+                                  (">", "ASUS", b"<imginfo><mode>photo</mode></imginfo>")]:
+            fields = read_exif(camera_exif(order=order, make=make, maker_note=note))
+            for directory in (fields.primary, fields.capture, fields.gps, fields.interop):
+                directory[0xCAFE] = Entry(7, 7, b"private")
+                directory[MAKER_NOTE] = fields.capture[MAKER_NOTE]
+            raw = add_thumbnail(write_exif(fields))
             self.save(exif=raw)
             state = self.decode()
             for settings, suffix in [(JxlSettings(), ".jxl"), (JpegSettings(), ".jpg"),
@@ -326,25 +330,42 @@ class JpegTests(unittest.TestCase):
                     export_image(state, destination, settings=settings, pipeline_sha256=HASH, runtime=self.runtime)
                     with Image.open(destination) as image:
                         exif = image.getexif()
-                        self.assertEqual(exif.get_ifd(34665)[37500], note)
+                        for directory in (exif, exif.get_ifd(34665), exif.get_ifd(34853), exif.get_ifd(40965)):
+                            self.assertNotIn(MAKER_NOTE, directory)
+                            self.assertNotIn(0xCAFE, directory)
+                        self.assertEqual(exif[271], make)
+                        self.assertEqual(exif.get_ifd(34665)[42036], "Test Lens")
+                        self.assertEqual(exif.get_ifd(34853)[1], "N")
+                        self.assertEqual(exif.get_ifd(40965)[2], b"0100")
                         self.assertEqual((exif[274], exif[305]), (1, SOFTWARE))
                     self.assertEqual(state.metadata.exif, raw)
                     destination.unlink()
 
-    def test_unsupported_maker_notes_fail_without_output(self):
-        for make, note in [
-                ("Test Camera Co", b"<imginfo><mode>photo</mode></imginfo>"),
-                ("ASUS", b"opaque vendor data with internal offsets"),
-                ("ASUS", b"<imginfo><offset>1234</offset></imginfo>"),
-                ("ASUS", b"<imginfo><mode offset='1234'/></imginfo>"),
-                ("ASUS", b"<imginfo><mode><offset/></mode></imginfo>"),
-                ("ASUS", b"<imginfo><mode></imginfo>"),
-                ("ASUS", b"<imginfo><mode>photo</mode></imginfo>\x00binary trailer")]:
-            with self.subTest(make=make, note=note):
-                self.save(exif=camera_exif(make=make, maker_note=note))
-                state = self.decode()
-                self.failure("OUTPUT_METADATA_UNSUPPORTED", lambda: self.export(state))
-                self.assertFalse(self.output.exists())
+    def test_embedded_iptc_survives_standard_exif_filter(self):
+        fields = read_exif(camera_exif())
+        fields.primary[33723] = Entry(7, len(IPTC), IPTC)
+        self.save(exif=write_exif(fields))
+        self.export(self.decode())
+        with Image.open(self.output) as image:
+            self.assertNotIn(33723, image.getexif())
+            self.assertEqual(image.info["photoshop"][1028], IPTC)
+
+    def test_new_standard_tag_ids_are_private_in_older_exif_versions(self):
+        for version in (b"0230", b"0310"):
+            with self.subTest(version=version):
+                fields = read_exif(camera_exif())
+                fields.capture[0x9000] = Entry(7, 4, version)
+                fields.capture[0x9287] = Entry(7, 2, b"\x01\0")
+                if version == b"0310":
+                    credit = "René\0".encode("utf-8")
+                    fields.capture[0xA437] = Entry(129, len(credit), credit)
+                self.save(exif=write_exif(fields))
+                self.export(self.decode())
+                with Image.open(self.output) as image:
+                    capture = read_exif(image.info["exif"]).capture
+                    self.assertEqual(0x9287 in capture, version == b"0310")
+                    self.assertEqual(capture.get(0xA437), fields.capture.get(0xA437))
+                self.output.unlink()
 
     def test_invalid_pixels_fail_without_output(self):
         invalid = ImageState.from_pixels(np.zeros((8, 8, 3), np.float32), SourceMetadata("test"))

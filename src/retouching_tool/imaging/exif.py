@@ -1,19 +1,18 @@
 """Bounded classic-TIFF EXIF reader and writer for JPEG APP1.
 
 Keep the byte order, type, count and value bytes of retained entries. Rebuild
-known IFD pointers and omit the thumbnail IFD entirely. Proprietary offsets
-inside MakerNotes cannot be verified by this codec.
+known IFD pointers and omit the thumbnail IFD entirely. Final exports select
+standard capture fields by directory and omit proprietary MakerNotes.
 """
 
 from dataclasses import dataclass
 import struct
-import xml.etree.ElementTree as ET
 
 from ..errors import RetouchingError
 
 EXIF_HEADER = b"Exif\0\0"
 MAX_APP_PAYLOAD = 65533
-TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8}
+TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8, 129: 1}
 EXIF_POINTER = 34665
 GPS_POINTER = 34853
 INTEROP_POINTER = 40965
@@ -24,6 +23,24 @@ SOFTWARE = 305
 COLOR_SPACE = 40961
 PIXEL_X = 40962
 PIXEL_Y = 40963
+
+# CIPA DC-008 capture and descriptive tags that can carry over to an edited
+# image. Directory pointers and output-dependent fields are written separately.
+PRIMARY_CAPTURE_TAGS = {
+    270, 271, 272, 282, 283, 296, 306, 315, 33432,  # description, camera, DPI, date and credits
+}
+EXIF_CAPTURE_TAGS = {
+    0x829A, 0x829D, 0x8822, 0x8824, 0x8827, 0x8828, *range(0x8830, 0x8836),  # exposure and sensitivity
+    0x9000, 0x9003, 0x9004, *range(0x9010, 0x9013),  # EXIF version, capture times and offsets
+    *range(0x9201, 0x920B), 0x9214,  # exposure, focal length and subject area
+    0x9286, *range(0x9290, 0x9293),  # user comment and subseconds
+    *range(0x9400, 0x9406),  # environmental measurements
+    0xA000, 0xA004, 0xA20B, 0xA20C, 0xA20E, 0xA20F, 0xA210, 0xA214, 0xA215, 0xA217,
+    *range(0xA300, 0xA303), *range(0xA401, 0xA40D),  # sensor, scene and camera settings
+    0xA420, *range(0xA430, 0xA43D), *range(0xA460, 0xA463),  # identity, credits, lens and composite images
+}
+# Some cameras used these IDs for private data before Exif 3.1 assigned them.
+EXIF_31_CAPTURE_TAGS = {0x9287, *range(0xA40D, 0xA413)}
 
 # Encoded layout values tied to the old image, including the obsolete JPEG-in-TIFF tags.
 TIFF_LAYOUT_TAGS = {
@@ -159,39 +176,16 @@ def read_tiff_directory(data, *, byte_limit, primary_filter=None, read_thumbnail
     return result
 
 
-def _is_asus_imginfo(make, note):
-    """Recognize the self-contained ASUS camera settings record before relocating it."""
-    if make != ascii_entry("ASUS") or note.kind != 7:
-        return False
-    raw = note.value
-    if not raw.startswith(b"<imginfo>") or not raw.endswith(b"</imginfo>") or b"<!" in raw or b"<?" in raw:
-        return False
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError:
-        return False
-    settings = {"type", "facing", "mode", "ditfilter", "customwatermark", "devicewatermark",
-                "datewatermark", "timewatermark", "undistort", "aeb"}
-    return (len(root) > 0 and not (root.text or "").strip()
-            and all(field.tag in settings and not field.attrib and len(field) == 0
-                    and not (field.tail or "").strip() for field in root))
-
-
 def for_output(source, size, software):
-    for entries in (source.primary, source.capture, source.gps or {}, source.interop or {}):
-        note = entries.get(MAKER_NOTE)
-        if note is not None and not (entries is source.capture and _is_asus_imginfo(source.primary.get(271), note)):
-            raise RetouchingError("OUTPUT_METADATA_UNSUPPORTED",
-                                  "Unrecognized camera MakerNote layout. Keep the original JPEG and report the camera make and model.")
     if 700 in source.primary or 34377 in source.primary:
         raise RetouchingError("OUTPUT_METADATA_UNSUPPORTED",
                               "XMP or Photoshop resources stored inside EXIF are unsupported. Keep the original JPEG.")
     old_software = source.primary.get(SOFTWARE)
     previous = ""
     if old_software is not None:
-        if old_software.kind != 2 or not old_software.value.endswith(b"\0"):
+        if old_software.kind not in (2, 129) or not old_software.value.endswith(b"\0"):
             raise ValueError("Invalid EXIF Software field")
-        previous = old_software.value.rstrip(b"\0").decode("ascii")
+        previous = old_software.value.rstrip(b"\0").decode("utf-8" if old_software.kind == 129 else "ascii")
         if "\0" in previous:
             raise ValueError("EXIF Software contains an embedded terminator")
 
@@ -199,20 +193,26 @@ def for_output(source, size, software):
         return Entry(kind, 1, struct.pack(source.order + ("H" if kind == 3 else "I"), value))
 
     width, height = size
-    primary = {tag: entry for tag, entry in source.primary.items() if tag not in TIFF_LAYOUT_TAGS}
+    primary = {tag: entry for tag, entry in source.primary.items() if tag in PRIMARY_CAPTURE_TAGS}
     primary.update({256: number(4, width), 257: number(4, height),
                     ORIENTATION: number(3, 1), SOFTWARE: ascii_entry(software)})
     if source.orientation >= 5 and 282 in primary and 283 in primary:
         primary[282], primary[283] = primary[283], primary[282]
-    capture = {tag: entry for tag, entry in source.capture.items() if tag not in (37122, 42240)}
+    capture_tags = EXIF_CAPTURE_TAGS
+    version = source.capture.get(0x9000)
+    if (version and version.kind == 7 and version.count == 4
+            and version.value.isdigit() and version.value >= b"0310"):
+        capture_tags = capture_tags | EXIF_31_CAPTURE_TAGS
+    capture = {tag: entry for tag, entry in source.capture.items() if tag in capture_tags}
     capture.update({COLOR_SPACE: number(3, 1), PIXEL_X: number(4, width), PIXEL_Y: number(4, height),
                     37121: Entry(7, 4, b"\x01\x02\x03\x00")})  # JPEG Y, Cb, Cr
     # Related image fields refer to a previous representation. R98 denotes sRGB.
     interop = None if source.interop is None else {
-        **{tag: entry for tag, entry in source.interop.items() if tag not in (4096, 4097, 4098)},
+        **{tag: entry for tag, entry in source.interop.items() if tag == 2},  # InteroperabilityVersion
         1: ascii_entry("R98"),
     }
-    return Exif(source.order, primary, capture, source.gps, interop), previous
+    gps = {tag: entry for tag, entry in (source.gps or {}).items() if 0 <= tag <= 31}
+    return Exif(source.order, primary, capture, gps or None, interop), previous
 
 
 def ascii_entry(value):

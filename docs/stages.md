@@ -432,8 +432,10 @@ do not embed face coordinates, dense masks, or machine-local paths by default.
 
 The adapter checks capture tags and provenance by reopening the temporary export.
 It removes the old EXIF and XMP thumbnails and carries standard XMP and Photoshop
-IPTC-IIM. Source files without EXIF remain valid inputs. Malformed capture EXIF
-and proprietary MakerNotes with unverified offsets have explicit failure paths.
+IPTC-IIM. Exports retain standard fields from the image, capture, GPS and
+interoperability directories and omit all MakerNotes and other private EXIF tags.
+Source files without EXIF remain valid inputs. Malformed capture EXIF produces
+an explicit error.
 See [JPEG metadata policy](decisions/0003-jpeg-boundary.md).
 
 ## Validation priorities
