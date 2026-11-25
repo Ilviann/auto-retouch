@@ -1,4 +1,4 @@
-"""Photometric, masking and lifecycle checks for the CPU skin shine operation."""
+"""Photometric, masking and lifecycle checks for the skin shine operation."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -86,3 +86,27 @@ class SkinShineTests(unittest.TestCase):
             with self.assertRaises(RetouchingError) as error:
                 self.process(invalid)
             self.assertEqual(error.exception.code, "CONTEXT_REQUIRED")
+
+    def test_staged_pass_reuses_session_until_radius_changes_and_then_releases_it(self):
+        from retouching_tool.operations import skin_shine
+
+        stage = StageDefinition("shine", DESCRIPTOR.operation, 1, True)
+        runtime = StageRuntime(self.log, "cuda", Path("models"), "job", stage)
+        selected = []
+        cpu_session = skin_shine.open_session
+
+        def simulate_cuda(graph, backend):
+            selected.append(backend)
+            return cpu_session(graph, "cpu")
+
+        with (patch.object(skin_shine, "open_session", side_effect=simulate_cuda),
+              StageSession(self.registry, ModelCatalog(), runtime) as session):
+            operation = session.operation
+            for size in (40, 60, 360):
+                pixels = np.full((size, size, 3), [.36, .21, .13], np.float32)
+                pixels[18:21, 18:21] += .2
+                image = self.image(pixels, np.ones((1, 1), np.uint8))
+                edited = session.process(image, image_id="photo")
+                self.assertLess(edited.pixels[19, 19, 0], image.pixels[19, 19, 0])
+        self.assertEqual(selected, ["cuda", "cuda"])
+        self.assertIsNone(operation.session)

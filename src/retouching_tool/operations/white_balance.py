@@ -3,6 +3,8 @@
 from ..errors import RetouchingError
 from ..pipeline.definition import ChoiceParameter, OperationDescriptor, Parameter
 from ..pipeline.image_state import ImageState
+from .color_curves import apply_curve, white_balance_graph
+from .onnx_session import open_session
 
 
 DESCRIPTOR = OperationDescriptor(
@@ -13,6 +15,7 @@ DESCRIPTOR = OperationDescriptor(
         Parameter("blue_stops", "Fixed blue adjustment (stops)", 0, -2, 2, preview_on_change=True, active_choice=("mode", "Fixed")),
     ),
     changes_pixels=True, neutral_picker=True,
+    inference_runtime="onnxruntime", backends=("cpu", "directml", "cuda"),
 )
 
 
@@ -59,12 +62,13 @@ def _estimate(state):
 class WhiteBalance:
     def __init__(self, stage):
         self.stage = stage
+        self.session = None
 
     def prepare(self, runtime):
         self.runtime = runtime
 
     def release(self):
-        self.runtime = None
+        self.runtime = self.session = None
 
     def process(self, state):
         import numpy as np
@@ -84,14 +88,19 @@ class WhiteBalance:
         gains = np.exp2(np.array([stops[0], 0, stops[1]], dtype=np.float32))
         # Keep a sampled neutral's linear luminance when equalizing its channels.
         gains *= np.dot(np.array([.2126, .7152, .0722], dtype=np.float32), 1 / gains)
-        pixels = np.empty_like(state.pixels)
-        for start in range(0, state.height, 64):
-            source = state.pixels[start:start + 64]
-            corrected = source * gains
-            # Roll off the correction near white, limiting the change before any channel clips.
-            peak = source.max(axis=2, keepdims=True)
-            weight = np.minimum(1, (1 - peak) / np.maximum(.15, (corrected - source).max(axis=2, keepdims=True)))
-            np.clip(source + weight * (corrected - source), 0, 1, out=pixels[start:start + 64])
+        if mode == "Fixed":
+            if self.session is None:
+                self.session = open_session(white_balance_graph(), self.runtime.backend)
+            pixels = apply_curve(self.session, state.pixels, gains)
+        else:
+            pixels = np.empty_like(state.pixels)
+            for start in range(0, state.height, 64):
+                source = state.pixels[start:start + 64]
+                corrected = source * gains
+                # Roll off the correction near white, limiting the change before any channel clips.
+                peak = source.max(axis=2, keepdims=True)
+                weight = np.minimum(1, (1 - peak) / np.maximum(.15, (corrected - source).max(axis=2, keepdims=True)))
+                np.clip(source + weight * (corrected - source), 0, 1, out=pixels[start:start + 64])
         self.runtime.emit("WHITE_BALANCE_APPLIED", "Applied the global white balance.", mode=mode,
                           red_stops=float(stops[0]), blue_stops=float(stops[1]))
         return ImageState.from_pixels(pixels, state.metadata, pixel_revision=state.pixel_revision + 1,

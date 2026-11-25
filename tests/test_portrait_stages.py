@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -40,6 +40,7 @@ class PortraitStageTests(unittest.TestCase):
             return session.process(state, image_id="photo")
 
     def test_automatic_cast_and_ambiguous_color(self):
+        opener = self.enterContext(patch.object(balance, "open_session"))
         ramp = np.repeat(np.linspace(.05, .65, 60)[:, None, None], 80, axis=1)
         for cast in ((1.18, 1, .92), (.92, 1, 1.18), (1, 1.12, 1)):
             state = self.state(ramp * cast)
@@ -56,6 +57,7 @@ class PortraitStageTests(unittest.TestCase):
             event = next(call for call in reversed(self.log.emit.call_args_list)
                          if call.args[0] == "WHITE_BALANCE_UNCERTAIN")
             self.assertEqual((event.kwargs["image_id"], event.kwargs["level"]), ("photo", "WARNING"))
+        opener.assert_not_called()
 
     def test_sampled_patch_reused_on_a_different_background_and_highlight_protection(self):
         pixels = np.full((25, 25, 3), [.6, .05, .09])
@@ -74,6 +76,23 @@ class PortraitStageTests(unittest.TestCase):
         for sample in (np.ones((3, 3, 3)), np.zeros((3, 3, 3))):
             with self.assertRaisesRegex(RetouchingError, "neutral patch"):
                 balance.sample_neutral(self.state(sample), 0, 0)
+
+    def test_fixed_session_reused_across_chunk_boundaries_and_different_sizes(self):
+        stage = StageDefinition("wb", balance.DESCRIPTOR.operation, 1, True,
+                                (("mode", "Fixed"), ("red_stops", .25), ("blue_stops", -.2)))
+        runtime = StageRuntime(self.log, "cpu", ROOT / "models", "job", stage)
+        with (patch("retouching_tool.operations.color_curves.CHUNK_PIXELS", 7),
+              patch.object(balance, "open_session", wraps=balance.open_session) as opener,
+              StageSession(self.registry, ModelCatalog(), runtime) as session):
+            operation = session.operation
+            for width in (3, 11):
+                state = self.state(np.full((2, width, 3), [.35, .24, .16]))
+                result = session.process(state, image_id="photo")
+                self.assertGreater(result.pixels[0, 0, 0], state.pixels[0, 0, 0])
+                np.testing.assert_array_equal(result.pixels, np.broadcast_to(result.pixels[0, 0], state.pixels.shape))
+        opener.assert_called_once()
+        self.assertEqual(opener.call_args.args[1], "cpu")
+        self.assertIsNone(operation.session)
 
     def test_detection_maps_suppresses_duplicates_ignores_padding_and_round_trips(self):
         stage = StageDefinition("det", detector.DESCRIPTOR.operation, 1, True,

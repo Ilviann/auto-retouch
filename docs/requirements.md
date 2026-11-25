@@ -84,11 +84,12 @@ presets rather than fixed processing paths.
 | U72 | Ask for confirmation before closing the application. Declining keeps the workspace and any running batch open. |
 | U73 | Provide separate **Skin tone smoothing (Alibaba)** and **Blemish cleanup (Alibaba)** stages. Omit the combined stage from the operation list and ignore its entries when loading pipeline JSON. |
 | U74 | Keep each stage's named output for the current photo until the pipeline ends or a later enabled stage writes the same key. Multiple later stages can read the same output across pixel edits. Spatial data must match the photo and its coordinate frame. |
-| U75 | Provide CPU-based Skin shine reduction using the existing exposed-skin mask, with adjustable strength and a preview of the affected areas. |
+| U75 | Provide Skin shine reduction using the existing exposed-skin mask, with adjustable strength and a preview of the affected areas. Run its reflection estimate on the setup-selected ONNX Runtime backend, including CPU. |
 | U76 | Offer **Show affected pixels** and **Pixel difference** in both stage previews for every operation that changes pixels. Show the selected stage's edits after blending as a highlight or as the absolute difference per RGB channel. |
 | U77 | Provide **Protect facial features** for eyes, eyebrows and lips and connect its protection mask to **Skin shine reduction**. |
 | U78 | Both Alibaba retouching stages run on the PyTorch device selected in setup, CPU or CUDA. Each new neural stage supports every compatible backend offered for its inference runtime. |
 | U79 | Provide separate High Pass and Low Pass filter stages using the ONNX Runtime backend selected during setup. |
+| U80 | Run the Auto exposure tone curve and Fixed white balance correction on the ONNX Runtime backend selected during setup. Keep Automatic white balance on the CPU. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 

@@ -25,7 +25,7 @@ class AutoExposureTests(unittest.TestCase):
 
     def process(self, state, descriptor=DESCRIPTOR, **parameters):
         stage = StageDefinition("test-stage", descriptor.operation, descriptor.version, True, tuple(parameters.items()))
-        runtime = StageRuntime(self.log, "directml", Path("models"), "test-job", stage)
+        runtime = StageRuntime(self.log, "cpu", Path("models"), "test-job", stage)
         with StageSession(self.registry, ModelCatalog(), runtime) as session:
             return session.process(state, image_id="test-photo")
 
@@ -89,3 +89,17 @@ class AutoExposureTests(unittest.TestCase):
         failed = self.event("STAGE_PROCESS_FAILED")
         self.assertTrue(failed["exc_info"])
         self.assertEqual((failed["image_id"], failed["operation"]), ("test-photo", DESCRIPTOR.operation))
+
+    def test_cuda_request_failure_is_reported_without_a_cpu_retry(self):
+        stage = StageDefinition("exposure", DESCRIPTOR.operation, 1, True)
+        runtime = StageRuntime(self.log, "cuda", Path("models"), "job", stage)
+        state = ImageState.from_pixels(np.full((3, 7, 3), .06, np.float32), self.metadata)
+        with (patch("retouching_tool.operations.auto_exposure.open_session",
+                    side_effect=RuntimeError("simulated unavailable device")) as opener,
+              StageSession(self.registry, ModelCatalog(), runtime) as session):
+            with self.assertRaisesRegex(RuntimeError, "simulated unavailable device"):
+                session.process(state, image_id="photo")
+        opener.assert_called_once()
+        self.assertEqual(opener.call_args.args[1], "cuda")
+        failed = self.event("STAGE_PROCESS_FAILED")
+        self.assertEqual((failed["backend"], failed["image_id"], failed["exc_info"]), ("cuda", "photo", True))

@@ -290,7 +290,7 @@ class ExposedSkinTests(unittest.TestCase):
             job = jobs.create(index, destination, mode=mode)
             finished = jobs.run(job)
             self.assertEqual(finished.status, "completed")
-            self.assertTrue(any(r["code"] == "SKIN_SHINE_APPLIED" and r["job_id"] == job and r["backend"] == "cpu"
+            self.assertTrue(any(r["code"] == "SKIN_SHINE_APPLIED" and r["job_id"] == job and r["backend"] == "directml"
                                 for r in self.log.records))
             with Image.open(finished.images[0].output) as image:
                 exports.append(image.tobytes())

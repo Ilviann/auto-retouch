@@ -1,8 +1,10 @@
 """Attenuate localized near-neutral reflections on exposed skin in linear light."""
 
-from ..imaging.skin_matte import full_skin_matte, neighborhood_sums
+from ..imaging.skin_matte import full_skin_matte
 from ..pipeline.definition import BooleanParameter, OperationDescriptor, Parameter
 from ..pipeline.image_state import EXPOSED_SKIN, FACIAL_FEATURES, ImageState
+from .onnx_session import open_session
+from .shine_graph import reflection_graph
 
 
 DESCRIPTOR = OperationDescriptor(
@@ -11,51 +13,31 @@ DESCRIPTOR = OperationDescriptor(
                 BooleanParameter("protect_features", "Use facial feature protection when available", True,
                                  FACIAL_FEATURES.key, preview_on_change=True)),
     requires=(EXPOSED_SKIN,), optional=(FACIAL_FEATURES,), changes_pixels=True,
-    backends=("cpu",), inference_runtime="cpu",
+    backends=("cpu", "directml", "cuda"), inference_runtime="onnxruntime",
 )
 TILE_SIZE = 256
-
-
-def _reflection(rgb, coverage, rows, cols, radius):
-    """Estimate an additive neutral component, bounded by two local measurements."""
-    import numpy as np
-
-    luma = rgb @ np.array([.2126, .7152, .0722], dtype=np.float32)
-    peak = rgb.max(axis=2)
-    span = peak - rgb.min(axis=2)
-    # Use well-covered, unclipped skin to estimate diffuse luminance and color.
-    weight = np.clip((coverage.astype(np.float32) - 192) / 63, 0, 1)
-    weight *= np.clip((.98 - peak) / .10, 0, 1)
-    h, w = luma.shape
-    integral = np.zeros((h + 1, w + 1, 3), dtype=np.float64)
-    integral[1:, 1:, 0] = weight
-    integral[1:, 1:, 1] = weight * luma
-    integral[1:, 1:, 2] = weight * span
-    mass, sum_luma, sum_span = neighborhood_sums(integral, rows, cols, radius).transpose(2, 0, 1)
-    reference = sum_luma / np.maximum(mass, 1e-8)
-    chroma = sum_span / np.maximum(sum_luma, 1e-8)
-    light = luma[rows, cols]
-    # Adding neutral light increases luminance while preserving the RGB channel span.
-    # A brighter patch of the same chromaticity therefore yields zero color evidence.
-    brightness_excess = light - reference * 1.08 - .008
-    neutral_excess = light * .92 - span[rows, cols] / np.maximum(chroma, 1e-8)
-    reflection = np.maximum(0, np.minimum(brightness_excess, neutral_excess))
-    reflection = np.minimum(reflection, .30 * light)
-    confidence = np.clip((mass - 4) / 12, 0, 1) * np.clip((chroma - .08) / .16, 0, 1)
-    confidence *= np.clip((1 - peak[rows, cols]) / .04, 0, 1)
-    return (reflection * confidence * (coverage[rows, cols] / 255)).astype(np.float32)
 
 
 class SkinShineReduction:
     def __init__(self, stage):
         self.strength = stage.parameter("strength")
         self.protect_features = stage.parameter("protect_features")
+        self.session = None
+        self.radius = None
 
     def prepare(self, runtime):
         self.runtime = runtime
 
     def release(self):
-        self.runtime = None
+        self.runtime = self.session = self.radius = None
+
+    def _session_for_radius(self, radius):
+        if self.radius != radius:
+            # A staged pass can encounter different photo sizes. Keep only the active graph.
+            self.session = self.radius = None
+            self.session = open_session(reflection_graph(TILE_SIZE, radius), self.runtime.backend)
+            self.radius = radius
+        return self.session
 
     def process(self, state):
         import numpy as np
@@ -72,6 +54,7 @@ class SkinShineReduction:
         entry = state.entry(FACIAL_FEATURES.key) if self.protect_features else None
         matte = full_skin_matte(mask, (state.width, state.height), entry.value if entry else None)
         radius = max(8, min(96, round(min(state.width, state.height) * .025)))
+        rgb_tile = mask_tile = None
         output = None
         changed = 0
         for y in range(0, state.height, TILE_SIZE):
@@ -84,8 +67,22 @@ class SkinShineReduction:
                 halo = (slice(top, bottom + radius), slice(left, right + radius))
                 selection = (slice(y, bottom), slice(x, right))
                 source = state.pixels[selection]
-                reflection = _reflection(state.pixels[halo], matte[halo], slice(y - top, bottom - top),
-                                         slice(x - left, right - left), radius)
+                if rgb_tile is None:
+                    session = self._session_for_radius(radius)
+                    side = TILE_SIZE + 2 * radius
+                    rgb_tile = np.empty((1, 3, side, side), dtype=np.float32)
+                    mask_tile = np.empty((1, 1, side, side), dtype=np.float32)
+                # Zero mask coverage outside the true image gives clipped box neighborhoods.
+                rgb_tile.fill(0)
+                mask_tile.fill(0)
+                coverage = matte[halo]
+                dy, dx = top - y + radius, left - x + radius
+                tile_rows = slice(dy, dy + coverage.shape[0])
+                tile_cols = slice(dx, dx + coverage.shape[1])
+                rgb_tile[0, :, tile_rows, tile_cols] = state.pixels[halo].transpose(2, 0, 1)
+                mask_tile[0, 0, tile_rows, tile_cols] = coverage
+                result, = session.run(None, {"rgb": rgb_tile, "mask": mask_tile})
+                reflection = result[0, 0, :bottom - y, :right - x]
                 # Cap neutral subtraction at the available room in the darkest channel.
                 correction = self.strength * np.minimum(reflection, source.min(axis=2))
                 edited = source - correction[:, :, None]

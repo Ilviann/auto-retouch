@@ -4,6 +4,8 @@ import math
 
 from ..pipeline.definition import OperationDescriptor, Parameter
 from ..pipeline.image_state import ImageState
+from .color_curves import apply_curve, exposure_graph
+from .onnx_session import open_session
 
 
 DESCRIPTOR = OperationDescriptor(
@@ -13,6 +15,7 @@ DESCRIPTOR = OperationDescriptor(
         Parameter("max_stops", "Maximum correction (stops)", 1.0, 0, 2, preview_on_change=True),
     ),
     changes_pixels=True,
+    inference_runtime="onnxruntime", backends=("cpu", "directml", "cuda"),
 )
 
 STRIP_ROWS = 64
@@ -43,34 +46,21 @@ def _measure_midtones(state):
     return low + (float(middle_bins.mean()) + 0.5) * (high - low) / HISTOGRAM_BINS, fraction
 
 
-def _apply_tone_curve(state, stops):
-    import numpy as np
-
-    gain = np.float32(2 ** stops)
-    pixels = np.empty_like(state.pixels)
-    for start in range(0, state.height, STRIP_ROWS):
-        strip = state.pixels[start:start + STRIP_ROWS]
-        # Apply a monotone curve to the largest channel, scaling all channels
-        # together. Black and the gamut boundary stay fixed without clipping.
-        peak = strip.max(axis=2)
-        divisor = peak + (1 - peak) / gain
-        np.divide(strip, divisor[:, :, None], out=pixels[start:start + STRIP_ROWS])
-    return ImageState.from_pixels(pixels, state.metadata, pixel_revision=state.pixel_revision + 1,
-                                  geometry_revision=state.geometry_revision)
-
-
 class AutoExposure:
     def __init__(self, stage):
         self.strength = stage.parameter("strength")
         self.max_stops = stage.parameter("max_stops")
+        self.session = None
 
     def prepare(self, runtime):
         self.runtime = runtime
 
     def release(self):
-        self.runtime = None
+        self.runtime = self.session = None
 
     def process(self, state):
+        import numpy as np
+
         if self.strength == 0 or self.max_stops == 0:
             self.runtime.emit("AUTO_EXPOSURE_UNCHANGED", "Strength or maximum correction is zero.")
             return state
@@ -93,7 +83,11 @@ class AutoExposure:
         # target at full strength for neutral pixels, with smooth toe and shoulder.
         requested = math.log2((target / (1 - target)) / (median / (1 - median)))
         stops = self.strength * max(-self.max_stops, min(self.max_stops, requested))
-        result = _apply_tone_curve(state, stops)
+        if self.session is None:
+            self.session = open_session(exposure_graph(), self.runtime.backend)
+        pixels = apply_curve(self.session, state.pixels, np.asarray([2 ** stops], dtype=np.float32))
+        result = ImageState.from_pixels(pixels, state.metadata, pixel_revision=state.pixel_revision + 1,
+                                        geometry_revision=state.geometry_revision)
         self.runtime.emit("AUTO_EXPOSURE_APPLIED", "Applied a bounded exposure and tone correction.",
                           median_luminance=median, usable_fraction=fraction,
                           requested_stops=requested, applied_stops=stops)

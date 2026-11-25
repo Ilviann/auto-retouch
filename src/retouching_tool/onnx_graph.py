@@ -27,11 +27,14 @@ def float_value(name, dimensions):
     return message(1, name) + message(2, message(1, tensor_type))
 
 
-def node(op, inputs, output, *, group=None):
+def node(op, inputs, output, **attributes):
     data = b"".join(message(1, name) for name in inputs) + message(2, output) + message(4, op)
-    if group is not None:
-        # AttributeProto: name, integer value and type INT.
-        data += message(5, message(1, "group") + number(3, group) + number(20, 2))
+    for name, value in attributes.items():
+        if isinstance(value, int):
+            attribute = number(3, value) + number(20, 2)  # INT
+        else:
+            attribute = b"".join(number(8, item) for item in value) + number(20, 7)  # INTS
+        data += message(5, message(1, name) + attribute)
     return data
 
 
@@ -54,3 +57,31 @@ def model(name, nodes, inputs, outputs, initializers=()):
     graph += b"".join(message(11, value) for value in inputs) + b"".join(message(12, value) for value in outputs)
     # ModelProto: IR version 8, producer, graph, default-domain opset 13.
     return number(1, 8) + message(2, "Auto ReTouch") + message(7, graph) + message(8, number(2, 13))
+
+
+class FloatGraph:
+    """Build float operations with scalar constants and static slice indices."""
+
+    def __init__(self):
+        self.nodes = []
+        self.constants = {}
+
+    def _constant(self, value):
+        if value not in self.constants:
+            name = f"c{len(self.constants)}"
+            self.constants[value] = (name, initializer(name, value))
+        return self.constants[value][0]
+
+    def op(self, kind, *inputs, **attributes):
+        inputs = [v if isinstance(v, str) else self._constant(float(v)) for v in inputs]
+        output = f"v{len(self.nodes)}"
+        self.nodes.append(node(kind, inputs, output, **attributes))
+        return output
+
+    def slice(self, source, starts, ends, axes):
+        indices = [self._constant(tuple(items)) for items in (starts, ends, axes)]
+        return self.op("Slice", source, *indices)
+
+    def encode(self, name, inputs, output, shape):
+        return model(name, self.nodes, [float_value(k, v) for k, v in inputs.items()],
+                     [float_value(output, shape)], [tensor for _, tensor in self.constants.values()])

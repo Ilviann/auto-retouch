@@ -33,15 +33,16 @@ It represents pooled person foreground. Exposed-skin classification and person
 instances require further operations. See the
 [checkpoint decision](decisions/0004-first-ai-checkpoint.md).
 
-**Auto exposure and tone** (`core.auto_exposure` version 1) is a CPU operation
-that measures the median of usable linear-sRGB luminance samples. It considers
+**Auto exposure and tone** (`core.auto_exposure` version 1) measures the median
+of usable linear-sRGB luminance samples on the CPU. It considers
 samples in the range 0.025–0.85 and leaves the pixels as they were if fewer than
 5% fall in that range or the measured median is already within 0.14–0.30. For
 medians outside that band it estimates a shift toward the nearest end of the
 band, limits it by **Maximum correction (stops)** (0–2, default 1), and scales
 it by **Strength** (0–1, default 0.5). Both settings support live preview.
 
-The stage applies a monotone curve in linear light, using a common multiplier
+When correction is needed, the stage applies a monotone curve in linear light
+on the setup-selected ONNX Runtime backend (CPU, DirectML or CUDA), using a common multiplier
 for the three channels to preserve channel ratios. The curve fixes black and
 pixels with a maximum channel of 1 and rolls into highlights without hard
 clipping. It keeps the original metadata, dimensions, and geometry revision.
@@ -72,8 +73,8 @@ CUDA hardware verification is pending. [Verification](verification/frequency-fil
 
 ## White balance and color cast
 
-`core.white_balance` v1 operates on full-resolution linear-sRGB pixels using the
-CPU. Place it before exposure and analysis. **Automatic** estimates red and blue
+`core.white_balance` v1 operates on full-resolution linear-sRGB pixels.
+Place it before exposure and analysis. **Automatic** runs on the CPU and estimates red and blue
 gains relative to green from a grid of up to 192 × 192 samples. It needs
 consistent near-neutral pixels in at least two brightness bands. An inconclusive
 estimate leaves pixels unchanged and shows a warning in the stage preview.
@@ -86,7 +87,7 @@ linear stage input, including when zoomed or previewing after upstream stages.
 Clipped, very dark, or excessively saturated samples can be rejected.
 Sampling selects **Fixed** and sets red and blue adjustments in stops relative
 to green. Saving the draft stores these values in the pipeline. Subsequent
-photos use the same gains regardless of composition. **Blending** sets the
+photos apply the same gains on the setup-selected ONNX Runtime backend regardless of composition. **Blending** sets the
 strength. Both modes retain the neutral reference's luminance at midtones and
 roll off the correction at highlights. Numeric defaults remain provisional.
 
@@ -119,14 +120,14 @@ stage supplied face regions, Alibaba uses the whole image.
 | Operation | Outputs | Main controls and dependencies |
 | --- | --- | --- |
 | Image statistics | Context: histogram/luminance statistics and clipping warnings; pixels unchanged | Analysis scope and thresholds. Measurements identify the pixel revision they describe. Useful as an initial CPU reference stage and diagnostic overlay. |
-| White balance and color-cast correction | Corrected pixels | Implemented automatic and fixed CPU correction, neutral picker and blending. |
+| White balance and color-cast correction | Corrected pixels | Automatic CPU correction, fixed ONNX Runtime correction, neutral picker and blending. |
 | Auto exposure and tone | Corrected pixels and correction diagnostics | Implemented baseline with strength, stop limit, and highlight protection. It measures the current pixels directly. |
 | Person and exposed-skin analysis | Whole-frame person foreground and exposed face/body skin grids | Implemented as independent stages. Instance association, overlapping-person quality and representative skin-tone coverage await evaluation. |
 | Portrait detection | Context: oriented face boxes; pixels unchanged | YuNet face boxes and minimum confidence implemented. Landmark output and person association remain proposals. |
 | Face-region parsing | Context: precise skin, lips, eyes, and teeth masks where supported; pixels unchanged | Per-region confidence, edge treatment, and analysis resolution. Requires faces or a declared self-contained detection implementation. Teeth must have a validated teeth mask; a mouth box is insufficient. |
 | Blemish cleanup | Local pixel edits within valid skin regions; optional candidate/debug context | Strength, maximum spot size, protected regions, and model-specific controls. Optional and quality-gated: distinguishing temporary blemishes from permanent features is uncertain. |
 | Local skin tone evening | Local color edits within the current exposed-skin mask | Implemented native-resolution CPU correction with strength, neighborhood radius and a per-pixel color shift limit. [Stage details](#local-skin-tone-evening). |
-| Skin shine reduction | Local highlight edits within the current exposed-skin mask | Adjustable CPU correction with a preview of the affected pixels. [Stage details](#skin-shine-reduction). |
+| Skin shine reduction | Local highlight edits within the current exposed-skin mask | Adjustable correction using the prepared ONNX Runtime backend, with a preview of affected pixels. [Stage details](#skin-shine-reduction). |
 | Skin texture correction | Skin-local pixel edits | Strength, detail preservation, and blending. Uses valid skin masks and protects eyes, lips, hair, and facial features. Conventional baseline or validated neural adapter; do not equate face restoration with retouching. |
 | Teeth whitening | Pixel edits confined to a valid teeth mask | Strength, yellow reduction, brightness limit, and edge feathering. Preserve shading and tooth detail. Optional and disabled by default until visual review. |
 
@@ -249,7 +250,9 @@ skin is eligible, so missed face detections do not authorize edits to the
 face-skin label. With the option off or the protection stage absent, shine
 reduction uses the original exposed-skin matte.
 
-The CPU operation works at the original resolution on both face and body skin.
+The operation estimates reflections on the setup-selected ONNX Runtime backend at
+the original resolution on both face and body skin. It builds the graph locally
+and reuses it across photos with the same neighborhood radius.
 It looks for patches that are brighter and less colorful than nearby skin, as
 expected when neutral studio light reflects off the surface. It estimates how
 much neutral light to subtract from the linear RGB channels, capped at 30% of
