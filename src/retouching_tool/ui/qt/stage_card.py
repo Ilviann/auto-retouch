@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import SCALING_METHODS
-from ...pipeline.definition import BLEND, BooleanParameter, ChoiceParameter, IntegerParameter, MaskTargetParameter, Parameter, ScalingParameter
+from ...pipeline.definition import BLEND, BLEND_MODE, BooleanParameter, ChoiceParameter, IntegerParameter, MaskTargetParameter, Parameter, ScalingParameter
 from ...pipeline.image_state import EXPOSED_SKIN, FACE_REGIONS, FACIAL_FEATURES, PERSON_FOREGROUND
 
 
@@ -54,7 +54,7 @@ class BlendControl(QWidget):
         self.slider.setAccessibleName("Blending")
         self.slider.setRange(0, 100)
         self.slider.setTracking(False)
-        self.slider.setToolTip("0.00 keeps the stage input. 1.00 uses the full stage result.")
+        self.slider.setToolTip("0.00 keeps the stage input. 1.00 applies the selected blend mode at full strength.")
         self.setFocusProxy(self.slider)
         self.readout = QLabel()
         self.readout.setMinimumWidth(self.fontMetrics().horizontalAdvance("0.00"))
@@ -92,7 +92,7 @@ def parameter_control(parameter):
     if isinstance(parameter, ChoiceParameter):
         control = ChoiceControl(objectName=f"parameter-{parameter.name}")
         for value in parameter.choices:
-            control.addItem(value, value)
+            control.addItem(value.title() if parameter == BLEND_MODE else value, value)
         return control
     control = QDoubleSpinBox(objectName=f"parameter-{parameter.name}")
     control.setDecimals(4)

@@ -22,7 +22,7 @@ from retouching_tool.errors import RetouchingError
 from retouching_tool.json_io import atomic_json, read_json
 from retouching_tool.operations.reference import EXPOSURE, LUMINANCE, Exposure, ReferenceOperation, Statistics
 from retouching_tool.pipeline.assets import ModelCatalog, ModelFile, ModelManifest
-from retouching_tool.pipeline.definition import ContextSpec, OperationDescriptor, Parameter, parse_pipeline
+from retouching_tool.pipeline.definition import BLEND_MODE, ContextSpec, OperationDescriptor, Parameter, parse_pipeline
 from retouching_tool.pipeline.executor import StageRuntime, StageSession
 from retouching_tool.pipeline.image_state import ContextEntry, ImageState, SourceMetadata
 from retouching_tool.pipeline.registry import reference_registry
@@ -315,6 +315,45 @@ class PipelineTests(unittest.TestCase):
                 self.editor.set_parameter("exposure", "blend", value)
         with self.assertRaisesRegex(RetouchingError, "unknown parameters"):
             self.editor.load_data(pipeline(stage(parameters={"blend": .25})))
+
+    def test_blend_modes_apply_per_channel_at_opacity_only_to_edited_pixels(self):
+        class LocalEdit(ReferenceOperation):
+            def process(self, state):
+                pixels = state.pixels.copy()
+                pixels[0, 0] = [.75, .25, .5]
+                return ImageState.from_pixels(pixels, state.metadata, pixel_revision=state.pixel_revision + 1)
+
+        self.register(OperationDescriptor("test.local_edit", 1, "Local edit", changes_pixels=True), LocalEdit)
+        state = ImageState.from_pixels(np.array([[[.25, .75, .5], [.3, .2, .8]]], dtype=np.float32),
+                                       self.state.metadata)
+        targets = {"normal": [.75, .25, .5], "darken": [.25, .25, .5], "multiply": [.1875, .1875, .25],
+                   "lighten": [.75, .75, .5], "screen": [.8125, .8125, .75], "overlay": [.375, .625, .5],
+                   "difference": [.5, .5, 0]}
+        self.assertEqual(set(targets), set(BLEND_MODE.choices))
+        for mode, target in targets.items():
+            for amount in (0, .25, 1):
+                with self.subTest(mode=mode, amount=amount):
+                    raw = stage("edit", "test.local_edit", parameters={"blend_mode": mode, "blend": amount})
+                    result = self.run_stage(raw, state)
+                    np.testing.assert_array_equal(result.pixels[0, 0],
+                                                  (1 - amount) * state.pixels[0, 0] + amount * np.array(target))
+                    np.testing.assert_array_equal(result.pixels[0, 1], state.pixels[0, 1])
+                    self.assertFalse(result.pixels.flags.writeable)
+
+    def test_blend_mode_round_trip_validation_and_legacy_identity(self):
+        raw = stage("edit", "core.exposure", parameters={"stops": 1, "blend": .75})
+        old = self.editor.load_data(pipeline(raw)).definition.stages[0]
+        normal = self.editor.set_parameter("edit", "blend_mode", "normal").definition
+        self.assertEqual(normal.to_json()["stages"][0], raw)
+        self.assertEqual(normal.stages[0].identity, old.identity)
+        screen = self.editor.set_parameter("edit", "blend_mode", "screen").definition
+        self.assertNotEqual(screen.stages[0].identity, old.identity)
+        self.assertEqual(parse_pipeline(screen.to_json(), self.registry), screen)
+        with self.assertRaisesRegex(RetouchingError, "Blend mode"):
+            self.editor.set_parameter("edit", "blend_mode", "invalid")
+        self.assertEqual(self.editor.status.definition, screen)
+        with self.assertRaisesRegex(RetouchingError, "unknown parameters"):
+            self.editor.load_data(pipeline(stage(parameters={"blend_mode": "screen"})))
 
     def test_spatial_preservation_and_geometry_invalidation_at_runtime(self):
         spatial = ContextSpec("test.spatial", pixel_sensitive=False)

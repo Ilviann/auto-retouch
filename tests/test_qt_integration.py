@@ -75,6 +75,8 @@ class QtIntegrationTests(unittest.TestCase):
                 try:
                     modes = dialog.preview_mode
                     self.assertEqual(modes.isVisible(), descriptor.changes_pixels)
+                    blend_mode = dialog.findChild(QComboBox, "parameter-blend_mode")
+                    self.assertEqual(blend_mode is not None, descriptor.changes_pixels)
                     self.assertEqual(modes.currentText(), "Stage result")
                     self.assertEqual([modes.itemText(i) for i in range(modes.count())],
                                      ["Stage result", "Show affected pixels", "Pixel difference"])

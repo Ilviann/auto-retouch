@@ -168,14 +168,22 @@ pixels and declared context inputs. Optional inputs carry a dashed border and
 an explicit label. **Out** lists edited pixels and produced context. The tooltip
 on **Out** describes context preservation and invalidation.
 
-Pixel stages expose a shared `blend` parameter. At 0.0 they return the stage
-input pixels, at 1.0 they return the algorithm output, and intermediate values
-interpolate in the working linear-sRGB representation. The slider steps by 0.01.
-Both previews and batch schedules use the same calculation. Full blending is
-the default and is implicit in pipeline JSON to preserve older checkpoint identities.
-Stage-specific strength controls apply before blending. Partial blends require
-aligned pixel grids and valid context for the mixed image. The current pixel
-operations preserve geometry and produce no pixel-dependent measurements.
+Pixel stages expose **Blend mode** (`blend_mode`) and **Blending** (`blend`).
+Normal uses the finished stage output. Darken and Lighten take the lower and
+higher value of each RGB channel, respectively. Multiply multiplies the two
+values. Screen multiplies their complements and takes the complement of the
+result. Overlay uses the stage input to choose its dark or light branch.
+Difference uses the absolute difference per channel.
+
+The mode applies wherever the stage changed at least one RGB channel. Pixels
+the stage left untouched keep their input values, including outside a local
+retouch. The slider sets opacity in steps of 0.01. Zero keeps the stage input,
+one applies the selected mode fully, and intermediate values interpolate
+between them in linear sRGB. Stage-specific strength applies first.
+Previews and both batch schedules share this calculation. Pipelines store
+nondefault modes as lowercase names. Normal and full opacity are implicit
+defaults that preserve older presets and checkpoint identities. Mixing requires
+aligned pixel grids and valid context for the mixed image.
 
 Every editable stage has an on/off control. Off stages retain their order and
 parameters and pass incoming image/context through without executing or producing

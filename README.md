@@ -132,8 +132,9 @@ whole photo again.
 On a stage card, **Preview** compares the
 source with the stage result. **Preview in pipeline** includes earlier enabled
 stages in the comparison input. Both stage previews let you adjust and save
-settings. Pixel stages have a **Blending** slider for mixing the stage input
-with its result.
+settings. For pixel stages, choose **Blend mode** and adjust **Blending** to
+set its opacity. **Normal** uses the stage result, **Screen** lightens edited
+pixels, and **Darken** keeps the darker value of each edited RGB channel.
 
 Choose a destination and set the schedule and JPEG options. Disk status updates
 automatically when you select folders, rescan, change the included photos, or

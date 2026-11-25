@@ -84,6 +84,9 @@ class ScalingParameter:
 
 SCALING_PARAMETERS = (ScalingParameter("downscale", "Downscaling"), ScalingParameter("upscale", "Upscaling"))
 BLEND = Parameter("blend", "Blending", 1.0, 0.0, 1.0, preview_on_change=True)
+BLEND_MODE = ChoiceParameter("blend_mode", "Blend mode", "normal",
+                             ("normal", "darken", "multiply", "lighten", "screen", "overlay", "difference"),
+                             preview_on_change=True)
 
 
 @dataclass(frozen=True)
@@ -129,7 +132,7 @@ class OperationDescriptor:
 
     @property
     def editable_parameters(self):
-        return (*self.parameters, BLEND) if self.changes_pixels else self.parameters
+        return (*self.parameters, BLEND_MODE, BLEND) if self.changes_pixels else self.parameters
 
     def active_optional_inputs(self, stage):
         if self.selected_mask(stage) is not None:
@@ -190,7 +193,8 @@ class StageDefinition:
         return {key: value for key, value in self.parameters
                 if not (key in ("downscale", "upscale") and value == "inherit"
                         or key in defaults and type(value) is type(defaults[key]) and value == defaults[key]
-                        or key == BLEND.name and value == BLEND.default)}
+                        or key == BLEND.name and value == BLEND.default
+                        or key == BLEND_MODE.name and value == BLEND_MODE.default)}
 
     @property
     def identity(self):

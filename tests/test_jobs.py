@@ -456,6 +456,7 @@ with fault:
         self.jpeg("sub/b.jpg")
         self.load_staged_reference()
         self.app.pipeline_service.set_parameter("exposure-reference", "blend", .4)
+        self.app.pipeline_service.set_parameter("exposure-reference", "blend_mode", "screen")
         index = self.app.batch_service.index((self.source,), recursive=True)
         alternate = self.root / "staged-output"
         alternate.mkdir()
@@ -465,6 +466,7 @@ with fault:
         process = Exposure.process
 
         def observe_context(operation, state):
+            self.assertEqual(operation.stage.parameter("blend_mode"), "screen")
             self.assertEqual(state.entry("image.luminance").producer_id, "statistics-before")
             return process(operation, state)
 

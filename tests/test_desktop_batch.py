@@ -20,7 +20,7 @@ from PIL import Image, JpegImagePlugin
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import (QApplication, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QLabel,
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QLabel,
                                QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSlider, QToolButton)
 
 from retouching_tool.application.service import ApplicationService
@@ -1434,6 +1434,10 @@ class DesktopBatchTests(unittest.TestCase):
         full_effect = red(cumulative.comparison.after)
         cumulative.findChild(QSlider, "blendSlider").setValue(50)
         self.until(lambda: baseline < red(cumulative.comparison.after) < full_effect, "blended preview did not refresh")
+        mode = cumulative.findChild(QComboBox, "parameter-blend_mode")
+        self.assertEqual(mode.currentText(), "Normal")
+        mode.setCurrentText("Darken")
+        self.until(lambda: red(cumulative.comparison.after) == baseline, "Darken did not refresh")
         self.assertEqual(red(cumulative.comparison.before), baseline)
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Save):
             with patch("retouching_tool.application.state.atomic_json", side_effect=OSError("fixture write failure")):
@@ -1450,7 +1454,8 @@ class DesktopBatchTests(unittest.TestCase):
         self.assertFalse(exposure.toggle.isChecked())
         self.assertEqual(exposure.parameters["stops"].value(), 1)
         payload = editor.state.read()["pipeline"]
-        self.assertEqual(payload["stages"][2]["parameters"], {"stops": 1, "blend": .5})
+        self.assertEqual(payload["stages"][2]["parameters"], {"stops": 1, "blend": .5, "blend_mode": "darken"})
+        self.assertEqual(exposure.parameters["blend_mode"].currentText(), "Darken")
         self.assertEqual(payload["stages"][0]["parameters"], {"stops": 1})
         self.assertEqual(list(self.destination.iterdir()), [])
         self.assertFalse(saved_job_files(panel.application.job_service.job_folder))
@@ -1621,12 +1626,13 @@ class DesktopBatchTests(unittest.TestCase):
                     self.assertEqual(dialog.live_progress.maximum(), 0)
                     self.assertIs(self.qt.activeModalWidget(), dialog)
                     self.assertEqual(layout_rects(), idle_rects)
-                    self.assertEqual(requests, [{"stops": 0, "manual": 0, "blend": 1}, {"stops": 1, "manual": 0, "blend": 1}])
+                    self.assertEqual(requests, [{"stops": stops, "manual": 0, "blend": 1, "blend_mode": "normal"}
+                                                for stops in (0, 1)])
                     live.setValue(2)
                 finally:
                     release.set()
                 self.until(lambda: len(requests) == 3 and dialog._future is None, "latest live preview did not render")
-                self.assertEqual(requests[-1], {"stops": 2, "manual": 0, "blend": 1})
+                self.assertEqual(requests[-1], {"stops": 2, "manual": 0, "blend": 1, "blend_mode": "normal"})
                 paint.assert_called_once()
             live_red = view.after.pixmap().toImage().pixelColor(0, 0).red()
             dialog.apply_preview.click()
@@ -1637,7 +1643,7 @@ class DesktopBatchTests(unittest.TestCase):
             self.assertTrue(dialog.live_progress.isVisible())
             self.assertGreater(dialog.live_progress.maximum(), 0)
             self.assertEqual(layout_rects(), idle_rects)
-            self.assertEqual(requests[-1], {"stops": 2, "manual": 2, "blend": 1})
+            self.assertEqual(requests[-1], {"stops": 2, "manual": 2, "blend": 1, "blend_mode": "normal"})
             self.assertGreater(view.after.pixmap().toImage().pixelColor(0, 0).red(), live_red)
             dialog.findChild(QDoubleSpinBox, "parameter-manual").setValue(1)
             dialog.apply_preview.click()

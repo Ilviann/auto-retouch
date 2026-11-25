@@ -74,3 +74,12 @@ linear-RGB blend, immutable pixel storage, JSON round trips, legacy checkpoint
 identity, and matching sequential and staged JPEG exports. The Qt preview test
 changed blending against an already edited input, checked the displayed result,
 and saved the draft into the pipeline.
+
+On 2026-11-25, focused checks covered Normal, Darken, Multiply, Lighten,
+Screen, Overlay and Difference on RGB samples at zero, quarter and full opacity.
+A synthetic color ramp with a circular edit was visually inspected across all
+seven modes. Pixels outside the circle matched the input exactly. An offscreen
+Qt test changed a brightening exposure to Darken in the stage preview, checked
+that the displayed pixels returned to their input value, and saved the mode
+to the card and pipeline. Sequential and staged jobs using Screen at 40%
+opacity produced matching JPEG pixels from their frozen settings.

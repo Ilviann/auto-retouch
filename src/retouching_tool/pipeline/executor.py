@@ -6,18 +6,39 @@ from pathlib import Path
 from time import perf_counter
 
 from ..errors import ResizeApprovalRequired, RetouchingError
-from .definition import BLEND, PipelineDefinition, StageDefinition, parse_pipeline
+from .definition import BLEND, BLEND_MODE, PipelineDefinition, StageDefinition, parse_pipeline
 
 
-def _blend_result(before, result, amount, produced):
-    if amount == 1 or result.pixels is before.pixels:
+def _blend_channels(original, edited, mode):
+    import numpy as np
+
+    match mode:
+        case "darken":
+            return np.minimum(original, edited)
+        case "multiply":
+            return original * edited
+        case "lighten":
+            return np.maximum(original, edited)
+        case "screen":
+            return original + (1 - original) * edited
+        case "overlay":
+            return np.where(original <= 0.5, 2 * original * edited,
+                            1 - 2 * (1 - original) * (1 - edited))
+        case "difference":
+            return np.abs(original - edited)
+        case _:
+            raise ValueError(f"Unknown blend mode {mode!r}")
+
+
+def _blend_result(before, result, amount, mode, produced):
+    if (amount == 1 and mode == "normal") or result.pixels is before.pixels:
         return result
     if result.geometry_revision != before.geometry_revision:
         raise RetouchingError("STAGE_BLEND_GEOMETRY", "Blending requires aligned stage input and output. "
-                              "Use full blending for this geometry change.")
+                              "Use Normal mode at full blending for this geometry change.")
     if any(spec.pixel_sensitive for spec in produced):
         raise RetouchingError("STAGE_BLEND_CONTEXT", "This stage measures its edited pixels. "
-                              "Use full blending to keep those measurements valid.")
+                              "Use Normal mode at full blending to keep those measurements valid.")
     if amount == 0:
         return replace(result, pixels=before.pixels, pixel_revision=before.pixel_revision,
                        context=tuple(replace(e, pixel_revision=before.pixel_revision) if e.spec in produced else e
@@ -30,7 +51,12 @@ def _blend_result(before, result, amount, produced):
         for start in range(0, before.height, 64):
             original = before.pixels[start:start + 64]
             edited = result.pixels[start:start + 64]
-            mixed = original + np.float32(amount) * (edited - original)
+            target = edited
+            if mode != "normal":
+                # Local operations return the input RGB outside their edited region.
+                changed = np.any(edited != original, axis=2, keepdims=True)
+                target = np.where(changed, _blend_channels(original, edited, mode), original)
+            mixed = target if amount == 1 else original + np.float32(amount) * (target - original)
             output.write(np.ascontiguousarray(mixed))
         pixels = np.frombuffer(output.getvalue(), dtype=np.float32).reshape(before.pixels.shape)
     return replace(result, pixels=pixels)
@@ -117,7 +143,8 @@ class StageSession:
             result = self.operation.process(current)
             self._validate_result(current, result)
             if desc.changes_pixels:
-                result = _blend_result(current, result, runtime.stage.parameter(BLEND.name), desc.provides)
+                result = _blend_result(current, result, runtime.stage.parameter(BLEND.name),
+                                       runtime.stage.parameter(BLEND_MODE.name), desc.provides)
             provided = {spec.key for spec in desc.provides}
             kept = tuple(e for e in current.context if e.spec.key not in provided and e.compatible(result))
             produced = tuple(e for e in result.context if e.spec.key in provided)

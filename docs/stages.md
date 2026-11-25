@@ -259,7 +259,8 @@ Each card has its own enable switch and settings.
 | Strength | 1.0 | Mixes the edit with the model input in linear RGB, from 0 (pass through) to 1 (full edit). |
 | Use face rects from context | On | Applies the operation to upstream face regions when available. Turning it off selects the whole image. |
 | Downscaling / Upscaling | Use app setting | Independently select the app setting, bilinear, or nearest neighbor in each direction. |
-| Blending | 1.0 | Mixes the finished stage output with its full-resolution input, from 0 to 1. |
+| Blend mode | Normal | Selects how edited pixels combine with the full-resolution input. See [stage controls](pipeline.md#stage-controls-and-model-availability). |
+| Blending | 1.0 | Sets the opacity of the chosen blend mode, from 0 to 1. |
 
 The working pipeline, imported presets and launch overrides skip the retired
 `retouch.alibaba_skin` v1 entry and preserve the order of the other stages.
