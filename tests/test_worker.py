@@ -4,6 +4,7 @@ import hashlib
 from io import StringIO
 import json
 import os
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -170,6 +171,46 @@ class WorkerTests(unittest.TestCase):
                   Image.open(self.root / "staged" / path.name) as right):
                 self.assertEqual(left.tobytes(), right.tobytes())
                 self.assertEqual(left.getexif()[271], "Worker Test Camera")
+
+    def test_csrnet_preview_assets_and_both_workers(self):
+        from retouching_tool.operations.auto_color_grade import DESCRIPTOR, MODEL
+
+        editor = self.app.pipeline_service
+        editor.load_data({"schema_version": 1, "name": "CSRNet", "stages": []})
+        status, = editor.add_operation(DESCRIPTOR.operation, 1, model_ref=MODEL.ref).stages
+        target = editor.checkpoints / MODEL.files[0].relative_path
+        self.assertFalse(status.stage.enabled)
+        self.assertEqual((status.issues[0].path, status.model_page), (target, MODEL.publisher_url))
+        source = ROOT / "models" / MODEL.files[0].relative_path
+        if not source.is_file():
+            self.skipTest("Install the pinned CSRNet checkpoint to verify inference.")
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"incorrect revision")
+        self.assertEqual(editor.recheck().stages[0].issues[0].code, "MODEL_CHECKSUM_INVALID")
+        shutil.copyfile(source, target)
+        self.assertFalse(editor.recheck().stages[0].stage.enabled)
+        editor.set_enabled(status.stage.id, True)
+        index = self.app.batch_service.index((self.source,))
+        comparison = self.app.preview_service.stage_comparison(index, index.images[0].image_id,
+                                                              status.stage.id, through_stage=False)
+        zero = comparison.render("zero", {"strength": 0})
+        self.assertEqual(zero.original, zero.result)
+        result = comparison.render("default", {})
+        self.assertNotEqual(result.original, result.result)
+        comparison.clear()
+        for mode in ("staged", "sequential"):
+            job_id = self.create(mode)
+            self.assertEqual(self.worker.start(job_id).wait(60).exit_code, 0)
+            self.assertEqual(self.jobs.status(job_id).status, "completed")
+            events = [e for e in self.persisted_records() if e["code"] == "AUTO_COLOR_GRADE_APPLIED"
+                      and e.get("job_id") == job_id]
+            self.assertEqual(len({e["image_id"] for e in events}), len(self.originals))
+            self.assertTrue(all(e["backend"] == "cpu" and e["stage_instance_id"] == status.stage.id for e in events))
+        for path in self.originals:
+            with (Image.open(self.root / "staged" / path.name) as staged,
+                  Image.open(self.root / "sequential" / path.name) as sequential):
+                self.assertEqual(staged.tobytes(), sequential.tobytes())
+                self.assertEqual(staged.getexif()[271], "Worker Test Camera")
 
     def test_auto_exposure_preview_and_worker_schedules(self):
         editor = self.app.pipeline_service

@@ -10,6 +10,7 @@ from ..config import ScalingSettings
 from ..json_io import atomic_json, read_json
 from ..operations.person_foreground import MODEL as PERSON_FOREGROUND_MODEL
 from ..operations.alibaba_skin import BLEMISH_MODEL, MODEL as ALIBABA_MODEL, SMOOTHING_MODEL
+from ..operations.auto_color_grade import MODEL as CSRNET_MODEL
 from ..operations.face_detection import MODEL as YUNET_MODEL
 from ..operations.facial_features import MODEL as FACIAL_FEATURES_MODEL
 from ..operations.exposed_skin import MODEL as EXPOSED_SKIN_MODEL
@@ -44,7 +45,7 @@ class PipelineService:
         self.registry = registry if registry is not None else application_registry()
         self.catalog = catalog if catalog is not None else ModelCatalog(
             (PERSON_FOREGROUND_MODEL, ALIBABA_MODEL, YUNET_MODEL, SMOOTHING_MODEL, BLEMISH_MODEL,
-             EXPOSED_SKIN_MODEL, FACIAL_FEATURES_MODEL))
+             EXPOSED_SKIN_MODEL, FACIAL_FEATURES_MODEL, CSRNET_MODEL))
         self.status = validate_pipeline(PipelineDefinition(UNTITLED_PIPELINE), self.registry,
                                         self.catalog, checkpoints, backend, pytorch_backend)
         self._saved_definition = self.status.definition

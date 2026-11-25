@@ -50,6 +50,38 @@ Place it before image statistics or AI analysis so those stages measure the
 corrected pixels. The target band and defaults are provisional and may need
 adjustment for intentional lighting or grading. See [verification](verification/auto-exposure.md).
 
+## Auto color grade
+
+Choose **Add operation → Auto color grade** to grade the whole incoming photo.
+Use **Preview in pipeline** to compare the effect after any upstream exposure or
+white-balance edits. Strength starts at 0.5 for evaluation. Zero passes through the
+input, and 1 applies the full CSRNet result. Strength mixes in linear RGB before
+the normal stage blend controls. The model can alter skin, clothing and backdrop
+colors together. Compare consecutive shots from one lighting setup when choosing a strength.
+
+The setup-selected PyTorch device runs CSRNet in float32. The stage encodes
+linear RGB to sRGB for inference, pools features across the full image, and
+applies one set of color adjustments to all pixels. Overlapping tiles in the
+analysis pass preserve the convolution neighborhoods. The output pass operates
+on native-resolution tiles. For inputs narrower or shorter than five pixels,
+the analysis pass extends the outer pixels to fit the model's first convolution.
+
+Place `pytorch_model.pt` at `csrnet/60f19c23/pytorch_model.pt` inside the
+configured checkpoint folder. The pinned revision is
+`60f19c2350d379bd4bb7a19da34be44fd451d829`, with SHA-256
+`d9e9f3182b5bfa609f34c3c8322046438759585bf77c708cbe1b8a8761bc29ea`.
+ModelScope declares Apache License 2.0 for this model and identifies Adobe FiveK
+as its training dataset. Checkpoint installation is manual. The publisher's
+inference implementation uses the checkpoint's `params` weights.
+[Pinned model card](https://www.modelscope.ai/models/iic/cv_csrnet_image-color-enhance-models/resolve/60f19c2350d379bd4bb7a19da34be44fd451d829/README.md) · [Download checkpoint](https://www.modelscope.ai/models/iic/cv_csrnet_image-color-enhance-models/resolve/60f19c2350d379bd4bb7a19da34be44fd451d829/pytorch_model.pt)
+
+The installed checkpoint ran on PyTorch 2.15.0+cpu in a 4,000 × 6,000 study
+portrait preview. On a generated 729 × 537 image, the full-strength tiled result
+matched the untiled ModelScope 1.40.3 implementation within 0.0000008 in linear
+RGB. Sequential and staged workers produced identical decoded JPEGs on two
+generated inputs. Strength selection, appearance across a studio series, and
+CUDA hardware validation remain pending.
+
 ## Levels
 
 **Levels** (`core.levels` v1) adjusts the whole image or one color channel.
