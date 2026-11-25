@@ -205,6 +205,41 @@ class WorkerTests(unittest.TestCase):
                 self.assertGreater(left.getpixel((0, 0))[0], 96)
                 self.assertEqual(left.getexif()[271], "Worker Test Camera")
 
+    def test_frequency_filters_in_preview_and_both_workers(self):
+        path = self.source / "edge.jpg"
+        with Image.new("RGB", (40, 30), (75, 96, 125)) as edge:
+            edge.paste((165, 155, 140), (20, 0, 40, 30))
+            edge.save(path, quality=100)
+        editor = self.app.pipeline_service
+        editor.load_data({"schema_version": 1, "name": "Frequency filters", "stages": []})
+        low = editor.add_operation("core.low_pass", 1).stages[0].stage
+        high = editor.add_operation("core.high_pass", 1).stages[1].stage
+        editor.set_parameters(low.id, {"radius": 1.5})
+        editor.set_parameters(high.id, {"blend_mode": "overlay", "radius": 4.5})
+        index = self.app.batch_service.index((path,))
+        image_id = index.images[0].image_id
+        preview = self.app.preview_service
+        softened = preview.stage_comparison(index, image_id, low.id, through_stage=False).render("low", {})
+        sharpened = preview.stage_comparison(index, image_id, high.id, through_stage=True).render("high", {})
+        self.assertNotEqual(softened.original, softened.result)
+        self.assertEqual(sharpened.original, softened.result)
+        self.assertNotEqual(sharpened.original, sharpened.result)
+        self.assertEqual(preview.picture(index, image_id, "both", process=True).result, sharpened.result)
+
+        for mode in ("sequential", "staged"):
+            job_id = self.create(mode)
+            self.assertIsNone(self.worker.start(job_id).wait(20).error_code)
+            self.assertEqual(self.jobs.status(job_id).status, "completed")
+            applied = {(record["stage_instance_id"], record["backend"]) for record in self.persisted_records()
+                       if record.get("job_id") == job_id and record["code"] == "FREQUENCY_FILTER_APPLIED"}
+            self.assertEqual(applied, {(low.id, "directml"), (high.id, "directml")})
+        with (Image.open(self.root / "sequential" / path.name) as sequential,
+              Image.open(self.root / "staged" / path.name) as staged):
+            self.assertEqual(sequential.tobytes(), staged.tobytes())
+        for mode in ("sequential", "staged"):
+            with Image.open(self.root / mode / "a.jpg") as output:
+                self.assertEqual(output.getexif()[271], "Worker Test Camera")
+
     def test_fixed_white_balance_replays_in_both_workers(self):
         editor = self.app.pipeline_service
         editor.load_data({"schema_version": 1, "name": "Same lighting", "stages": []})

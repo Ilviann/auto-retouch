@@ -102,39 +102,16 @@ def validate_packages(root: Path, backend: str, pytorch_backend: str) -> None:
         raise RetouchingError("DEPENDENCY_MISMATCH", "Application package version changed; rerun prepare_env.cmd")
 
 
-def _varint(value: int) -> bytes:
-    result = bytearray()
-    while value > 127:
-        result.append((value & 127) | 128)
-        value >>= 7
-    result.append(value)
-    return bytes(result)
-
-
-def _number(field: int, value: int) -> bytes:
-    return _varint(field << 3) + _varint(value)
-
-
-def _message(field: int, value: bytes | str) -> bytes:
-    value = value.encode() if isinstance(value, str) else value
-    return _varint((field << 3) | 2) + _varint(len(value)) + value
-
-
 def probe_graph() -> bytes:
     """ONNX IR 8/opset 13: z = Add(x,y), float32[2]. No trained assets.
 
     Encode the tiny public protobuf schema directly to avoid a build-time ONNX
     compiler dependency. All inputs are supplied at runtime, so it cannot fold.
     """
-    def value_info(name):
-        shape = _message(1, _number(1, 2))
-        tensor_type = _number(1, 1) + _message(2, shape)
-        return _message(1, name) + _message(2, _message(1, tensor_type))
+    from .onnx_graph import float_value, model, node
 
-    node = _message(1, "x") + _message(1, "y") + _message(2, "z") + _message(4, "Add")
-    graph = _message(1, node) + _message(2, "auto-retouch-provider-probe")
-    graph += _message(11, value_info("x")) + _message(11, value_info("y")) + _message(12, value_info("z"))
-    return _number(1, 8) + _message(2, "Auto ReTouch") + _message(7, graph) + _message(8, _number(2, 13))
+    return model("auto-retouch-provider-probe", [node("Add", ["x", "y"], "z")],
+                 [float_value("x", [2]), float_value("y", [2])], [float_value("z", [2])])
 
 
 def probe_backend(backend: str) -> BackendInfo:

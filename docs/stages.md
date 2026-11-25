@@ -49,6 +49,27 @@ Place it before image statistics or AI analysis so those stages measure the
 corrected pixels. The target band and defaults are provisional and may need
 adjustment for intentional lighting or grading. See [verification](verification/auto-exposure.md).
 
+## High Pass and Low Pass
+
+**Low Pass** (`core.low_pass` v1) softens fine texture by applying a Gaussian
+blur to each linear-sRGB channel. **High Pass** (`core.high_pass` v1) extracts
+the detail removed by the same blur. In Normal blend mode, uniform areas appear
+gray. Choose Overlay to sharpen the stage input and use Blending to control
+the strength.
+
+Both stages take **Radius (px)** as the Gaussian standard deviation in
+full-resolution pixels, from 0.5 to 32 with a default of 3. Larger values
+include broader details. The kernel extends three standard deviations on each
+side, rounded up, and repeats edge pixels at the photo boundary. High Pass
+returns `0.5 + input − blur`, clipped to the working range [0, 1]. The 0.5
+midpoint is in linear light so that it is neutral for the pipeline's Overlay
+mode. Both stages filter the entire frame using the ONNX Runtime backend
+selected during setup (CPU, DirectML or CUDA). They generate the Gaussian graph
+from the radius and reuse its session across photos in a staged pass. No
+checkpoint or mask is required. They preserve geometry, metadata and upstream
+context. The CPU and Radeon 780M DirectML paths have been exercised.
+CUDA hardware verification is pending. [Verification](verification/frequency-filter-directml.md#integrated-stages).
+
 ## White balance and color cast
 
 `core.white_balance` v1 operates on full-resolution linear-sRGB pixels using the

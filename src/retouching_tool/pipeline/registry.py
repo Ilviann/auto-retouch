@@ -48,6 +48,7 @@ def application_registry():
         BLEMISH, BLEMISH_MODEL, DESCRIPTOR as ALIBABA_SKIN, SMOOTHING, SMOOTHING_MODEL, AlibabaSkin,
     )
     from ..operations.auto_exposure import DESCRIPTOR as AUTO_EXPOSURE, AutoExposure
+    from ..operations.frequency_filters import HIGH_PASS, LOW_PASS, FrequencyFilter
     from ..operations.person_foreground import DESCRIPTOR, PersonForeground
     from ..operations.white_balance import DESCRIPTOR as WHITE_BALANCE, WhiteBalance
     from ..operations.face_detection import DESCRIPTOR as FACE_DETECTION, FaceDetection
@@ -59,6 +60,8 @@ def application_registry():
     registry = reference_registry()
     registry.register(WHITE_BALANCE, WhiteBalance)
     registry.register(AUTO_EXPOSURE, AutoExposure)
+    registry.register(HIGH_PASS, FrequencyFilter)
+    registry.register(LOW_PASS, FrequencyFilter)
     registry.register(DESCRIPTOR, PersonForeground)
     registry.register(FACE_DETECTION, FaceDetection)
     registry.register(FACIAL_FEATURES, ProtectFacialFeatures)
