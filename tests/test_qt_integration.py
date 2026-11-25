@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from contextlib import ExitStack
+from dataclasses import replace
 from concurrent.futures import Future
 from pathlib import Path
 import hashlib
@@ -456,9 +457,9 @@ class QtIntegrationTests(unittest.TestCase):
             root = Path(temporary)
             log = Diagnostics(root / "logs", console=io.StringIO())
             resources.callback(log.close)
-            editor = PipelineService(root / "models", "directml", log, pytorch_backend="cpu")
+            editor = PipelineService(root / "models", "directml", log, pytorch_backend="cuda")
             stage = editor.add_operation(SMOOTHING.operation, 1, model_ref=SMOOTHING_MODEL.ref).stages[0].stage
-            snapshot = StartupSnapshot((), "Pipeline", "test", "directml", root, root, root, ())
+            snapshot = StartupSnapshot((), "Pipeline", "test", "directml", root, root, root, (), pytorch_backend="cuda")
             window = MainWindow(snapshot, editor)
             resources.callback(self.close_window, window)
             window.resize(460, 760)
@@ -529,6 +530,24 @@ class QtIntegrationTests(unittest.TestCase):
             cleanup_card = window.pipeline_page.stage_cards[cleanup.id]
             self.assertEqual(cleanup_card.toggle.text(), "Blemish cleanup (Alibaba)")
             self.assertIn(str(editor.checkpoints / BLEMISH_MODEL.files[0].relative_path), cleanup_card.status_label.text())
+            # Supply matching fixtures and recover both CUDA cards through the editor.
+            manifests = []
+            for model in (SMOOTHING_MODEL, BLEMISH_MODEL):
+                asset, = model.files
+                path = editor.checkpoints / asset.relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
+                manifests.append(replace(model, files=(replace(asset, sha256=hashlib.sha256(b"fixture").hexdigest()),)))
+            editor.catalog = ModelCatalog((*manifests, SKIN_MODEL, DETECTOR_MODEL))
+            card.settings.menu().actions()[-1].trigger()
+            self.app.processEvents()
+            for stage_id in (stage.id, cleanup.id):
+                toggle = window.pipeline_page.stage_cards[stage_id].toggle
+                self.assertTrue(toggle.isEnabled())
+                self.assertFalse(toggle.isChecked())
+                toggle.click()
+                self.app.processEvents()
+                self.assertTrue(window.pipeline_page.stage_cards[stage_id].toggle.isChecked())
 
 
 if __name__ == "__main__":

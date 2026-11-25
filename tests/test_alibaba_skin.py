@@ -70,7 +70,7 @@ class AlibabaTests(unittest.TestCase):
             networks.return_value.apply.side_effect = lambda rgb, *_: np.ones_like(rgb)
             with StageSession(self.editor.registry, self.editor.catalog, runtime) as session:
                 networks.assert_called_once_with(generator_file=self.editor.checkpoints / SMOOTHING_MODEL.files[0].relative_path,
-                                                 joint_file=None)
+                                                 joint_file=None, device="cpu")
                 result = session.process(state, image_id="source")
                 self.assertEqual(networks.return_value.apply.call_count, 2)
                 expected = np.zeros_like(result.pixels)
@@ -99,12 +99,14 @@ class AlibabaTests(unittest.TestCase):
                     self.assertEqual(edited.entry(FACE_REGIONS.key), image.entry(FACE_REGIONS.key))
 
     def test_resize_approval_preview_and_saved_jobs(self):
+        self.editor.pytorch_backend = "cuda"
         self.install_fixture()
         src = self.root / "input.jpg"
         Image.new("RGB", (6000, 10), (80, 120, 90)).save(src)
         index = self.app.batch_service.index((src,))
         image_id = index.images[0].image_id
-        with patch("retouching_tool.operations.alibaba_inference.SkinNetworks") as networks:
+        with (patch("retouching_tool.operations.alibaba_inference.SkinNetworks") as networks,
+              patch("torch.cuda.empty_cache")):
             networks.return_value.apply.side_effect = lambda rgb, *_: 1 - rgb
             with self.assertRaises(ResizeApprovalRequired) as required:
                 self.app.preview_service.picture(index, image_id, "first", process=True)
@@ -113,6 +115,7 @@ class AlibabaTests(unittest.TestCase):
             approval = (self.stage.id,)
             preview = self.app.preview_service.picture(index, image_id, "approved", process=True, resize_approvals=approval)
             self.assertNotEqual(preview.original.rgb, preview.result.rgb)
+            self.assertEqual(networks.call_args.kwargs["device"], "cuda")
             exports = []
             for mode in ("sequential", "staged"):
                 dest = self.root / mode
@@ -123,12 +126,27 @@ class AlibabaTests(unittest.TestCase):
                 job_id = jobs.create(index, dest, mode=mode, resize_approvals=approval)
                 with open_journal(self.app.job_service.folder_for(job_id), job_id) as journal:
                     self.assertEqual(journal.snapshot()["resize_approvals"], list(approval))
+                networks.reset_mock()
                 result = jobs.run(job_id)
                 self.assertEqual(result.status, "completed")
+                self.assertEqual(networks.call_args.kwargs["device"], "cuda")
                 with Image.open(result.images[0].output) as image:
                     self.assertEqual(image.size, (6000, 10))
                     exports.append(image.tobytes())
             self.assertEqual(exports[0], exports[1])
+
+    def test_cuda_session_failure_preserves_device_and_cause(self):
+        self.editor.pytorch_backend = "cuda"
+        self.install_fixture()
+        runtime = StageRuntime(self.log, self.editor.stage_backend(self.stage), self.editor.checkpoints, None, self.stage)
+        failure = RuntimeError("CUDA device unavailable")
+        with patch("retouching_tool.operations.alibaba_inference.SkinNetworks", side_effect=failure) as networks:
+            with self.assertRaisesRegex(RetouchingError, "PyTorch CUDA") as caught:
+                with StageSession(self.editor.registry, self.editor.catalog, runtime):
+                    self.fail("An unavailable CUDA device must fail preparation")
+        self.assertIs(caught.exception.__cause__, failure)
+        networks.assert_called_once_with(generator_file=self.editor.checkpoints / SMOOTHING_MODEL.files[0].relative_path,
+                                         joint_file=None, device="cuda")
 
     def test_two_local_checkpoints_run_in_both_schedules(self):
         checkpoints = load_config(ROOT).checkpoints
@@ -200,6 +218,7 @@ class AlibabaTests(unittest.TestCase):
         from retouching_tool.operations.alibaba_inference import SkinNetworks
 
         nets = SkinNetworks.__new__(SkinNetworks)
+        nets.device = torch.device("cpu")
         nets.generator = None
         def detect(tensor):
             logits = torch.full_like(tensor[:, :1], -20)

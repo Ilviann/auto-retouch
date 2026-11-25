@@ -243,7 +243,8 @@ reflections can be missed, and makeup highlights can be selected. The skin mask
 can cover edges of small facial features. Inspect these areas when tuning
 strength. Fully clipped highlights contain no recoverable texture.
 
-Choose either operation in the Add menu. Both run on PyTorch CPU. When using both,
+Choose either operation in the Add menu. Both use the PyTorch device recorded by
+setup (CPU or CUDA) for preview and batch inference. When using both,
 put cleanup before smoothing to apply the tone adjustment to the repaired pixels.
 
 | Operation | Effect | Required file |
@@ -280,8 +281,13 @@ weights strictly and ran in float32. Generated inputs exercised the 512 × 512
 smoothing network, 768 × 768 blemish detector, and 576 × 576 repair window.
 The same process then ran PP-HumanSeg through ONNX Runtime DirectML 1.24.4.
 The runtime package pins still validated and `pip check` passed.
-Repeat the native CPU check with
-`.venv\Scripts\python.exe -B tools\verify_alibaba_pytorch.py`.
+Run `.venv\Scripts\python.exe -B tools\verify_alibaba_pytorch.py` to check both
+stages with the installed weights and synthetic inputs. It prints the actual output
+device for smoothing, detection and repair and checks both stages return linear RGB.
+The development machine covers CPU. NVIDIA hardware verification is pending.
+Both stages produced pixel-identical CPU output to the previous implementation
+on the local 572 × 768 study crop. The CUDA configuration was exercised in the
+editor, preview and both batch modes with inference mocked.
 The app includes the required Apache-2.0 network definitions from ModelScope
 1.40.3 and the associated license. Each operation loads its checkpoint with strict
 state-dictionary checks and weights-only loading. ModelScope sign-in and the

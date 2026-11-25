@@ -17,7 +17,7 @@ MODEL = ModelManifest(
                "760d0c0b95c4e0a692165677fe2b82dbdf8fbbd4a3780ca966599c627b082993"),
      ModelFile("alibaba-skin-retouching/16c8351a/joint_20210926.pth",
                "c9e1388b19d9334c90db08308c86de208f535920ee381ae8a9cb63484a78351a")),
-    ("cpu",), "https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch",
+    ("cpu", "cuda"), "https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch",
     "Publisher model repository license: Apache License 2.0. "
     "https://www.modelscope.ai/models/iic/cv_unet_skin_retouching_torch/resolve/master/README.md")
 DESCRIPTOR = OperationDescriptor("retouch.alibaba_skin", 1, "Alibaba skin retouching",
@@ -167,14 +167,16 @@ class AlibabaSkin:
         if self.strength:
             try:
                 self.networks = SkinNetworks(
+                    device=runtime.backend,
                     generator_file=runtime.checkpoints / SMOOTHING_MODEL.files[0].relative_path
                     if SMOOTHING_MODEL.files[0] in self.model.files else None,
                     joint_file=runtime.checkpoints / BLEMISH_MODEL.files[0].relative_path
                     if BLEMISH_MODEL.files[0] in self.model.files else None)
             except Exception as exc:
-                raise RetouchingError("AI_SESSION_FAILED", f"Could not load {self.descriptor.title} on PyTorch CPU. "
-                                      "Check the model files and technical details.") from exc
-            runtime.emit("AI_SESSION_READY", f"Loaded {self.descriptor.title} on PyTorch CPU.",
+                raise RetouchingError("AI_SESSION_FAILED",
+                                      f"Could not load {self.descriptor.title} on PyTorch {runtime.backend.upper()}. "
+                                      "Check the model files, selected device and technical details.") from exc
+            runtime.emit("AI_SESSION_READY", f"Loaded {self.descriptor.title} on PyTorch {runtime.backend.upper()}.",
                          model_version=self.model.version, precision="float32")
 
     def process(self, state):
@@ -202,7 +204,7 @@ class AlibabaSkin:
         except RetouchingError:
             raise
         except Exception as exc:
-            raise RetouchingError("AI_INFERENCE_FAILED", f"{self.descriptor.title} failed on CPU. "
+            raise RetouchingError("AI_INFERENCE_FAILED", f"{self.descriptor.title} failed on PyTorch {self.runtime.backend.upper()}. "
                                   "Inspect the stage diagnostics and available memory.") from exc
         if pixels is state.pixels:
             return state
@@ -210,5 +212,10 @@ class AlibabaSkin:
                                       geometry_revision=state.geometry_revision)
 
     def release(self):
+        release_cuda = self.networks is not None and self.runtime.backend == "cuda"
         self.networks = None
         self.runtime = None
+        if release_cuda:
+            import torch
+            # Hand unused VRAM back to other runtimes between stage passes.
+            torch.cuda.empty_cache()

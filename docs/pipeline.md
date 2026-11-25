@@ -96,7 +96,7 @@ are editable on their stage cards.
 | Alibaba smoothing | Off (stage omitted) | 30% strength on exposed skin |
 
 Both need the local SelfieMulticlass ONNX checkpoint. Beauty additionally needs
-the Alibaba smoothing checkpoint and a supported PyTorch CPU setup. Its second
+the Alibaba smoothing checkpoint and a PyTorch CPU or CUDA setup. Its second
 mask stage measures the pixels after local tone evening. The smoothing stage
 requests permission before resizing a frame over 5,000 pixels on its longest
 side. Model filenames and installation instructions are on the stage cards.

@@ -87,6 +87,7 @@ presets rather than fixed processing paths.
 | U75 | Provide CPU-based Skin shine reduction using the existing exposed-skin mask, with adjustable strength and a preview of the affected areas. |
 | U76 | Offer **Show affected pixels** and **Pixel difference** in both stage previews for every operation that changes pixels. Show the selected stage's edits after blending as a highlight or as the absolute difference per RGB channel. |
 | U77 | Provide **Protect facial features** for eyes, eyebrows and lips and connect its protection mask to **Skin shine reduction**. |
+| U78 | Both Alibaba retouching stages run on the PyTorch device selected in setup, CPU or CUDA. Each new neural stage supports every compatible backend offered for its inference runtime. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 

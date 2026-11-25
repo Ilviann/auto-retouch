@@ -1,4 +1,4 @@
-"""CPU inference for the three networks in Alibaba's two skin-retouching checkpoints."""
+"""PyTorch inference for the three networks in Alibaba's two skin-retouching checkpoints."""
 
 from ..errors import RetouchingError
 from ..imaging.scaling import resize_rgb
@@ -22,25 +22,26 @@ def _sample(image, size, methods, *, align_corners=False):
 
 
 class SkinNetworks:
-    def __init__(self, generator_file, joint_file):
+    def __init__(self, generator_file, joint_file, *, device):
         import torch
         from .alibaba_networks.unet_deploy import UNet
         from .alibaba_networks.detection_model.detection_unet_in import DetectionUNet
         from .alibaba_networks.inpainting_model.inpainting_unet import RetouchingNet
 
+        self.device = torch.device(device)
         self.generator = self.detector = self.repair = None
         if generator_file is not None:
             self.generator = UNet(3, 3, init_weights=False)
             self.generator.load_state_dict(torch.load(generator_file, map_location="cpu", weights_only=True)["generator"])
-            self.generator.eval()
+            self.generator.to(self.device).eval()
         if joint_file is not None:
             joint = torch.load(joint_file, map_location="cpu", weights_only=True)
             self.detector = DetectionUNet(3, 1, init_weights=False)
             self.repair = RetouchingNet(4, 3, init_weights=False)
             self.detector.load_state_dict(joint["detection_net"])
             self.repair.load_state_dict(joint["inpainting_net"])
-            self.detector.eval()
-            self.repair.eval()
+            self.detector.to(self.device).eval()
+            self.repair.to(self.device).eval()
 
     def _blemish_weights(self, roi, methods):
         import torch
@@ -59,7 +60,7 @@ class SkinNetworks:
         size = roi.shape[-2:]
         gain = self.generator(_sample(roi, (512, 512), methods))
         # The publisher feathers the gain towards neutral over the outer 4% of the crop.
-        axis = torch.arange(500, dtype=torch.float32)
+        axis = torch.arange(500, dtype=roi.dtype, device=roi.device)
         ramp = torch.minimum(axis, 500 - axis).div_(20).clamp_(0, 1)
         feather = torch.minimum(ramp[:, None], ramp[None, :])[None, None]
         return _sample(gain, size, methods), F.interpolate(feather, size, mode="bilinear", align_corners=False)
@@ -71,7 +72,7 @@ class SkinNetworks:
         height, width = pixels.shape[:2]
         # Keep model calculations in normalized nonlinear RGB, retaining float precision at both boundaries.
         encoded = resize_rgb(pixels, (width, height), methods, encode_srgb=True)
-        roi = torch.from_numpy(encoded).permute(2, 0, 1).unsqueeze(0).mul_(2).sub_(1)
+        roi = torch.from_numpy(encoded).to(self.device).permute(2, 0, 1).unsqueeze(0).mul_(2).sub_(1)
         with torch.inference_mode():
             del encoded
             weight = None
@@ -91,10 +92,11 @@ class SkinNetworks:
                     base = base + correction * base * (1 - base)
                 base = base.clamp(0, 1)
                 linear = torch.where(base <= .04045, base / 12.92, ((base + .055) / 1.055).pow(2.4))
-                output[rows] = linear[0].permute(1, 2, 0).numpy()
+                output[rows] = linear[0].permute(1, 2, 0).cpu().numpy()
                 if weight is not None:
                     # Keep untouched pixels bit-exact through the sRGB round trip.
-                    np.copyto(output[rows], pixels[rows], where=(weight[0, 0, rows].numpy() == 0)[:, :, None])
+                    untouched = (weight[0, 0, rows] == 0).cpu().numpy()
+                    np.copyto(output[rows], pixels[rows], where=untouched[:, :, None])
                 if strength != 1:
                     output[rows] = pixels[rows] + strength * (output[rows] - pixels[rows])
             return output

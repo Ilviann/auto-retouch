@@ -113,6 +113,9 @@ tests do not establish portrait quality.
   and shared dependencies. Launch uses both choices recorded in `.venv`, without
   backend flags, config overrides, or automatic
   backend fallback. See `docs/runtime.md`; avoid conflicting runtime packages.
+- For every new stage, implement and declare all backends its algorithm and
+  runtime support. Keep the operation descriptor and any checkpoint manifests
+  in agreement, use the prepared device, and record which backends have had hardware testing.
 - Record model/code redistribution terms before choosing distributable assets.
 - Do not silently lower output resolution or select a weaker retouching mode.
 - Use bounded retries and account for every input, including failures.
