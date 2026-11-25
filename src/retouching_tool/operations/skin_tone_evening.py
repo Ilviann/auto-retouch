@@ -12,7 +12,7 @@ DESCRIPTOR = OperationDescriptor(
         IntegerParameter("radius", "Neighborhood radius (px)", 24, 1, 96),
         Parameter("max_shift", "Maximum color shift (% of luminance)", 6, 0, 20, preview_on_change=True),
     ),
-    requires=(EXPOSED_SKIN,), changes_pixels=True,
+    requires=(EXPOSED_SKIN,), changes_pixels=True, inference_runtime="cpu", backends=("cpu",),
 )
 
 TILE_SIZE = 256

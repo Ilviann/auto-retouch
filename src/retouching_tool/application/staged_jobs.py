@@ -170,6 +170,10 @@ class StagedRunner:
                 provided.update(spec["key"] for spec in descriptor["provides"])
                 if descriptor["resize_limit"] is None:
                     del descriptor["resize_limit"]
+                # These v1 stages have always run on CPU. Preserve the descriptor
+                # values used to fingerprint their existing checkpoints.
+                if key in {("analysis.image_statistics", 1), ("core.exposure", 1), ("retouch.local_skin_tone_evening", 1)}:
+                    descriptor.update(inference_runtime="onnxruntime", backends=("cpu", "directml", "cuda"))
                 if self.job.pytorch_backend is None and descriptor["inference_runtime"] == "onnxruntime":
                     # Preserve contract hashes in checkpoints created before per-runtime devices.
                     del descriptor["inference_runtime"]

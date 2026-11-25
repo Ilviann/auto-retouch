@@ -7,9 +7,10 @@ from ..pipeline.image_state import ContextEntry, ImageState, ImageStatistics
 
 LUMINANCE = ContextSpec("image.luminance", 1)
 STATISTICS = OperationDescriptor("analysis.image_statistics", 1, "Image statistics (reference)",
-                                 provides=(LUMINANCE,))
+                                 provides=(LUMINANCE,), inference_runtime="cpu", backends=("cpu",))
 EXPOSURE = OperationDescriptor("core.exposure", 1, "Exposure (reference)",
-    parameters=(Parameter("stops", "Exposure stops", 0, -3, 3, preview_on_change=True),), changes_pixels=True)
+    parameters=(Parameter("stops", "Exposure stops", 0, -3, 3, preview_on_change=True),), changes_pixels=True,
+    inference_runtime="cpu", backends=("cpu",))
 
 
 class ReferenceOperation:

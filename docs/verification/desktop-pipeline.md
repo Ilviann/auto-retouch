@@ -5,8 +5,10 @@ operation version and model choice, sorted alphabetically by display name.
 The search field takes focus when the picker opens. Type any part of a name
 to filter the cards regardless of case. Enter adds the first match, and
 clearing the field restores the full list.
-Cards show required, optional and setting-dependent inputs, outputs, and
-either conventional processing or the AI runtime, supported devices and model.
+Cards show required, optional and setting-dependent inputs and outputs.
+For conventional stages, the Processing row names the runtime, for example
+“Conventional on CPU” or “Conventional on ONNX”. AI cards show the runtime,
+supported devices and model.
 Click a card or focus it and press Enter to append the operation. Escape or
 Cancel dismisses the picker.
 Each stage card shows Move up, Move down and Remove to the left of the fold

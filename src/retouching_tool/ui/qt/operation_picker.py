@@ -16,7 +16,7 @@ CONTEXT_NAMES = {
     FACIAL_FEATURES.key: "Facial feature protection mask",
     PERSON_FOREGROUND.key: "Person foreground mask",
 }
-RUNTIME_NAMES = {"onnxruntime": "ONNX Runtime", "pytorch": "PyTorch"}
+RUNTIME_NAMES = {"cpu": "CPU", "onnxruntime": "ONNX Runtime", "pytorch": "PyTorch"}
 DEVICE_NAMES = {"directml": "DirectML", "cpu": "CPU", "cuda": "CUDA"}
 
 
@@ -36,10 +36,12 @@ def _details(descriptor, model_ref):
         if isinstance(parameter, MaskTargetParameter):
             yield "Conditional input", f"{_context_name(parameter.mask)} (required with “{parameter.label}”)"
     yield "Outputs", ", ".join(outputs) or "None"
+    engine = descriptor.inference_runtime
+    runtime = RUNTIME_NAMES.get(engine, engine)
     if model_ref is None:
-        yield "Processing", "Conventional (no AI)"
+        platform = "ONNX" if engine == "onnxruntime" else runtime
+        yield "Processing", f"Conventional on {platform}"
     else:
-        runtime = RUNTIME_NAMES.get(descriptor.inference_runtime, descriptor.inference_runtime)
         devices = ", ".join(DEVICE_NAMES.get(device, device) for device in descriptor.backends)
         yield "AI engine", f"{runtime}  ·  Supports {devices}"
         yield "Model", model_ref

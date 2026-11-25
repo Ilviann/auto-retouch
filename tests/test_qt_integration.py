@@ -264,7 +264,9 @@ class QtIntegrationTests(unittest.TestCase):
                                    for _ in d.model_refs or (None,)), key=str.casefold)
                 self.assertEqual([button.accessibleName() for button in choices], expected)
                 descriptions = {button.toolTip(): button.accessibleDescription() for button in choices}
-                self.assertIn("Conventional (no AI)", descriptions["core.exposure"])
+                for operation in ("core.exposure", "analysis.image_statistics", "retouch.local_skin_tone_evening"):
+                    self.assertIn("Processing: Conventional on CPU", descriptions[operation].splitlines())
+                self.assertIn("Processing: Conventional on ONNX", descriptions[SHINE.operation].splitlines())
                 self.assertIn("Outputs: Pixels", descriptions["core.exposure"])
                 self.assertIn("AI engine: ONNX Runtime", descriptions[DETECTOR.operation])
                 self.assertIn("Outputs: Face regions", descriptions[DETECTOR.operation])

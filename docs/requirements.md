@@ -18,7 +18,7 @@ presets rather than fixed processing paths.
 | U06 | Separate Natural and Beauty presets. |
 | U07 | Minimum GPU class is consumer RTX 20-series with at least 6 GB VRAM. |
 | U08 | A couple of hours of unattended background work is acceptable. No hard processing-time limit is specified; the computer need not serve other tasks during processing. |
-| U09 | An editable ordered list of operations with add, remove, reorder, and separate parameter panels. **Add operation** lists cards alphabetically by display name. A search field at the top filters cards by operation name as the user types. Each card shows the operation name, version, input and output types, and whether processing uses AI, including its runtime and model when applicable. Removing a stage requires confirmation. |
+| U09 | An editable ordered list of operations with add, remove, reorder, and separate parameter panels. **Add operation** lists cards alphabetically by display name. A search field at the top filters cards by operation name as the user types. Each card shows the operation name, version, and input and output types. Conventional stages show “Conventional on” followed by their runtime. AI stages show their runtime and model. Removing a stage requires confirmation. |
 | U10 | Operations can use conventional image processing or local neural-network checkpoints. Auto contrast, red-eye correction, and skin-texture correction are example operations. |
 | U11 | Save and load pipeline settings as JSON files. |
 | U12 | Automatically restore the last-used pipeline at application startup. |
