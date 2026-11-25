@@ -15,7 +15,7 @@ from ..pipeline.image_state import ImageState, SourceMetadata
 from .export_settings import JpegSettings
 from .exif import EXIF_HEADER, ORIENTATION, read_exif
 from .iptc import PHOTOSHOP, read_iptc
-from .transfer import srgb8_to_linear
+from .transfer import encode_srgb_strip, srgb8_to_linear
 from .xmp import EXIF, EXTENDED_XMP_HEADER, TIFF, XMP_HEADER, Xmp
 
 MAX_PIXELS = 80_000_000
@@ -246,14 +246,6 @@ def decode_jpeg(path, *, source_id, runtime: JpegRuntime, expected_sha256: str |
                      source_id=source_id, width=state.width, height=state.height, orientation=orientation,
                      color_handling=handling, duration_ms=(perf_counter() - started) * 1000)
     return state
-
-
-def encode_srgb_strip(strip):
-    """Convert normalized linear RGB samples to 8-bit sRGB for display or export."""
-    import numpy as np
-
-    encoded = np.where(strip <= .0031308, 12.92 * strip, 1.055 * strip ** (1 / 2.4) - .055)
-    return np.rint(encoded * 255).astype(np.uint8)
 
 
 def encode_rgb_samples(state):

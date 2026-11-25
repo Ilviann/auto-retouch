@@ -78,3 +78,27 @@ settings back to the stage card. The headless preview check verified full-image
 bin counts before and after upstream exposure and histogram reuse across edits
 and display modes. The desktop layouts were inspected offscreen with synthetic
 images.
+
+## Auto Levels
+
+Auto Levels was exercised on ONNX Runtime CPU and Radeon 780M DirectML in
+the prepared environment. The CPU checks covered percentile ranks, asymmetric
+clipping, fractional samples, bounded histogram blocks, shared or separate
+endpoints, channel passthrough, blending, source metadata and context. Feeding
+three images in A–B–A order through one session reproduced A's original result.
+An injected provider failure preserved the traceback and job/image correlation.
+
+Two generated photos contained an identical gray stripe with code 80.
+Auto Levels measured 20–140 for one and 64–224 for the other. Stage preview
+and both DirectML worker schedules mapped the stripe to approximately 128
+and 26 respectively. Sequential and staged JPEGs matched pixel for pixel.
+An upstream exposure change altered the points in **Preview in pipeline**.
+The saved stage settings stayed constant across photos.
+
+Using default linked settings, one DirectML stage session processed local
+4,000 × 6,000 study photos A and B identified above. A measured 2–245.
+B measured 0–255 and retained its original pixels. Both retained source
+metadata and dimensions. On a synthetic tinted ramp, visual review showed
+linked adjustment expanding contrast while retaining the tint and independent
+channel adjustment producing a neutral ramp. Portrait aesthetic acceptance and
+CUDA hardware execution remain pending.

@@ -87,6 +87,35 @@ source metadata and compatible upstream context. All controls support live previ
 The curve runs locally on the setup-selected ONNX Runtime backend and requires
 no checkpoint. [Levels verification](verification/levels.md).
 
+## Auto Levels
+
+**Auto Levels** (`core.auto_levels` v1) measures the image arriving at this
+stage, including any edits earlier in the pipeline. It maps the measured black
+point to 0 and white point to 255, with gamma fixed at 1. The saved pipeline
+contains the measurement settings. Each preview and each batch photo gets
+freshly calculated endpoints, displayed in the stage result caption and
+recorded in that photo's diagnostics.
+
+**Shadow clipping** and **Highlight clipping** each default to 0.1% and can
+be set independently from 0% to 5%. For each channel the stage counts all
+pixels in a 256-bin sRGB histogram, discards the specified number of samples
+at each end (rounded down), and finds the remaining extrema. Setting both
+percentages to zero uses the observed minimum and maximum.
+
+- **Linked RGB** (default) takes the lowest of the three measured black points
+  and the highest white point, then applies one curve across all channels.
+- **Per channel** stretches red, green and blue independently. This can remove
+  a color cast, including one that was intentional. A channel spanning fewer
+  than eight sRGB codes retains its original samples.
+
+If all three measured spans are below eight codes, the stage passes the photo
+through and reports low contrast. An already full-range correction also passes
+through. Measurement uses bounded CPU buffers. The stretch operates on
+continuous sRGB values, returns linear float32 pixels, and uses the prepared
+ONNX Runtime backend with per-image inputs. Stage blending, source metadata,
+geometry and compatible context follow the same contracts as manual Levels.
+[Verification](verification/levels.md#auto-levels).
+
 ## High Pass and Low Pass
 
 **Low Pass** (`core.low_pass` v1) softens fine texture by applying a Gaussian

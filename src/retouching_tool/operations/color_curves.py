@@ -8,6 +8,18 @@ CHUNK_PIXELS = 480_000
 RGB_SHAPE = ["pixels", 3]
 
 
+def encode_srgb(graph, source):
+    op = graph.op
+    return op("Where", op("LessOrEqual", source, .0031308), op("Mul", source, 12.92),
+              op("Sub", op("Mul", 1.055, op("Pow", source, 1 / 2.4)), .055))
+
+
+def decode_srgb(graph, source):
+    op = graph.op
+    return op("Where", op("LessOrEqual", source, .04045), op("Div", source, 12.92),
+              op("Pow", op("Div", op("Add", source, .055), 1.055), 2.4))
+
+
 def exposure_graph():
     graph = FloatGraph()
     op = graph.op

@@ -4,7 +4,7 @@ from ..imaging.transfer import srgb8_to_linear
 from ..onnx_graph import FloatGraph
 from ..pipeline.definition import ChoiceParameter, IntegerParameter, OperationDescriptor, Parameter
 from ..pipeline.image_state import ImageState
-from .color_curves import RGB_SHAPE, apply_curve
+from .color_curves import RGB_SHAPE, apply_curve, decode_srgb, encode_srgb
 from .onnx_session import open_session
 
 
@@ -36,14 +36,12 @@ def levels_graph(channel, input_black, input_white, gamma, output_black, output_
     if low == high or (gamma == 1 and input_black == output_black and input_white == output_white):
         return graph.encode("levels", {source: shape}, op("Clip", source, low, high), shape)
 
-    encoded = op("Where", op("LessOrEqual", source, .0031308), op("Mul", source, 12.92),
-                 op("Sub", op("Mul", 1.055, op("Pow", source, 1 / 2.4)), .055))
+    encoded = encode_srgb(graph, source)
     unit = op("Clip", op("Div", op("Sub", op("Mul", encoded, 255), input_black),
                          input_white - input_black), 0, 1)
     shaped = op("Pow", unit, 1 / gamma)
     mapped = op("Add", output_black / 255, op("Mul", shaped, (output_white - output_black) / 255))
-    linear = op("Where", op("LessOrEqual", mapped, .04045), op("Div", mapped, 12.92),
-                op("Pow", op("Div", op("Add", mapped, .055), 1.055), 2.4))
+    linear = decode_srgb(graph, mapped)
     # Compare endpoints in the decoder's working space. An encode roundoff just
     # above black can otherwise become visible when raised to a small exponent.
     linear = op("Where", op("LessOrEqual", source, black), low,

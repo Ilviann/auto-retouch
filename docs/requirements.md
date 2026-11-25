@@ -91,6 +91,7 @@ presets rather than fixed processing paths.
 | U79 | Provide separate High Pass and Low Pass filter stages using the ONNX Runtime backend selected during setup. |
 | U80 | Run the Auto exposure tone curve and Fixed white balance correction on the ONNX Runtime backend selected during setup. Keep Automatic white balance on the CPU. |
 | U81 | Provide an editable Levels stage similar to a photo editor's Levels adjustment, with a GIMP-style settings editor. Use ONNX if it speeds up the stage by more than 1.5×. |
+| U82 | Provide a separate Auto Levels stage that calculates and applies levels independently to every incoming photo. |
 
 ### Desktop workflow refinements approved on 2026-11-19
 

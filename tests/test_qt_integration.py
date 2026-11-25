@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QLabel, QLineEdit, QPlainTextEdit, QSlider,
@@ -83,6 +83,8 @@ class QtIntegrationTests(unittest.TestCase):
                                      ["Stage result", "Show affected pixels", "Pixel difference"])
                 finally:
                     dialog.close()
+                    dialog.deleteLater()
+                    self.app.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
 
     def test_stage_preview_mode_follows_latest_request_without_changing_settings(self):
         settings = {parameter.name: parameter.default for parameter in SHINE.editable_parameters}

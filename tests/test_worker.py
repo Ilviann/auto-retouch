@@ -205,6 +205,54 @@ class WorkerTests(unittest.TestCase):
                 self.assertGreater(left.getpixel((0, 0))[0], 96)
                 self.assertEqual(left.getexif()[271], "Worker Test Camera")
 
+    def test_auto_levels_remeasures_each_photo_in_preview_and_both_workers(self):
+        editor = self.app.pipeline_service
+        editor.load_data({"schema_version": 1, "name": "Auto Levels", "stages": []})
+        stage = editor.add_operation("core.auto_levels", 1).definition.stages[0]
+        # Both photos contain the same center stripe but have different tonal ranges.
+        spans = {}
+        for path, (low, high) in zip(self.originals, ((20, 140), (64, 224))):
+            with Image.new("RGB", (48, 16), (80,)*3) as image:
+                image.paste((low,)*3, (0, 0, 16, 16))
+                image.paste((high,)*3, (32, 0, 48, 16))
+                image.save(path, quality=100)
+            spans[path] = (low, high)
+        index = self.app.batch_service.index((self.source,), recursive=False)
+        frozen = editor.status.definition
+        for item in index.images:
+            low, high = spans[item.path]
+            preview = self.app.preview_service.stage_comparison(index, item.image_id, stage.id, through_stage=False)
+            result = preview.render("auto", {})
+            self.assertEqual(result.result_caption, f"Input levels · RGB {low}–{high}")
+            self.assertAlmostEqual(result.result.rgb[24 * 3], (80 - low) / (high - low) * 255, delta=1)
+            preview.clear()
+        for mode in ("sequential", "staged"):
+            job_id = self.create(mode)
+            self.assertEqual(self.worker.start(job_id).wait(20).exit_code, 0)
+            status = self.jobs.status(job_id)
+            self.assertEqual(status.status, "completed")
+            events = {e["image_id"]: e for e in self.persisted_records()
+                      if e["code"] == "AUTO_LEVELS_APPLIED" and e.get("job_id") == job_id}
+            for item in status.images:
+                event = events[item.image_id]
+                self.assertEqual((event["input_black"][0], event["input_white"][0]), spans[item.source])
+                self.assertEqual(event["backend"], "directml")
+        self.assertEqual(editor.status.definition, frozen)
+        for path, (low, high) in spans.items():
+            with (Image.open(self.root / "sequential" / path.name) as sequential,
+                  Image.open(self.root / "staged" / path.name) as staged):
+                self.assertEqual(sequential.tobytes(), staged.tobytes())
+                self.assertAlmostEqual(staged.getpixel((24, 8))[0], (80 - low) / (high - low) * 255, delta=2)
+
+        exposure = editor.add_operation("core.exposure", 1).definition.stages[-1]
+        editor.set_parameter(exposure.id, "stops", -1)
+        editor.reorder((exposure.id, stage.id))
+        item = index.images[0]
+        preview = self.app.preview_service.stage_comparison(index, item.image_id, stage.id, through_stage=True)
+        result = preview.render("upstream", {})
+        self.assertEqual(result.result_caption, f"Input levels · RGB {result.original.rgb[0]}–{result.original.rgb[-1]}")
+        self.assertLess(result.original.rgb[-1], spans[item.path][1])
+
     def test_levels_in_preview_and_both_workers(self):
         editor = self.app.pipeline_service
         editor.load_data({"schema_version": 1, "name": "Manual levels", "stages": []})

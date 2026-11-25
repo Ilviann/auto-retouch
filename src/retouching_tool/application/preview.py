@@ -56,10 +56,13 @@ class _PreviewDiagnostics(ImageDiagnostics):
         super().__init__(diagnostics)
         self.stage_id = stage_id
         self.stage_warning = None
+        self.result_caption = None
         self.stage_messages = {}
 
     def emit(self, code, message, **details):
         producer = details.get("stage_instance_id")
+        if producer and producer == self.stage_id and "result_caption" in details:
+            self.result_caption = details["result_caption"]
         if producer and details.get("level") == "WARNING":
             self.stage_messages[producer, message] = None
             if producer == self.stage_id:
@@ -282,7 +285,7 @@ class PreviewService:
         if on_pipeline_progress:
             on_pipeline_progress("Preparing comparison…")
         _check_source(image)
-        caption = None
+        caption = runtime.diagnostics.result_caption
         if mode == StagePreviewMode.DIFFERENCE:
             result = _pixel_difference(stage_input, state.pixels)
             caption = "Pixel difference · absolute change per RGB channel"
